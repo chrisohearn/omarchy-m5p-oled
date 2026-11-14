@@ -68,8 +68,8 @@
       "built_tested": "2026-11-14: 45 tests on a FAT32 image with the live ESP's 34 files, size, 4 KB clusters and free space (r2's refusal reproduced; check, apply, kernel swap, rollback, 1 MB-short refusal, interrupted write); linux-persist 95 and hook 18 fake-root tests with images built by the tool; QEMU boots of r1 and r1a: firmware and module arrive intact in the initramfs, 77 modules load",
       "space_plan": "live ESP 138,522,624 bytes free: peak 120,954,880 + 8 MiB margin; 21.9 MB free afterwards",
       "staged": "2026-11-14",
-      "applied": null,
-      "awaiting_reboot": null,
+      "applied": "2026-11-14T20:46:41Z by the owner from macOS (check passed: 138.5 MB free, peak 121.0 MB + 8.4 MB margin; 17 files written and verified by hash; free afterwards 22 MB). Variant r1, Stage 2 r1, default entry 1.",
+      "awaiting_reboot": "yes: next boot of the repair entry tests trackpad, Wi-Fi, USB-C",
       "hardware_verified": null
     },
     {
