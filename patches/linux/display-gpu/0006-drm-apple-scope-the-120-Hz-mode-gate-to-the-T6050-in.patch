@@ -1,0 +1,86 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 18:59:03 -0600
+Subject: [PATCH] drm/apple: scope the 120 Hz mode gate to the T6050 internal
+ DCP
+
+The gate keyed on firmware 27.0 plus !external, which also caught the T8142 Air internal DCP, a 60 Hz panel on firmware 27.0 (121d6e97826). Select it with a hardware flag set only for apple,t6050-dcp, so the T8142 and the T6050 dcpext are untouched. KUnit parser_internal_v27_only_120hz covers the gated and ungated cases.
+
+(cherry picked from commit 84b3b93c04e68f7e7e5c9cffcded47d4ddd579fb)
+---
+ drivers/gpu/drm/apple/dcp-internal.h | 2 ++
+ drivers/gpu/drm/apple/dcp.c          | 1 +
+ drivers/gpu/drm/apple/iomfb.c        | 5 ++---
+ drivers/gpu/drm/apple/parser-test.c  | 6 +++---
+ 4 files changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/gpu/drm/apple/dcp-internal.h b/drivers/gpu/drm/apple/dcp-internal.h
+index 8a24a1e97..63daa46d8 100644
+--- a/drivers/gpu/drm/apple/dcp-internal.h
++++ b/drivers/gpu/drm/apple/dcp-internal.h
+@@ -284,6 +284,8 @@ struct apple_dcp_hw_data {
+ 	 */
+ 	bool s2r;
+ 	bool s2r_ext;
++	/* The firmware crashes on any mode but the 120 Hz boot timing, see dcp_mode_settable(). */
++	bool only_120hz_modes;
+ };
+ 
+ enum dcp_test_point {
+diff --git a/drivers/gpu/drm/apple/dcp.c b/drivers/gpu/drm/apple/dcp.c
+index 789f3150f..ecfdd0d2c 100644
+--- a/drivers/gpu/drm/apple/dcp.c
++++ b/drivers/gpu/drm/apple/dcp.c
+@@ -8903,6 +8903,7 @@ static const struct apple_dcp_hw_data apple_dcp_hw_t6050 = {
+ 	.num_dptx_ports = 0,
+ 	.adopt_live_session = true,
+ 	.firmware_compat = DCP_FIRMWARE_V_27_0,
++	.only_120hz_modes = true,
+ };
+ 
+ static const struct apple_dcp_hw_data apple_dcp_hw_t6050_dcpext = {
+diff --git a/drivers/gpu/drm/apple/iomfb.c b/drivers/gpu/drm/apple/iomfb.c
+index e9af504cd..a6e10556a 100644
+--- a/drivers/gpu/drm/apple/iomfb.c
++++ b/drivers/gpu/drm/apple/iomfb.c
+@@ -3045,12 +3045,11 @@ static bool dcp_mode_settable(struct apple_dcp *dcp,
+ 		return dcp_mode.mode.type & DRM_MODE_TYPE_PREFERRED;
+ 
+ 	/*
+-	 * The firmware 27 internal DCP (M5) crashes on 3024x1986@60 and the
++	 * The T6050 internal DCP (M5 Max) crashes on 3024x1986@60 and the
+ 	 * other 60 Hz timings it lists.  Only the 120 Hz timing is known to
+ 	 * survive a modeset, so refuse the rest until they are understood.
+ 	 */
+-	if (dcp->fw_compat == DCP_FIRMWARE_V_27_0 && !dcp->external &&
+-	    !dcp->ext_failsafe && drm_mode_vrefresh(mode) != 120)
++	if (dcp->hw.only_120hz_modes && drm_mode_vrefresh(mode) != 120)
+ 		return false;
+ 
+ 	return true;
+diff --git a/drivers/gpu/drm/apple/parser-test.c b/drivers/gpu/drm/apple/parser-test.c
+index a31ecffd5..e79da0fb0 100644
+--- a/drivers/gpu/drm/apple/parser-test.c
++++ b/drivers/gpu/drm/apple/parser-test.c
+@@ -2052,6 +2052,7 @@ static void parser_internal_v27_only_120hz(struct kunit *test)
+ 	mutex_init(&dcp->dcpavserv.lock);
+ 	mutex_init(&dcp->hpd_mutex);
+ 	dcp->fw_compat = DCP_FIRMWARE_V_27_0;
++	dcp->hw.only_120hz_modes = true;
+ 	dcp->connector = connector;
+ 	dcp->modes = catalog;
+ 	dcp->nr_modes = 2;
+@@ -2062,11 +2063,10 @@ static void parser_internal_v27_only_120hz(struct kunit *test)
+ 	KUNIT_EXPECT_EQ(test, dcp_mode_valid(&connector->base, &catalog[0].mode), MODE_OK);
+ 	KUNIT_EXPECT_EQ(test, dcp_mode_valid(&connector->base, &catalog[1].mode), MODE_BAD);
+ 
+-	/* An external dcpext (T6050 Studio Display) keeps every mode it lists. */
+-	dcp->ext_failsafe = true;
++	/* The T8142 Air internal DCP (60 Hz panel, firmware 27.0) and the T6050 dcpext keep every mode. */
++	dcp->hw.only_120hz_modes = false;
+ 	KUNIT_EXPECT_EQ(test, dcp_mode_valid(&connector->base, &catalog[0].mode), MODE_OK);
+ 	KUNIT_EXPECT_EQ(test, dcp_mode_valid(&connector->base, &catalog[1].mode), MODE_OK);
+-	dcp->ext_failsafe = false;
+ 	dcp->modes = NULL;
+ 	dcp->nr_modes = 0;
+ 	dcp_modes_release(dcp);

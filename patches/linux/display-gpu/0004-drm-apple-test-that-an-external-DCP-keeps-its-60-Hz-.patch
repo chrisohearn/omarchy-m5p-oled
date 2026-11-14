@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 23:51:30 +0000
+Subject: [PATCH] drm/apple: test that an external DCP keeps its 60 Hz modes
+
+Fails before the next commit: the 120 Hz gate also hit the T6050 dcpext.
+
+(cherry picked from commit 10f14b7ff802a824c60cfa171848a468edb95d50)
+---
+ drivers/gpu/drm/apple/parser-test.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/gpu/drm/apple/parser-test.c b/drivers/gpu/drm/apple/parser-test.c
+index 3d3a369b5..a31ecffd5 100644
+--- a/drivers/gpu/drm/apple/parser-test.c
++++ b/drivers/gpu/drm/apple/parser-test.c
+@@ -2061,6 +2061,12 @@ static void parser_internal_v27_only_120hz(struct kunit *test)
+ 
+ 	KUNIT_EXPECT_EQ(test, dcp_mode_valid(&connector->base, &catalog[0].mode), MODE_OK);
+ 	KUNIT_EXPECT_EQ(test, dcp_mode_valid(&connector->base, &catalog[1].mode), MODE_BAD);
++
++	/* An external dcpext (T6050 Studio Display) keeps every mode it lists. */
++	dcp->ext_failsafe = true;
++	KUNIT_EXPECT_EQ(test, dcp_mode_valid(&connector->base, &catalog[0].mode), MODE_OK);
++	KUNIT_EXPECT_EQ(test, dcp_mode_valid(&connector->base, &catalog[1].mode), MODE_OK);
++	dcp->ext_failsafe = false;
+ 	dcp->modes = NULL;
+ 	dcp->nr_modes = 0;
+ 	dcp_modes_release(dcp);
