@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: chrisohearn <137103567+chrisohearn@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 23:30:00 +0000
+Subject: [PATCH 03/10] PCI: apple: qualify the K114s for suspend-to-idle over
+ the adopted N1 link
+
+The adopted link's suspend check admits the J716c, the K114c and the
+K116s. On a K114s (MacBook Pro 14-inch OLED, M5 Pro, Mac17,13) with the
+N1 described on port 0, every suspend-to-idle is therefore refused with
+-EBUSY from the host's noirq suspend.
+
+The K114s is the K116s's 14-inch twin: the same T6050 host, the N1 on
+the port the boot loader trains, and in the macOS 27.2 (26B8125) Apple
+device trees the two boards' PCIe nodes are identical. Unlike the K116s
+tree it describes no second, kernel-trained port, so every device below
+the host must still be in D0, as on the J716c and the K114c. Let it
+through the same checks.
+
+Compile-tested only (pcie-apple.o, clang 23, no warnings). Not yet run
+through a suspend on a K114s.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ drivers/pci/controller/pcie-apple.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/pci/controller/pcie-apple.c b/drivers/pci/controller/pcie-apple.c
+index 1b87ff0fa..0ac0675bb 100644
+--- a/drivers/pci/controller/pcie-apple.c
++++ b/drivers/pci/controller/pcie-apple.c
+@@ -5774,9 +5774,15 @@ static int apple_pcie_check_adopted_s2idle(struct apple_pcie *pcie)
+ 	 * Qualified on the J716c, the K114c and the K116s. The K116s is the
+ 	 * J716c's OLED sibling: the same T6050 host, the N1 on port 0. Other
+ 	 * adopted platforms and deeper sleep remain unqualified.
++	 *
++	 * The K114s is admitted as the K116s's 14-inch twin: the same M5 Pro,
++	 * the same PCIe host and the N1 on the loader-trained port 0, and no
++	 * second port. It takes the K116s's checks; it has not been through a
++	 * suspend on the hardware yet.
+ 	 */
+ 	if (!(of_machine_is_compatible("apple,j716c") ||
+ 	      of_machine_is_compatible("apple,k114c") ||
++	      of_machine_is_compatible("apple,k114s") ||
+ 	      of_machine_is_compatible("apple,k116s")) || !pm_suspend_no_platform())
+ 		return -EBUSY;
+ 

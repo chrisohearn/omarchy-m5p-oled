@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s r3, sleep and lid: device tree additions. Include it after t6050-k114s-common.dtsi.
+ *
+ * Both parts repeat, as overrides, what two open aurora-silicon/linux pull requests put into
+ * the shared T6050 files, so that a K114s tree built against a kernel tree without those
+ * commits still carries them. Against a tree that has them, each line sets the same property
+ * a second time, which changes nothing.
+ *
+ * Nothing here has run on a K114s.
+ *
+ * Copyright The Asahi Linux Contributors
+ */
+
+/*
+ * The built-in panel is the loader's framebuffer until the display coprocessor drives it. With
+ * this property simpledrm (aurora-silicon/linux #1688, 1006491a, ed) names its connector eDP-1
+ * instead of Unknown-1, so user space counts it as the laptop's own panel, not as an external
+ * monitor, and a lid close can lock and suspend. Same line as #1688's 76c5ea39 (Joshua Warren)
+ * adds to t6050-k114-k116.dtsi. A kernel without 1006491a ignores it.
+ */
+&framebuffer0 {
+	apple,internal-panel;
+};
+
+/*
+ * The PMP's firmware keeps running through a suspend-to-idle, so its core, its SRAM and their
+ * parent must not be gated in the noirq phase (aurora-silicon/linux #1789, f61eb455, Jens
+ * Axboe: on the K116s the PMP crashed at wake in 3 of 4 suspends without it). The three
+ * domains stay disabled in the K114s tree until the PMP is described (the sound work enables
+ * them, as the K116s tree does); on a disabled node the property does nothing.
+ */
+&ps_pms {
+	apple,always-on;
+};
+
+&ps_pmp {
+	apple,always-on;
+};
+
+&ps_pms_sram {
+	apple,always-on;
+};
