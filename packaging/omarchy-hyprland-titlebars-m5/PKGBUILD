@@ -1,0 +1,105 @@
+# omarchy-hyprland-titlebars, rebuilt against the hyprland-m5 headers (K114s, omarchy-m5p-oled).
+#
+# Why this exists. The channel's omarchy-hyprland-titlebars is compiled against Omarchy's stock
+# Hyprland. betizzel/omarchy-m5's hyprland-m5 adds three fields (32 bytes) to Monitor::CMonitor
+# for its direct-scanout latch, yet still reports the stock commit hash and "Provides
+# hyprland=<ver>", so both the plugin's load-time version check and its package dependency pass
+# while every CMonitor member behind the new fields sits 32 bytes further on than the plugin
+# believes. The first click on a floating workspace then reads m_layerSurfaceLayers from the wrong
+# place and takes the compositor down. See docs/r3-titlebars.md.
+#
+# What it is. The unchanged upstream source at the tag below, compiled with the same recipe as
+# omacom/omarchy-pkgs pkgbuilds/omarchy-hyprland-titlebars (MIT, Ryan Hughes), against the
+# installed hyprland-m5 headers. Differences from that recipe:
+#   - epoch=1 and "+m5" in pkgver: pacman never takes the channel's build over this one in an
+#     upgrade, and the version says which build it is;
+#   - depends on the exact hyprland-m5 it was compiled against, pkgrel included, so pacman
+#     refuses to move hyprland-m5 without a rebuild of this package;
+#   - build() refuses headers that are not that hyprland-m5, and pins the CMonitor offsets;
+#   - installs titlebars.abi beside the plugin: what it was built against (check-abi reads it).
+#
+# Build as a normal user (no root): see README.md in this directory.
+
+pkgname=omarchy-hyprland-titlebars
+epoch=1
+_plugin=0.4.0
+pkgver=$_plugin+m5
+pkgrel=1
+pkgdesc="Titlebars for Omarchy's floating workspaces (rebuilt against hyprland-m5 headers)"
+arch=('aarch64')
+url='https://github.com/omacom/omarchy-hyprland-titlebars'
+license=('BSD-3-Clause' 'MIT')
+
+# The Hyprland this build is for: package, version-release, and what its headers must say.
+_hyprland_pkg=hyprland-m5
+_hyprland_ver=0.57.2-2
+# Monitor::CMonitor in hyprland-m5 0.57.2-2 (stock 0.57.2: no m_dsFailedClient, m_layerSurfaceLayers at 0x790).
+_abi_off_m_dsFailedClient=0x5b0
+_abi_off_m_layerSurfaceLayers=0x7b0
+
+depends=('glibc' 'libgcc' 'libstdc++' 'hyprlang' 'hyprutils' "$_hyprland_pkg=$_hyprland_ver")
+makedepends=('cmake' 'pkgconf' 'binutils')
+options=('!lto' '!debug')
+source=("omarchy-hyprland-titlebars-$_plugin.tar.gz::$url/archive/refs/tags/v$_plugin.tar.gz"
+        'abi-probe.cpp')
+sha256sums=('275cef436530b3cd2e665b199d8df142e78fde4c00067d99676068e2c6f40e69'
+            'aa742dfad5559b7c91dd84cbd2a3b7d1cd7837294865b29443076bc6717f3a73')
+
+_fail() { echo "==> ERROR: $*" >&2; return 1; }
+
+# Read one of abi-probe's values: the size of the array it declares for it.
+_probe() {
+  nm -S --defined-only "$srcdir/abi-probe.o" | awk -v sym="abi_$1" '$4 == sym { print "0x" $2; found = 1 } END { exit !found }' |
+    sed -E 's/^0x0+([0-9a-f])/0x\1/'
+}
+
+build() {
+  # The headers in /usr/include/hyprland must be the ones this package will depend on.
+  local owner have
+  owner=$(pacman -Qqo /usr/include/hyprland/src/output/Monitor.hpp)
+  [[ $owner == "$_hyprland_pkg" ]] || _fail "Hyprland headers belong to $owner, not $_hyprland_pkg"
+  have=$(pacman -Q "$_hyprland_pkg" | awk '{ print $2 }')
+  [[ $have == "$_hyprland_ver" ]] ||
+    _fail "$_hyprland_pkg $have is installed, this recipe is for $_hyprland_ver: review the headers, then move _hyprland_ver and the _abi_ values"
+
+  cmake -S "$srcdir/omarchy-hyprland-titlebars-$_plugin" -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr
+  cmake --build build
+
+  # The layout the plugin was just compiled with, from the same headers and flags. The probe does
+  # not compile at all against stock Hyprland headers.
+  # shellcheck disable=SC2046
+  g++ -std=gnu++23 $CXXFLAGS -O3 -DNDEBUG -fPIC -c "$srcdir/abi-probe.cpp" -o "$srcdir/abi-probe.o" \
+    $(pkg-config --cflags hyprland libdrm libinput libudev pixman-1 wayland-server xkbcommon)
+  local got
+  got=$(_probe off_m_dsFailedClient)
+  [[ $got == "$_abi_off_m_dsFailedClient" ]] || _fail "m_dsFailedClient at $got, expected $_abi_off_m_dsFailedClient"
+  got=$(_probe off_m_layerSurfaceLayers)
+  [[ $got == "$_abi_off_m_layerSurfaceLayers" ]] || _fail "m_layerSurfaceLayers at $got, expected $_abi_off_m_layerSurfaceLayers"
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  install -Dm644 "omarchy-hyprland-titlebars-$_plugin/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "omarchy-hyprland-titlebars-$_plugin/LICENSE.MIT" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.MIT"
+
+  # What this plugin was compiled against. The build ID names one Hyprland binary exactly, which
+  # the commit hash Hyprland reports does not.
+  local build_id
+  build_id=$(readelf -n /usr/bin/Hyprland | awk '/Build ID:/ { print $3; exit }')
+  [[ -n $build_id ]] || _fail "no build ID in /usr/bin/Hyprland"
+  cat > "$pkgdir/usr/lib/omarchy-hyprland-titlebars/titlebars.abi" <<ABI
+# omarchy-hyprland-titlebars: the Hyprland build this titlebars.so was compiled against.
+plugin=$epoch:$pkgver-$pkgrel
+plugin_source=$url v$_plugin
+hyprland_package=$_hyprland_pkg
+hyprland_version=$_hyprland_ver
+hyprland_build_id=$build_id
+hyprland_reported_commit=$(awk -F'"' '/GIT_COMMIT_HASH/ { print $2 }' /usr/include/hyprland/src/version.h)
+sizeof_CMonitor=$(_probe sizeof_CMonitor)
+offsetof_CMonitor_m_dsFailedClient=$(_probe off_m_dsFailedClient)
+offsetof_CMonitor_m_layerSurfaceLayers=$(_probe off_m_layerSurfaceLayers)
+ABI
+  chmod 644 "$pkgdir/usr/lib/omarchy-hyprland-titlebars/titlebars.abi"
+}

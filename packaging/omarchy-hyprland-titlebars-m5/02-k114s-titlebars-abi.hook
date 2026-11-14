@@ -1,0 +1,18 @@
+# K114s (omarchy-m5p-oled): never leave a titlebars plugin armed that was not compiled against
+# the installed Hyprland. Belongs in /etc/pacman.d/hooks/, which Omarchy's pacman.conf template
+# does not touch; the script belongs in /usr/local/lib/omarchy-k114s/. It runs after any
+# transaction that installs or upgrades the plugin or a Hyprland, and moves a mismatched
+# titlebars.so aside (see titlebars-abi-check). It cannot be shipped inside the plugin package:
+# replacing that package would remove the hook in the same transaction.
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Target = omarchy-hyprland-titlebars
+Target = hyprland
+Target = hyprland-m5
+
+[Action]
+Description = K114s: checking that the titlebars plugin matches the installed Hyprland...
+When = PostTransaction
+Exec = /usr/local/lib/omarchy-k114s/titlebars-abi-check --disarm

@@ -1,0 +1,87 @@
+#!/bin/sh
+# K114s (omarchy-m5p-oled): is the installed titlebars plugin built for the installed Hyprland?
+#
+#   titlebars-abi-check             say so; exit 0 when it is (or none is installed), 1 when not
+#   titlebars-abi-check --disarm    the same, and on a mismatch move titlebars.so aside so that
+#                                   Omarchy cannot load it (it loads the plugin only when
+#                                   /usr/lib/omarchy-hyprland-titlebars/titlebars.so exists);
+#                                   always exits 0. This is what 02-k114s-titlebars-abi.hook runs.
+#
+# Why. Hyprland refuses a plugin whose headers report another commit hash than its own, and the
+# plugin package depends on "hyprland=<version>". A patched Hyprland built from the release
+# tarball (hyprland-m5) passes both while laying Monitor::CMonitor out differently, and a plugin
+# compiled for the stock layout then crashes the compositor on the first click on a floating
+# workspace. The M5 rebuild of the plugin ships titlebars.abi, which names the one Hyprland binary
+# it was compiled against by its build ID. A plugin without it, beside a Hyprland that is not the
+# channel's own "hyprland" package, was not built for that Hyprland.
+#
+# Never arms anything: a plugin that was moved aside stays aside until someone moves it back.
+root=${K114S_ROOT:-}
+dir=$root/usr/lib/omarchy-hyprland-titlebars
+lib=$dir/titlebars.so
+abi=$dir/titlebars.abi
+hyprland=$root/usr/bin/Hyprland
+disarm=0
+case ${1:-} in
+  --disarm) disarm=1 ;;
+  "") ;;
+  *) echo "titlebars-abi-check: unknown argument $1" >&2; exit 2 ;;
+esac
+say() { echo "K114s titlebars check: $*"; }
+
+build_id() { # of an ELF file; readelf when it is installed, file otherwise
+  if command -v readelf > /dev/null 2>&1; then
+    readelf -n "$1" 2> /dev/null | awk '/Build ID:/ { print $3; exit }'
+  else
+    file -L "$1" 2> /dev/null | sed -n 's/.*BuildID\[sha1\]=\([0-9a-f]*\).*/\1/p'
+  fi
+}
+owner() { # the package that owns the Hyprland binary
+  if [ -n "${K114S_HYPRLAND_OWNER:-}" ]; then echo "$K114S_HYPRLAND_OWNER"; return; fi
+  pacman -Qqo "$hyprland" 2> /dev/null
+}
+
+if [ ! -e "$lib" ]; then
+  say "no titlebars.so is installed, nothing can be loaded"
+  exit 0
+fi
+if [ ! -e "$hyprland" ]; then
+  say "no Hyprland binary at $hyprland, nothing to compare with"
+  exit 0
+fi
+
+have=$(build_id "$hyprland")
+pkg=$(owner)
+why=
+if [ -f "$abi" ]; then
+  want=$(sed -n 's/^hyprland_build_id=//p' "$abi")
+  built_for="$(sed -n 's/^hyprland_package=//p' "$abi") $(sed -n 's/^hyprland_version=//p' "$abi")"
+  if [ -z "$have" ]; then
+    why="cannot read the build ID of $hyprland"
+  elif [ "$have" != "$want" ]; then
+    why="titlebars.so was compiled against $built_for (build ID $want), the installed Hyprland is another build ($have)"
+  fi
+elif [ "$pkg" = hyprland ]; then
+  say "ok: the channel's plugin beside the channel's own hyprland package (Omarchy pins that pair)"
+  exit 0
+else
+  why="titlebars.so has no titlebars.abi, so it is the channel's build for stock Hyprland, and the installed Hyprland is ${pkg:-not a package}"
+fi
+
+if [ -z "$why" ]; then
+  say "ok: titlebars.so was compiled against the installed Hyprland ($built_for, build ID $have)"
+  exit 0
+fi
+
+say "MISMATCH: $why."
+say "Loaded like this it crashes the compositor on the first click on a floating workspace."
+if [ "$disarm" = 1 ]; then
+  if mv -f "$lib" "$lib.disabled-k114s"; then
+    say "moved titlebars.so to titlebars.so.disabled-k114s; floating workspaces work without titlebars."
+  else
+    say "COULD NOT move $lib aside. Do not use floating workspaces until it is gone."
+  fi
+  say "Fix: rebuild omarchy-hyprland-titlebars against the installed Hyprland (omarchy-m5p-oled packaging/omarchy-hyprland-titlebars-m5) and install that."
+  exit 0
+fi
+exit 1
