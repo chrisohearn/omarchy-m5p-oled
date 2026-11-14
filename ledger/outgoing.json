@@ -1,5 +1,34 @@
 {
   "policy": "UPSTREAM.md",
-  "states": ["candidate", "built_tested", "hardware_confirmed", "submitted", "acknowledged", "merged"],
-  "reports": []
+  "states": [
+    "candidate",
+    "built_tested",
+    "hardware_confirmed",
+    "submitted",
+    "acknowledged",
+    "merged"
+  ],
+  "reports": [
+    {
+      "id": "k114s-boot-2026-11-14",
+      "destination": "aurora-silicon/linux discussion 142 (MacBook Pro, M5 family: hardware reports)",
+      "url": "https://github.com/aurora-silicon/linux/discussions/142#discussioncomment-19618807",
+      "posted": "2026-11-14T20:02:00Z",
+      "account": "chrisohearn",
+      "kind": "hardware confirmation, with one failure and one board fact",
+      "result": "K114S boots to an encrypted NVMe root with the built-in keyboard and the boot framebuffer (owner-observed, one boot); trackpad fails with 'invalid report_size 524288', HID product 0x0361; ADT board-id 0x14, so the N1 platform ID is 0x00146050 (agent-read under macOS, not yet tried)",
+      "tested_revisions": {
+        "kernel": "aurora-silicon/linux a34d26c255c2 + betizzel/omarchy-m5 linux-j714s-27.2.patch (v272-4)",
+        "loader": "aurora-silicon/aura 22b71758dfd0 + betizzel aura-j714s-27.2.patch",
+        "device_tree_sha256": "a8c82b27b478b61cb8e92f6d06e316ae9c5575207f0fe3fba4e3fb0d9a1d27a9",
+        "stage2_sha256": "2bf4d5f3e1f744e7adc540ddce2fe02be65edfa47848dc79d04069a20df8adef"
+      },
+      "not_claimed": "Wi-Fi, Bluetooth, USB, trackpad fix, GPU, display coprocessor, sound, camera, sleep",
+      "state": "submitted",
+      "read_back": "body read back after posting, 3972 characters, identical length to what was sent",
+      "follow_up": "add the r2 boot results (pass or fail) to the same thread once the owner has booted it",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    }
+  ]
 }

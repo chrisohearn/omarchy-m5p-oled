@@ -38,7 +38,7 @@ The registry is `ledger/outgoing.json`.
 
 | Item | Destination | Depends on | State |
 | --- | --- | --- | --- |
-| K114s boots: NVMe root, keyboard, boot framebuffer; trackpad fails as on K116s; board-id 0x14 gives the N1 platform ID `0x00146050` | aurora-silicon/linux, the hardware directory discussion | nothing further | see `ledger/outgoing.json` |
+| K114s boots: NVMe root, keyboard, boot framebuffer; trackpad fails as on K116s; board-id 0x14 gives the N1 platform ID `0x00146050` | aurora-silicon/linux, the M5 MacBook Pro hardware discussion | nothing further | **submitted** 2026-11-14: [discussion 142 comment](https://github.com/aurora-silicon/linux/discussions/142#discussioncomment-19618807) |
 | HID product 0x0361 for the Trackpad26 gate of #1830 | aurora-silicon/linux | the r1a kernel moving the pointer on this Mac | candidate |
 | K114s N1, USB-C and SMC device tree sections | aurora-silicon/linux | Wi-Fi associating and a USB device enumerating on this Mac | candidate |
 | `apple,k114s` admission in the installer build | betizzel/omarchy-m5 | the r2 boot | candidate |
