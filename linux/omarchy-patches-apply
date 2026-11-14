@@ -1,0 +1,46 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled): put this machine's fixes to Omarchy's own scripts back after an update.
+# The Omarchy package (omarchy, or omarchy-dev on Edge) owns /usr/bin/omarchy-*, and every update
+# replaces those files, which drops a local fix. 03-k114s-omarchy-patches.hook runs this after each
+# transaction that installs or upgrades that package; omarchy-patches-install runs it once.
+#
+# Each patch in the patch directory, in name order, is checked as a whole before anything is
+# written, and without fuzz:
+#   already in the files                   -> left alone (reported if Omarchy now ships it itself)
+#   applies exactly                        -> applied
+#   neither (Omarchy has changed those lines) -> nothing written; reported
+# It never fails the package transaction and never leaves .orig or .rej files behind.
+set -u
+ROOT=${K114S_ROOT:-}
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+DIR=${K114S_OMARCHY_PATCHES:-$ROOT/usr/local/lib/omarchy-k114s/omarchy-patches}
+say() { echo "K114s Omarchy fixes: $*"; }
+
+# shellcheck source=omarchy-patches-lib.sh
+. "$HERE/omarchy-patches-lib.sh" 2>/dev/null || { say "omarchy-patches-lib.sh is missing beside $0; nothing checked or written"; exit 0; }
+have_patch || { say "GNU patch is not installed (sudo pacman -S patch); nothing checked or written"; exit 0; }
+
+shopt -s nullglob
+patches=("$DIR"/*.patch)
+if (( ${#patches[@]} == 0 )); then say "none installed in $DIR"; exit 0; fi
+
+for p in "${patches[@]}"; do
+  name=$(basename "$p" .patch)
+  if is_in "$p"; then
+    if applied_here "$p"; then
+      say "$name: in place"
+    else
+      say "$name: Omarchy ships this change itself now; retire the patch (docs/omarchy-patches.md)"
+    fi
+  elif fits "$p"; then
+    if run_patch "$p" -N; then
+      record_applied "$p" || say "$name: applied, but its record could not be written; a later take-out will leave it in"
+      say "$name: applied"
+    else
+      say "$name: FAILED while applying; reinstall the Omarchy package to restore its files"
+    fi
+  else
+    say "$name: does not fit this Omarchy build (it changed those lines). Nothing was written. Check whether Omarchy now has the fix, then refresh or retire the patch (docs/omarchy-patches.md)."
+  fi
+done
+exit 0

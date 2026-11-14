@@ -1,0 +1,14 @@
+# K114s (omarchy-m5p-oled): re-apply this machine's fixes to Omarchy's own scripts after an update.
+# Installed by omarchy-patches-install into /etc/pacman.d/hooks/. See /usr/local/lib/omarchy-k114s/omarchy-patches-apply.
+# A channel switch installs omarchy-dev in place of omarchy, so both names are listed.
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Target = omarchy
+Target = omarchy-dev
+
+[Action]
+Description = K114s: re-applying this machine's fixes to Omarchy's scripts...
+When = PostTransaction
+Exec = /usr/local/lib/omarchy-k114s/omarchy-patches-apply

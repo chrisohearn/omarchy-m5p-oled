@@ -1,0 +1,90 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled): install this machine's fixes to Omarchy's own scripts, and the pacman
+# hook that puts them back after every Omarchy update.
+#     sudo bash linux/omarchy-patches-install          install, or refresh after a pull, and apply now
+#     sudo bash linux/omarchy-patches-install --undo   take the fixes out and remove the hook
+# Separate from the repair bundles: it touches no boot file, package hold or EFI partition.
+# A refresh also takes out any patch that has been retired from patches/omarchy/. To retire the
+# last one, use --undo. A change is only ever taken out of files where it was made here: files the
+# Omarchy package itself installed with the same change are left alone.
+set -euo pipefail
+ROOT=${K114S_ROOT:-}
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+SRC=${K114S_OMARCHY_PATCHES_SRC:-$HERE/../patches/omarchy}
+LIB=$ROOT/usr/local/lib/omarchy-k114s
+DEST=$LIB/omarchy-patches
+APPLY=$LIB/omarchy-patches-apply
+SHARED=$LIB/omarchy-patches-lib.sh
+HOOK=$ROOT/etc/pacman.d/hooks/03-k114s-omarchy-patches.hook
+die() { echo "omarchy-patches-install: $*" >&2; exit 1; }
+say() { echo "omarchy-patches-install: $*"; }
+
+[[ $(id -u) == 0 || -n $ROOT ]] || die "run with sudo"
+[[ -f $HERE/omarchy-patches-lib.sh && -f $HERE/omarchy-patches-apply && -f $HERE/03-k114s-omarchy-patches.hook ]] ||
+  die "run it from the repository's linux/ folder"
+# shellcheck source=omarchy-patches-lib.sh
+. "$HERE/omarchy-patches-lib.sh"
+have_patch || die "GNU patch is not installed (sudo pacman -S patch); nothing changed"
+shopt -s nullglob
+[[ ${1:-} == "" || ${1:-} == --undo ]] || die "unknown argument $1"
+
+if [[ ${1:-} == --undo ]]; then
+  [[ -d $DEST || -e $HOOK || -e $APPLY ]] || die "nothing to undo"
+  migrate "$DEST"
+  # The hook goes first, so an update meanwhile cannot put a fix back.
+  rm -f "$HOOK"
+  installed=("$DEST"/*.patch)
+  for (( i = ${#installed[@]} - 1; i >= 0; i-- )); do
+    take_out "${installed[i]}" || die "stopped; the patches not yet taken out are still in $DEST"
+    rm -f "${installed[i]}"
+  done
+  rm -rf "$DEST"
+  rm -f "$APPLY" "$SHARED"
+  say "undone"
+  exit 0
+fi
+wanted=("$SRC"/*.patch)
+(( ${#wanted[@]} )) || die "no patches in $SRC. To retire the last one, run: sudo bash $HERE/omarchy-patches-install --undo"
+for p in "${wanted[@]}"; do
+  [[ $(basename "$p") =~ ^[A-Za-z0-9._-]+\.patch$ ]] || die "unexpected patch name: $p"
+  why=$(check_targets "$p") || die "$(basename "$p") $why; patches may only change files the Omarchy package installed. Nothing changed."
+done
+# Only now, with the new set known to be good: a refused install leaves a first-version one as it was.
+migrate "$DEST"
+mkdir -p "$DEST" "$(dirname "$HOOK")"
+: > "$DEST/.records"
+
+# Patches stack in name order, and one may sit on another's lines. So before the set changes,
+# take out, from the top down, every installed patch from the lowest one the change reaches:
+# one that is retired or changed, or one a new patch sorts below. The applier then puts the
+# wanted set back from the bottom up.
+installed=("$DEST"/*.patch)
+first_new=""
+for p in "${wanted[@]}"; do
+  b=$(basename "$p")
+  [[ -e $DEST/$b ]] && continue
+  first_new=$b
+  break
+done
+low=-1
+for i in "${!installed[@]}"; do
+  b=$(basename "${installed[i]}")
+  if [[ ! -e $SRC/$b ]] || ! cmp -s "${installed[i]}" "$SRC/$b" || [[ -n $first_new && $b > $first_new ]]; then
+    low=$i
+    break
+  fi
+done
+if (( low >= 0 )); then
+  for (( i = ${#installed[@]} - 1; i >= low; i-- )); do
+    take_out "${installed[i]}" || die "stopped part-way; run the install again, or reinstall the Omarchy package"
+  done
+fi
+
+rm -f "$DEST"/*.patch
+for m in "$DEST"/*.applied; do [[ -e $SRC/$(basename "$m" .applied).patch ]] || rm -f "$m"; done
+for p in "${wanted[@]}"; do install -m 644 "$p" "$DEST/$(basename "$p")"; done
+install -m 644 "$HERE/omarchy-patches-lib.sh" "$SHARED"
+install -m 755 "$HERE/omarchy-patches-apply" "$APPLY"
+install -m 644 "$HERE/03-k114s-omarchy-patches.hook" "$HOOK"
+say "installed ${#wanted[@]} patch(es) and $HOOK"
+K114S_ROOT=$ROOT "$APPLY"

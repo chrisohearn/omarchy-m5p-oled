@@ -71,7 +71,8 @@ Exact revisions are in `pins/sources.json`; who wrote what is in [NOTICE.md](NOT
 | `patches/linux/` | the two upstream trackpad series as used |
 | `installer/` | the patches that admit `apple,k114s` in betizzel's installer build |
 | `macos/` | apply/rollback tool for the Linux EFI partition; runs from macOS |
-| `linux/` | update handling installed inside Linux |
+| `linux/` | update handling installed inside Linux; `omarchy-patches-install` for `patches/omarchy/` |
+| `patches/omarchy/` | open upstream fixes to Omarchy's own scripts, kept across updates by a pacman hook ([docs/omarchy-patches.md](docs/omarchy-patches.md)) |
 | `tests/` | replica tests for the macOS tool, fake-root tests for `linux/`, the image isolation run |
 | `build/` | bundle assembly, device tree and kernel build scripts, the publish check |
 | `releases/r1/` | bundle r1's text files as delivered, with its test evidence |

@@ -1,0 +1,202 @@
+#!/bin/bash
+# Fake-root tests of linux/omarchy-patches-install, linux/omarchy-patches-apply and their hook.
+#   usage: test-omarchy-patches.sh LINUX_DIR [OMARCHY_SRC]
+# OMARCHY_SRC, if given, is an omacom/omarchy checkout at the revision the machine runs; the real
+# patches in patches/omarchy/ are then checked to apply to it without fuzz, and to come out again.
+set -u
+L=$(cd "$1" && pwd); P=$(cd "$L/../patches/omarchy" && pwd); INSTALL=$L/omarchy-patches-install
+pass=0; fail=0
+ok() { if [ "$2" = "$3" ]; then pass=$((pass+1)); echo "PASS $1"; else fail=$((fail+1)); echo "FAIL $1: got '$2' want '$3'"; fi; }
+BASE=$(mktemp -d "${TMPDIR:-/tmp}/k114s-omarchy-patches-test.XXXXXX"); trap 'rm -rf "$BASE"' EXIT
+
+# "Omarchy" scripts as the package ships them, and the package database's record of them.
+orig() { mkdir -p "$1/usr/bin"
+  printf '#!/bin/bash\n# one\nkey=user\necho "$key"\n# end\n' > "$1/usr/bin/omarchy-a"
+  printf '#!/bin/bash\n# two\ncache=user\necho "$cache"\n# end\n' > "$1/usr/bin/omarchy-b"
+  printf 'one\n' > "$1/usr/bin/omarchy-c"
+  printf 'a\nb\nc\nd\n' > "$1/usr/bin/omarchy-x"
+  chmod 755 "$1"/usr/bin/omarchy-*; }
+fixed() { sed -i 's/^key=user$/key=user-org/' "$1/usr/bin/omarchy-a"; sed -i 's/^cache=user$/cache=user-org/' "$1/usr/bin/omarchy-b"; }
+shipped() { # record the files now under $1/usr/bin as what the package installed
+  local d=$1/var/lib/pacman/local/omarchy-dev-1-1 f; mkdir -p "$d"
+  for f in "$1"/usr/bin/*; do echo "./usr/bin/$(basename "$f") time=1.0 size=$(stat -c %s "$f") sha256digest=$(sha256sum "$f" | cut -c1-64)"; done | gzip > "$d/mtree"; }
+# A patch in Omarchy's tree layout (a/bin/...) between two versions of one file.
+mkpatch() { local out=$1 file=$2; mkdir -p "$BASE/mp"; printf "$3" > "$BASE/mp/old"; printf "$4" > "$BASE/mp/new"
+  diff -u "$BASE/mp/old" "$BASE/mp/new" | sed "1s#^--- .*#--- a/bin/$file#; 2s#^+++ .*#+++ b/bin/$file#" > "$out"; }
+SRC=$BASE/src; mkdir -p "$SRC" "$BASE/a" "$BASE/b"; orig "$BASE/a"; orig "$BASE/b"; fixed "$BASE/b"
+{ echo "A test fix. Free text before the diff is ignored by patch."; echo
+  for f in omarchy-a omarchy-b; do diff -u "$BASE/a/usr/bin/$f" "$BASE/b/usr/bin/$f" | sed "1s#^--- .*#--- a/bin/$f#; 2s#^+++ .*#+++ b/bin/$f#"; done; } > "$SRC/0001-test.patch"
+sumof() { cat "$1/usr/bin/omarchy-a" "$1/usr/bin/omarchy-b" | sha256sum | cut -c1-64; }
+ORIG=$(sumof "$BASE/a"); FIXED=$(sumof "$BASE/b")
+mk() { local r; r=$(mktemp -d "$BASE/root.XXXXXX"); orig "$r"; shipped "$r"; echo "$r"; }
+inst() { K114S_ROOT=$1 K114S_OMARCHY_PATCHES_SRC=${2:-$SRC} bash "$INSTALL" "${@:3}" 2>&1; }
+apply() { K114S_ROOT=$1 bash "$1/usr/local/lib/omarchy-k114s/omarchy-patches-apply" 2>&1; }
+leftovers() { find "$1/usr" \( -name '*.orig' -o -name '*.rej' \) | wc -l | tr -d ' '; }
+x() { tr '\n' ' ' < "$1/usr/bin/omarchy-x"; }
+installed() { (cd "$1/usr/local/lib/omarchy-k114s/omarchy-patches" && ls *.patch 2>/dev/null) | tr '\n' ' '; }
+markers() { (cd "$1/usr/local/lib/omarchy-k114s/omarchy-patches" && ls *.applied 2>/dev/null) | tr '\n' ' '; }
+
+r=$(mk); out=$(inst "$r"); rc=$?
+ok "install: succeeds" "$rc" 0
+ok "install: fix applied" "$(sumof "$r")" "$FIXED"
+ok "install: reports applied" "$(grep -c '0001-test: applied' <<<"$out")" 1
+ok "install: modes kept" "$(stat -c %a "$r/usr/bin/omarchy-a" "$r/usr/bin/omarchy-b" | tr '\n' ' ')" "755 755 "
+ok "install: hook in place" "$(test -f "$r/etc/pacman.d/hooks/03-k114s-omarchy-patches.hook" && echo yes)" yes
+ok "install: applier and its library" "$(test -x "$r/usr/local/lib/omarchy-k114s/omarchy-patches-apply" && test -f "$r/usr/local/lib/omarchy-k114s/omarchy-patches-lib.sh" && echo yes)" yes
+ok "install: no .orig or .rej" "$(leftovers "$r")" 0
+ok "install: applied-here record written" "$(markers "$r")" "0001-test.applied "
+out=$(apply "$r"); ok "again: in place" "$(grep -c '0001-test: in place' <<<"$out")" 1
+ok "again: files unchanged" "$(sumof "$r")" "$FIXED"
+out=$(inst "$r"); ok "reinstall: in place, unchanged" "$(grep -c 'in place' <<<"$out"):$(sumof "$r")" "1:$FIXED"
+
+# An Omarchy update puts the shipped files back; the hook's run re-applies the fix.
+orig "$r"; out=$(apply "$r"); rc=$?
+ok "after update: re-applied" "$rc:$(sumof "$r")" "0:$FIXED"
+
+# Omarchy changes the lines the fix touches: nothing written, reported, transaction not failed.
+orig "$r"; sed -i 's/^key=user$/key=account/' "$r/usr/bin/omarchy-a"; changed=$(sumof "$r")
+out=$(apply "$r"); rc=$?
+ok "changed upstream: exit 0" "$rc" 0
+ok "changed upstream: reported" "$(grep -c 'does not fit this Omarchy build' <<<"$out")" 1
+ok "changed upstream: nothing written (the other file too)" "$(sumof "$r")" "$changed"
+ok "changed upstream: no .orig or .rej" "$(leftovers "$r")" 0
+
+# Context changed within fuzz range: still refused, no fuzzy application.
+orig "$r"; sed -i 's/^# end$/# finish/' "$r/usr/bin/omarchy-b"; fuzzy=$(sumof "$r")
+out=$(apply "$r"); ok "fuzz needed: refused, nothing written" "$(grep -c 'does not fit' <<<"$out"):$(sumof "$r")" "1:$fuzzy"
+
+# Omarchy merges the fix: its package installs the fixed files. Nothing is written, the hook says
+# to retire the patch, and neither --undo nor a refresh without it takes Omarchy's fix out.
+merged() { local r; r=$(mk); inst "$r" >/dev/null; orig "$r"; fixed "$r"; shipped "$r"; echo "$r"; }
+r=$(merged); touch -d '2001-01-01' "$r/usr/bin/omarchy-a"
+out=$(apply "$r"); ok "upstream merged: says retire" "$(grep -c 'Omarchy ships this change itself now' <<<"$out")" 1
+ok "upstream merged: not rewritten" "$(stat -c %Y "$r/usr/bin/omarchy-a")" "$(date -d '2001-01-01' +%s)"
+out=$(inst "$r" "$SRC" --undo); rc=$?
+ok "upstream merged, undo: succeeds" "$rc" 0
+ok "upstream merged, undo: Omarchy's fix kept" "$(sumof "$r")" "$FIXED"
+ok "upstream merged, undo: says why" "$(grep -c 'its own carry this change' <<<"$out")" 1
+other=$BASE/other; mkdir -p "$other"; mkpatch "$other/0002-other.patch" omarchy-c 'one\n' 'two\n'
+r=$(merged); out=$(inst "$r" "$other"); rc=$?
+ok "upstream merged, retired: Omarchy's fix kept" "$rc:$(sumof "$r")" "0:$FIXED"
+ok "upstream merged, retired: forgotten" "$(installed "$r")" "0002-other.patch "
+
+# Two patches share a file and Omarchy merges only one of them: the other is still re-applied,
+# the merged one is reported for retirement, and neither --undo nor retiring it strips Omarchy's fix.
+share=$BASE/share; mkdir -p "$share"
+mkpatch "$share/0001-ours.patch" omarchy-y '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n' '1\nTWO\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n'
+mkpatch "$share/0002-merged.patch" omarchy-y '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n' '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\nELEVEN\n12\n'
+y() { tr '\n' ' ' < "$1/usr/bin/omarchy-y"; }
+sharedroot() { local r; r=$(mk); printf '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n' > "$r/usr/bin/omarchy-y"; shipped "$r"; inst "$r" "$share" >/dev/null
+  printf '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\nELEVEN\n12\n' > "$r/usr/bin/omarchy-y"; shipped "$r"; echo "$r"; }
+r=$(sharedroot); out=$(apply "$r")
+ok "shared file, one merged: ours re-applied" "$(y "$r")" "1 TWO 3 4 5 6 7 8 9 10 ELEVEN 12 "
+ok "shared file, one merged: merged one reported" "$(grep -c '0002-merged: Omarchy ships this change itself now' <<<"$out")" 1
+out=$(inst "$r" "$share" --undo); ok "shared file, undo: only ours taken out" "$(y "$r")" "1 2 3 4 5 6 7 8 9 10 ELEVEN 12 "
+r=$(sharedroot); apply "$r" >/dev/null; keep=$BASE/keep; mkdir -p "$keep"; cp "$share/0001-ours.patch" "$keep/"
+out=$(inst "$r" "$keep"); ok "shared file, merged one retired: Omarchy's fix kept" "$(y "$r")" "1 TWO 3 4 5 6 7 8 9 10 ELEVEN 12 "
+ok "shared file, merged one retired: its record gone" "$(markers "$r")" "0001-ours.applied "
+
+# Omarchy already ships one of two patches on a shared file: later refreshes never adopt it,
+# and --undo leaves Omarchy's change in.
+r=$(mk); printf '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\nELEVEN\n12\n' > "$r/usr/bin/omarchy-y"; shipped "$r"
+out=$(inst "$r" "$share"); ok "already shipped: reported, not recorded" "$(grep -c '0002-merged: Omarchy ships' <<<"$out"):$(markers "$r")" "1:0001-ours.applied "
+out=$(inst "$r" "$share"); ok "already shipped, second refresh: still not adopted" "$(grep -c 'recorded as applied' <<<"$out"):$(markers "$r")" "0:0001-ours.applied "
+out=$(inst "$r" "$share" --undo); ok "already shipped, undo: Omarchy's change kept" "$(y "$r")" "1 2 3 4 5 6 7 8 9 10 ELEVEN 12 "
+
+# Only files the Omarchy package installed may be changed: no created or deleted files.
+newf=$BASE/newf; mkdir -p "$newf"; printf 'hello\n' > "$BASE/mp/created"
+diff -u /dev/null "$BASE/mp/created" | sed "1s#^--- .*#--- /dev/null#; 2s#^+++ .*#+++ b/bin/omarchy-new#" > "$newf/0001-new.patch"
+r=$(mk); out=$(inst "$r" "$newf"); rc=$?
+ok "creates a file: refused, nothing installed" "$rc:$(test -e "$r/usr/bin/omarchy-new" && echo there || echo gone):$(test -e "$r/etc/pacman.d/hooks/03-k114s-omarchy-patches.hook" && echo hook || echo nohook)" "1:gone:nohook"
+foreign=$BASE/foreign; mkdir -p "$foreign"; mkpatch "$foreign/0001-foreign.patch" omarchy-unowned 'a\n' 'b\n'
+r=$(mk); printf 'a\n' > "$r/usr/bin/omarchy-unowned"; out=$(inst "$r" "$foreign"); rc=$?
+ok "file no package installed: refused" "$rc:$(grep -c 'neither omarchy nor omarchy-dev installed' <<<"$out")" "1:1"
+# A file another omarchy-* package owns (the hook does not watch it): refused too.
+r=$(mk); d=$r/var/lib/pacman/local/omarchy-settings-dev-1-1; mkdir -p "$d"
+echo "./usr/bin/omarchy-unowned time=1.0 size=2 sha256digest=$(printf 'a\n' | sha256sum | cut -c1-64)" | gzip > "$d/mtree"
+printf 'a\n' > "$r/usr/bin/omarchy-unowned"; out=$(inst "$r" "$foreign"); rc=$?
+ok "file of another omarchy package: refused" "$rc:$(cat "$r/usr/bin/omarchy-unowned")" "1:a"
+
+# Applied by the first version of this tool (no records): the next run adopts it, once.
+legacy() { local r; r=$(mk); inst "$r" >/dev/null; rm -f "$r"/usr/local/lib/omarchy-k114s/omarchy-patches/{*.applied,.records}; echo "$r"; }
+r=$(legacy); out=$(inst "$r"); ok "first version: adopted on refresh" "$(grep -c 'recorded as applied here' <<<"$out"):$(markers "$r")" "1:0001-test.applied "
+out=$(inst "$r" "$SRC" --undo); ok "adopted: undo takes it out" "$(sumof "$r")" "$ORIG"
+r=$(legacy); out=$(inst "$r" "$SRC" --undo); ok "first version, straight to undo: taken out" "$(grep -c 'taken out' <<<"$out"):$(sumof "$r")" "1:$ORIG"
+# A refused install on a first-version install leaves it unmigrated, so it is adopted later.
+r=$(legacy); out=$(inst "$r" "$newf"); ok "refused refresh: first version left unmigrated" "$(markers "$r"):$(test -e "$r/usr/local/lib/omarchy-k114s/omarchy-patches/.records" && echo marked || echo unmarked)" ":unmarked"
+
+# Retiring: a refresh without the patch takes it out first. The last one is retired with --undo.
+r=$(mk); inst "$r" >/dev/null; empty=$BASE/empty; mkdir -p "$empty"
+out=$(inst "$r" "$empty"); rc=$?
+ok "no patches in source: refused" "$rc" 1
+ok "no patches in source: points at --undo" "$(grep -c -- '--undo' <<<"$out")" 1
+ok "no patches in source: fix still in" "$(sumof "$r")" "$FIXED"
+out=$(inst "$r" "$other"); rc=$?
+ok "retire: succeeds" "$rc" 0
+ok "retire: old fix taken out" "$(sumof "$r")" "$ORIG"
+ok "retire: old patch forgotten" "$(installed "$r")" "0002-other.patch "
+ok "retire: new fix applied" "$(cat "$r/usr/bin/omarchy-c")" two
+out=$(inst "$r"); ok "switch back: first fix in, second out" "$(sumof "$r"):$(cat "$r/usr/bin/omarchy-c")" "$FIXED:one"
+
+# Stacked patches on neighbouring lines of one file: 0001 b->B, 0002 c->C with B as context.
+stack=$BASE/stack; mkdir -p "$stack"
+mkpatch "$stack/0001-p.patch" omarchy-x 'a\nb\nc\nd\n' 'a\nB\nc\nd\n'
+mkpatch "$stack/0002-q.patch" omarchy-x 'a\nB\nc\nd\n' 'a\nB\nC\nd\n'
+r=$(mk); inst "$r" "$stack" >/dev/null; ok "stacked: both applied" "$(x "$r")" "a B C d "
+out=$(inst "$r" "$other"); ok "stacked, both retired: file as shipped" "$(x "$r")" "a b c d "
+ok "stacked, both retired: only the new one installed" "$(installed "$r")" "0002-other.patch "
+changed=$BASE/changed; mkdir -p "$changed"
+mkpatch "$changed/0001-p.patch" omarchy-x 'a\nb\nc\nd\n' 'a\nBB\nc\nd\n'
+mkpatch "$changed/0002-q.patch" omarchy-x 'a\nBB\nc\nd\n' 'a\nBB\nC\nd\n'
+r=$(mk); inst "$r" "$stack" >/dev/null; out=$(inst "$r" "$changed")
+ok "stacked, lower changed: old out, new in, upper back" "$(x "$r")" "a BB C d "
+# A new patch that sorts below an installed one it overlaps.
+upper=$BASE/upper; mkdir -p "$upper"; mkpatch "$upper/0002-q.patch" omarchy-x 'a\nb\nc\nd\n' 'a\nb\nC\nd\n'
+r=$(mk); inst "$r" "$upper" >/dev/null; ok "new lower patch: upper alone first" "$(x "$r")" "a b C d "
+out=$(inst "$r" "$stack"); ok "new lower patch: both in, in order" "$(x "$r")" "a B C d "
+out=$(inst "$r" "$stack" --undo); ok "stacked, undo: file as shipped" "$(x "$r")" "a b c d "
+
+# Undo puts the shipped files back and removes everything installed.
+r=$(mk); inst "$r" >/dev/null; out=$(inst "$r" "$SRC" --undo); rc=$?
+ok "undo: succeeds" "$rc" 0
+ok "undo: files as shipped" "$(sumof "$r")" "$ORIG"
+ok "undo: hook, applier, library and patches gone" "$(find "$r/etc" "$r/usr/local" -type f | wc -l | tr -d ' ')" 0
+out=$(inst "$r" "$SRC" --undo); rc=$?; ok "undo twice: refused" "$rc" 1
+r=$(mk); inst "$r" >/dev/null; orig "$r"; out=$(inst "$r" "$SRC" --undo); rc=$?
+ok "undo after an update: succeeds, files as shipped" "$rc:$(sumof "$r")" "0:$ORIG"
+r=$(mk); out=$(K114S_ROOT=$r bash "$INSTALL" bogus 2>&1); rc=$?; ok "unknown argument: refused" "$rc" 1
+
+# Without GNU patch: the hook writes nothing and says so; the installer refuses.
+nopatch=$BASE/nopatch; mkdir -p "$nopatch"
+for t in bash basename dirname cat cmp cut gzip zcat awk sed sort head id install mkdir rm sha256sum env tr; do ln -s "$(command -v $t)" "$nopatch/$t"; done
+r=$(mk); inst "$r" >/dev/null; orig "$r"
+out=$(PATH=$nopatch K114S_ROOT=$r "$nopatch/bash" "$r/usr/local/lib/omarchy-k114s/omarchy-patches-apply" 2>&1); rc=$?
+ok "no patch tool: hook exits 0, writes nothing" "$rc:$(sumof "$r")" "0:$ORIG"
+ok "no patch tool: says so" "$(grep -c 'GNU patch is not installed' <<<"$out")" 1
+out=$(PATH=$nopatch K114S_ROOT=$r K114S_OMARCHY_PATCHES_SRC=$SRC "$nopatch/bash" "$INSTALL" --undo 2>&1); rc=$?
+ok "no patch tool: installer refuses" "$rc:$(grep -c 'GNU patch is not installed' <<<"$out")" "1:1"
+
+# The hook runs the installed applier after the Omarchy package changes, never before.
+H=$L/03-k114s-omarchy-patches.hook
+ok "hook: Exec is the installed applier" "$(sed -n 's/^Exec = //p' "$H")" /usr/local/lib/omarchy-k114s/omarchy-patches-apply
+ok "hook: after the transaction" "$(sed -n 's/^When = //p' "$H")" PostTransaction
+ok "hook: both package names" "$(sed -n 's/^Target = //p' "$H" | tr '\n' ' ')" "omarchy omarchy-dev "
+ok "hook: cannot abort a transaction" "$(grep -c AbortOnFail "$H")" 0
+
+# The real patches against the Omarchy revision this machine runs.
+if [ -n "${2:-}" ]; then
+  O=$BASE/omarchy; mkdir -p "$O/usr"; cp -a "$2/bin" "$O/usr/bin"; shipped "$O"
+  for p in "$P"/*.patch; do
+    n=$(basename "$p")
+    patch -p1 -d "$O/usr" -F0 -s -f --dry-run < "$p" >/dev/null 2>&1; ok "real $n: applies without fuzz" "$?" 0
+  done
+  out=$(K114S_ROOT=$O bash "$INSTALL" 2>&1); ok "real patches: install succeeds" "$?" 0
+  ok "real patches: all applied" "$(grep -c ': applied' <<<"$out")" "$(ls "$P"/*.patch | wc -l | tr -d ' ')"
+  for f in "$O"/usr/bin/omarchy-agent-*; do head -1 "$f" | grep -q python && { python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$f" || ok "real: $(basename "$f") parses" 1 0; }; done
+  out=$(K114S_ROOT=$O bash "$INSTALL" --undo 2>&1)
+  ok "real patches: undo gives the shipped files" "$(diff -r "$2/bin" "$O/usr/bin" >/dev/null && echo same)" same
+  ok "real patches: no .orig or .rej" "$(leftovers "$O")" 0
+fi
+
+echo "omarchy patches tests: $pass passed, $fail failed"
+[ "$fail" = 0 ]

@@ -82,6 +82,17 @@
       "applied": null,
       "awaiting_reboot": null,
       "hardware_verified": null
+    },
+    {
+      "id": "omarchy-patches-0001",
+      "what": "Claude account keyed by user and organization: omacom/omarchy#18681 applied to Omarchy's scripts and kept across updates by 03-k114s-omarchy-patches.hook (docs/omarchy-patches.md)",
+      "evaluated": "2026-11-14",
+      "integrated": "2026-11-14",
+      "built_tested": "2026-11-14",
+      "staged": "2026-11-14",
+      "applied": "2026-11-14 (linux/omarchy-patches-install on Omarchy Edge 4.0.0.r7859.g9ac0883; no reboot needed)",
+      "awaiting_reboot": null,
+      "hardware_verified": null
     }
   ]
 }
