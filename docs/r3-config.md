@@ -132,7 +132,7 @@ v272-5 enables nothing the K114s lacks.
 | 14 | Virtual machines: vhost-net, vsock | 3 + 0 | common |
 
 Of the 248 options turned on, 244 are also on in the Aurora project's own distribution kernel
-configuration (aurora-silicon/alarm-aurora, `linux-aurora` 7.3.0 at `d89d8c0c`), which is built
+configuration (aurora-silicon/alarm-aurora, `linux-aurora` 7.3.0, kernel pin `d89d8c0c`), which is built
 from the same kernel tree family. The four that are not (`HID_LENOVO`, `HID_RAZER`, `F2FS_FS`,
 `DRM_UDL`) are on in Arch Linux ARM's generic kernel 7.3.4.
 

@@ -18,7 +18,7 @@ and keep their authors and licenses.
 | `build/make_k114s_ftab.py` | calls betizzel/omarchy-m5's `omarchy_centauri.py` unchanged | this repository | MIT |
 | `build/validate-config.py` | method of betizzel/omarchy-m5 `installer/recipes/linux-aurora-j714s/validate-config.py` (`886269a`), rewritten and extended | betizzel and omarchy-m5 contributors (method) | MIT |
 | `patches/linux/config/k114s-required.config` | this repository; the lines marked `[recipe]` restate betizzel/omarchy-m5 `j714s-required.config` | this repository; betizzel and omarchy-m5 contributors for those lines | MIT |
-| `patches/linux/config/k114s-r3.config` | this repository; option names and help texts are the Linux kernel's, and the selection was compared with aurora-silicon/alarm-aurora's `linux-aurora` configuration (`d89d8c0c` pin) | this repository | MIT |
+| `patches/linux/config/k114s-r3.config` | this repository; option names and help texts are the Linux kernel's, and the selection was compared with aurora-silicon/alarm-aurora's `linux-aurora` configuration (kernel pin `d89d8c0c`) | this repository | MIT |
 
 Nothing of Apple's is in this repository. Firmware is read from Apple's own restore image on the
 owner's machine and never redistributed.
