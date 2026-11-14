@@ -1,0 +1,228 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s sound (r3 candidate): the headphone jack and the microphone array. NO SPEAKERS.
+ *
+ * Include after t6050-k114s-common.dtsi. Needs the kernel patches in patches/linux/sound/
+ * ("apple,k114-macaudio") and this Mac's PMP values in t6050-k114s-pmp-tunables.dtsi, which is
+ * generated on the Mac (build/k114s-adt.py pmp-dtsi) and is not part of this repository.
+ *
+ * Ported from the K116s tree of aurora-silicon/linux #1648 (Jens Axboe, booted on a K116s):
+ *   dac02289da54  the speakers and the headphone jack   -> the jack, the AOP, the card
+ *   f25b8eb19c92  the microphone array ("Not tested on the hardware yet")
+ *   7e584a680b77  the PMP and the SEP                   -> the PMP only
+ * and from this base's J714s tree, which has the same nodes, plus the device-tree change of
+ * #1789 (PMP power states always on). Nothing is taken from 8f5a2223fd3a: it removes
+ * speaker-config rows this tree never had.
+ *
+ * Every node below is in the shared T6050 files of the base (t6050-die0.dtsi,
+ * t6050-peripherals.dtsi), disabled; this file turns them on and adds the board's own nodes.
+ * The addresses, interrupts and stream IDs in the comments are the K116s ADT's as its tree
+ * states them. The K114s ADT has to confirm each one (docs/r3-sound.md lists them and how to
+ * read them).
+ *
+ * SPEAKER SAFETY. This file must never give the speaker amplifiers a way to play:
+ *   - no amplifier node: i2c1 (left amps, 0x38-0x3a) and i2c3 (right amps, 0x3b-0x3d) stay
+ *     disabled, so no driver binds to an amp and nothing can write to one;
+ *   - no SDZ regulator: the amps' shared shutdown line (AP pin 107) and their fault line (106)
+ *     stay inside gpio-reserved-ranges, so the kernel refuses every request for them;
+ *   - no "Speaker" link in the card, and "apple,k114-macaudio" refuses one in the driver;
+ *   - no "spkr" and no "sense" DMA channel on the AOP audio node, so no stream can be opened
+ *     on the speaker serializer.
+ * tests/lint-sound-dtb.py checks all of this on the compiled tree. Do not copy the amp nodes
+ * of the K116s or J714s trees here before protection data exists for this model.
+ *
+ * Copyright The Asahi Linux Contributors
+ */
+
+/*
+ * AP pins. Pin 112 takes an SError when read, so only the pins a node names are exposed:
+ * 80 (PCIe port 0 PERST#, with K114S_R1_N1), 134 (jack codec interrupt) and 139 (jack codec
+ * reset). Unlike the K116s tree, 106/107 (amp fault, amp shutdown) and 136/137 (speaker ID)
+ * stay reserved. This property replaces the one in t6050-k114s-common.dtsi: a later fragment
+ * that needs another pin has to carry these as well.
+ */
+&pinctrl_ap {
+#ifdef K114S_R1_N1
+	gpio-reserved-ranges = <0 80>, <81 53>, <135 4>, <140 81>;
+#else
+	gpio-reserved-ranges = <0 134>, <135 4>, <140 81>;
+#endif
+};
+
+/*
+ * The PMP (ADT pmp0, /chosen, /arm-io/pmgr), as on the K116s and the J714s: iBoot loads its
+ * firmware and the driver starts it with the boot arguments and firmware properties below.
+ * The AOP's audio firmware needs it: its LEAP cluster enable goes through PMP-managed power
+ * domains, and without the PMP "the audio controller never reaches systemReady and no AOP
+ * service is announced" (K116s tree). The GPU and display parts of the K116s PMP section
+ * (pmp0_gfx, the SEP) are not sound's and are left to their own fragments; repeating these
+ * nodes there is harmless.
+ */
+/*
+ * The three PMP power states are kept on, as aurora-silicon/linux #1789 (f61eb4550a95, open)
+ * does in t6050-peripherals.dtsi: the firmware runs from the moment the driver starts it, and
+ * on the K116s gating them in suspend-to-idle crashed it at wake "in 3 of the 4 suspends".
+ * Stated here so that the sound tree does not depend on that patch being in the kernel.
+ */
+&ps_pms {
+	apple,always-on;
+	status = "okay";
+};
+
+&ps_pmp {
+	apple,always-on;
+	status = "okay";
+};
+
+&ps_pms_sram {
+	apple,always-on;
+	status = "okay";
+};
+
+&pmp0_dart {
+	status = "okay";
+};
+
+&pmp0_mbox {
+	status = "okay";
+};
+
+&pmp0 {
+	/* ADT /chosen board-id; the generated file repeats it from the ADT */
+	apple,board-id = <20>;
+	status = "okay";
+};
+
+&pmp0_report {
+	status = "okay";
+};
+
+&pmc {
+	/* PMP, CLPC and AP agents, once the PMP runs */
+	apple,static-voters = <0 1 3>;
+	apple,pmp = <&pmp0>;
+};
+
+/*
+ * This Mac's own values, from its ADT: apple,dram-vendor-id (/chosen), apple,pmc and
+ * apple,pmc-pmgr (/arm-io/pmgr), and the apple,tunable-* firmware properties
+ * (/arm-io/pmp0/iop-pmp0-nub). The K116s and J714s files differ from each other in the DRAM
+ * vendor, the GPU voltage table, the firmware segment ranges and the firmware UUID, so neither
+ * is used here. The build fails without the file, on purpose.
+ */
+#include "t6050-k114s-pmp-tunables.dtsi"
+
+/*
+ * The CS42L84 headphone codec (K116s ADT /arm-io/i2c2/audio-codec-output, reg 0x4b): reset on
+ * AP pin 139 (function-reset GPIO(0x8b, 0x1)), driven high to run; interrupt AP pin 134, level
+ * low. i2c2 is disabled by t6050-k114-k116.dtsi; re-enabled here. It carries nothing else.
+ */
+&i2c2 {
+	status = "okay";
+
+	jack_codec: codec@4b {
+		compatible = "cirrus,cs42l84";
+		reg = <0x4b>;
+		reset-gpios = <&pinctrl_ap 139 GPIO_ACTIVE_HIGH>;
+		interrupts-extended = <&pinctrl_ap 134 IRQ_TYPE_LEVEL_LOW>;
+		#sound-dai-cells = <0>;
+		sound-name-prefix = "Jack";
+	};
+};
+
+/* ADT admac-base-ns: 0x293800000, IRQ 637, 13 TX + 13 RX channels, dart-aop stream 8 */
+&admac_base_ns {
+	status = "okay";
+};
+
+/*
+ * The AOP, booted through its setup port (ADT aop-exclave-mailbox at 0x2d067c000, dart-aop
+ * stream 1), with its RTKit mailbox (ADT aop interrupts 578-581), dart-aop (0x290fc0000,
+ * IRQ 616, locked tables) and the AOP itself (0x290c00000 SRAM window, ASC 0x290600000).
+ */
+&aop_mbox {
+	status = "okay";
+};
+
+&aop_setup_mbox {
+	status = "okay";
+};
+
+&aop_dart {
+	status = "okay";
+};
+
+&aop {
+	status = "okay";
+};
+
+/*
+ * The AOP audio service (apple,t6050-aop-audio in t6050-die0.dtsi). The chassis name is the
+ * microphone card's identity (AppleK114HPAI), the machine kind its long name.
+ *
+ * t6050-die0.dtsi gives the node four channels: cout/cin (the jack, base-ns TX2/RX2) and
+ * spkr/sense (the amps' stream and their V/I sense, base-ns TX0/RX0). Only the jack's are kept
+ * here. The driver asks for a channel by name when a PCM is opened, so without "spkr" and
+ * "sense" a stream towards the amps cannot be opened at all.
+ */
+#ifndef K114S_SOUND_NO_MICS
+/*
+ * The microphone array: ADT audio-hp-mic (three microphones, 48 kHz float32) on leap-s ADMAC
+ * RX0, which the AP reaches through the proxy aperture ADT admac-hp-mic-ec-proxy: reg
+ * 0x2d3200000 size 0x34000, dma-channel 0, admac-leap-s interrupt 638, dart-aop stream 11
+ * (vm-base-11 0x10040000000, vm-size-11 0xffff0000). Upstream enabled this on the K116s with
+ * "Not tested on the hardware yet", and it has not run on a K114s either. Define
+ * K114S_SOUND_NO_MICS to build the jack alone.
+ */
+&admac_ec_proxy {
+	status = "okay";
+};
+
+&aop_audio {
+	apple,chassis-name = "K114";
+	apple,machine-kind = "MacBook Pro";
+	/* hpai: leap-s RX0 is Linux channel 1 of the proxy ADMAC (2N for TX N, 2N+1 for RX N) */
+	dmas = <&admac_base_ns 4>, <&admac_base_ns 5>,
+	       <&admac_ec_proxy 1>;
+	dma-names = "cout", "cin", "hpai";
+};
+#else
+&aop_audio {
+	apple,chassis-name = "K114";
+	apple,machine-kind = "MacBook Pro";
+	dmas = <&admac_base_ns 4>, <&admac_base_ns 5>;
+	dma-names = "cout", "cin";
+};
+#endif
+
+/*
+ * The sound card: the jack only. "apple,k114-macaudio" is this repository's kernel patch
+ * (patches/linux/sound/0004): J714's jack configuration with the speakers refused. A kernel
+ * without it matches "apple,macaudio", whose fallback expects the MCA's front-ends, so the
+ * card does not bind there at all.
+ *
+ * There is no "Speaker" link (the K116s tree's dai-link@1 on <&aop_audio 3>) and no
+ * speaker-id-gpios. /chosen/asahi,speaker-id still comes from the loader.
+ */
+/ {
+	sound {
+		compatible = "apple,k114-macaudio", "apple,macaudio";
+		model = "MacBook Pro K114";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		dai-link@0 {
+			reg = <0>;
+			link-name = "Headphone Jack";
+
+			cpu {
+				/* T8152-style driver: DAI 0 is the jack ("cout"/"cin") back-end */
+				sound-dai = <&aop_audio 0>;
+			};
+
+			codec {
+				sound-dai = <&jack_codec>;
+			};
+		};
+	};
+};
