@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s candidate r3, GPU step: r1 plus the GPU only. The panel stays the boot framebuffer.
+ * Not booted on a K114s. See docs/r3-display-gpu.md.
+ */
+#define K114S_R1_N1
+#define K114S_R1_USB
+#include "t6050-k114s-common.dtsi"
+#define K114S_R3_GPU
+#include "t6050-k114s-display-gpu.dtsi"

@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s candidate r3: r1 (N1, two USB-C host ports, SMC sensors) plus the internal panel on the
+ * display coprocessor and the GPU. Not booted on a K114s. See docs/r3-display-gpu.md.
+ */
+#define K114S_R1_N1
+#define K114S_R1_USB
+#include "t6050-k114s-common.dtsi"
+#define K114S_R3_EDP
+#define K114S_R3_DISPLAY
+#define K114S_R3_GPU
+#include "t6050-k114s-display-gpu.dtsi"
