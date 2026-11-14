@@ -1,0 +1,33 @@
+#!/bin/sh
+# K114s (omarchy-m5p-oled): pacman PreTransaction hook, AbortOnFail, NeedsTargets.
+#
+# Stops a transaction that would install, upgrade or remove a package of the K114s boot chain,
+# or remove the image's Omarchy build, which a channel switch does (00-k114s-hold-guard.hook
+# names them). The IgnorePkg lines in /etc/pacman.conf normally keep
+# these packages out of every upgrade. This is the backstop for when those lines are gone
+# (Omarchy rewrites pacman.conf from a template on a channel refresh) or do not apply (a named
+# reinstall, a removal). pacman runs it before it changes anything, so a stop here leaves the
+# system exactly as it was.
+#
+# To change those packages on purpose (the K114s bundle updater does this for its own packages):
+#   sudo touch /etc/omarchy-k114s/allow-coupled-update     and remove it afterwards
+allow=${K114S_ROOT:-}/etc/omarchy-k114s/allow-coupled-update
+targets=$(cat | tr '\n' ' ')
+targets=${targets% }
+[ -n "$targets" ] || exit 0
+if [ -e "$allow" ]; then
+  echo "K114s hold guard: $allow exists; letting this transaction change: $targets"
+  exit 0
+fi
+cat >&2 <<EOF
+K114s hold guard: stopped. This transaction would change packages this K114s install is built on:
+  $targets
+The kernel, loader, firmware and boot packages belong together with the K114s kernel and Stage 2,
+and Edge's packages of those names have no K114s support. Replacing the image's Omarchy build,
+which a channel switch does, has not been run on a K114s yet. Nothing has been changed.
+If an ordinary update asked for this, the package holds are missing from /etc/pacman.conf.
+Put them back:
+  sudo /usr/local/lib/omarchy-k114s/apply-holds
+then run the update again.
+EOF
+exit 1

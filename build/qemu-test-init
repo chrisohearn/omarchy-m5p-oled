@@ -1,0 +1,23 @@
+#!/usr/bin/bash
+# QEMU-only test init for the K114s repair UKI: reports through the kernel log, then powers off.
+export PATH=/usr/bin
+mount -t devtmpfs dev /dev; mount -t proc proc /proc; mount -t sysfs sys /sys
+say() { echo "K114S-TEST $*" > /dev/kmsg; }
+kver=$(uname -r)
+say "begin release=$kver version=$(uname -v)"
+for m in hid-magicmouse hid-apple hid-apple-mtp-haptic; do
+  f=/usr/lib/modules/$kver/kernel/drivers/hid/$m.ko
+  say "sha256 $m $(sha256sum < $f | cut -c1-64) bytes=$(stat -c %s $f)"
+done
+ok=0; bad=0; failed=""
+shopt -s globstar nullglob; for f in /usr/lib/modules/$kver/**/*.ko; do
+  n=$(basename $f .ko)
+  if modprobe "$n" 2>/dev/null; then ok=$((ok+1)); else bad=$((bad+1)); failed="$failed $n"; fi
+done
+say "modprobe ok=$ok failed=$bad"
+say "failed:${failed:0:700}"
+say "magicmouse loaded=$(grep -c '^hid_magicmouse ' /proc/modules) taint=$(cat /proc/sys/kernel/tainted) modules=$(wc -l < /proc/modules)"
+say "end"
+sleep 1
+echo o > /proc/sysrq-trigger
+sleep 5

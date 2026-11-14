@@ -1,0 +1,487 @@
+From 80b443a7d80a62ddc30bc24d6383a4bee007ec3c Mon Sep 17 00:00:00 2001
+From: k114s-trial <k114s-trial@localhost>
+Date: Fri, 13 Nov 2026 23:36:32 -0700
+Subject: [PATCH] EXPERIMENTAL K114s boot trial: admit apple,k114s (k114sap,
+ board 0x14) in developer builds
+
+- Engine: k114sap device, 26B8125 stub IPSW row (k114sap identity, mBoot-20457.41.3,
+  RestoreLongVersion 26.2.125.8.0,0), board 0x14 gate; BOARD_MACHO k114sap
+  (stage1-k114s.{bin,macho}, confined m1n1/boot-ctxr.bin, 27.2); collect k* FUD
+  multitouch firmware (port of aurora-installer asahi_firmware/multitouch.py).
+  Engine v0.9.2-omarchy.20261114.34c0d271c5f0 (17914560 bytes, sha256 2cc772dd...).
+- supported-models: apple,k114s developer board (experimental, never booted).
+- MacModelNames: K114s.
+- Tests: K114s engine tests; developer board set.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ Engine/overlay/src/omarchy_asahi.py           |  47 +++++-
+ Engine/overlay/tests/test_omarchy_asahi.py    | 136 ++++++++++++++++++
+ .../patches/0001-omarchy-engine-runtime.patch |  43 ++++--
+ Engine/source-lock.json                       |  16 +--
+ .../MacModelNames.swift                       |   1 +
+ scripts/supported-models.json                 |   3 +-
+ scripts/tests/test_make_unsigned_catalog.py   |   2 +-
+ 7 files changed, 223 insertions(+), 25 deletions(-)
+
+diff --git a/Engine/overlay/src/omarchy_asahi.py b/Engine/overlay/src/omarchy_asahi.py
+index cb9433e..5dbeb20 100644
+--- a/Engine/overlay/src/omarchy_asahi.py
++++ b/Engine/overlay/src/omarchy_asahi.py
+@@ -584,6 +584,17 @@ BOARD_MACHO = {
+         "the 14-inch MacBook Pro (M5 Pro) on macOS 27.2 stub firmware",
+         compress=True,
+     ),
++    # EXPERIMENTAL K114s trial (developer build only, not yet booted on the
++    # hardware). Stage 1 is the same T6050 Aura build as the J714s image's
++    # (chip-level: it only chainloads the ESP Stage 2), carried under its own
++    # name; the board binding is the K114s-only Stage 2, whose one device tree
++    # is apple,k114s, and the 26B8125 stub (k114sap identity, board 0x14).
++    "k114sap": BoardMachO(
++        "esp/aurora/stage1-k114s.bin", "esp/aurora/stage1-k114s.macho",
++        "esp/" + MACHO_CTXR_STAGE2, 15000, "27.2",
++        "the 14-inch OLED MacBook Pro (M5 Pro, K114s) on macOS 27.2 stub firmware",
++        compress=True,
++    ),
+ }
+ 
+ 
+@@ -858,8 +869,8 @@ def stub_installer(sysinfo, dutil, osinfo):
+     collect_firmware = installer.collect_firmware
+ 
+     def collect_firmware_from_an_encrypted_recovery(pkg):
+-        with _newer_trackpad_keys(), _neo_peripheral_collectors(installer), \
+-                _j714s_peripheral_collectors(installer):
++        with _newer_trackpad_keys(), _oled_multitouch_machines(), \
++                _neo_peripheral_collectors(installer), _j714s_peripheral_collectors(installer):
+             result = _collect_firmware(pkg)
+         try:
+             omarchy_centauri.collect(installer, pkg)
+@@ -1050,6 +1061,38 @@ def _newer_trackpad_keys():
+         multitouch.device_key_to_kind = original
+ 
+ 
++@contextlib.contextmanager
++def _oled_multitouch_machines():
++    """Also collect multitouch firmware from FUD machines named k* (K114/K116).
++
++    asahi_firmware v0.9.2's MultitouchFWCollection.load reads only machine
++    directories starting with "j", so an OLED MacBook Pro got no
++    apple/tpmtfw-k1xxx.bin. aurora-silicon/aurora-installer's
++    asahi_firmware/multitouch.py takes ("j", "k"); this does the same for the
++    k* directories after the original pass, converting them unchanged.
++    """
++    multitouch = getattr(asahi_firmware, "multitouch", None)
++    collection = getattr(multitouch, "MultitouchFWCollection", None)
++    if collection is None:
++        yield
++        return
++    original = collection.load
++
++    def load(self, source_path):
++        original(self, source_path)
++        if not os.path.exists(source_path):
++            return
++        for fname in sorted(os.listdir(source_path)):
++            if fname.startswith("k"):
++                self.do_machine(fname, os.path.join(source_path, fname))
++
++    collection.load = load
++    try:
++        yield
++    finally:
++        collection.load = original
++
++
+ def _is_encrypted(path):
+     with open(path, "rb") as fd:
+         return fd.read(len(AEA_MAGIC)) == AEA_MAGIC
+diff --git a/Engine/overlay/tests/test_omarchy_asahi.py b/Engine/overlay/tests/test_omarchy_asahi.py
+index 63e5552..d36e093 100644
+--- a/Engine/overlay/tests/test_omarchy_asahi.py
++++ b/Engine/overlay/tests/test_omarchy_asahi.py
+@@ -829,6 +829,142 @@ class AsahiStage1AdapterTests(unittest.TestCase):
+         self.assertIs(stage.call_args.kwargs["macho_compress"], False)
+         self.assertEqual((self.installed_esp / "m1n1/boot-ctxr.bin").read_bytes(), b"aura ctxr stage2")
+ 
++    # EXPERIMENTAL K114s trial (MacBook Pro 14-inch OLED, M5 Pro, board 0x14).
++    K114S_POLICY = {"kind": "board-macho-ctxr-v1", "qualified_machines": {"k114sap": ["27.2"]}}
++
++    def _k114s_payload(self, stage2=b"aura ctxr stage2 k114s", drop=()):
++        raw = j700_stage1()
++        with zipfile.ZipFile(self.payload) as archive:
++            entries = {name: archive.read(name) for name in archive.namelist()}
++        entries["esp/aurora/stage1-k114s.bin"] = raw
++        entries["esp/aurora/stage1-k114s.macho"] = aura_macho(raw)
++        entries["esp/m1n1/boot-ctxr.bin"] = stage2
++        for name in drop:
++            entries.pop(name)
++        with zipfile.ZipFile(self.payload, "w") as archive:
++            for name, data in entries.items():
++                archive.writestr(name, data)
++        for name, data in entries.items():
++            if name.startswith("esp/"):
++                path = self.installed_esp / name[len("esp/"):]
++                path.parent.mkdir(parents=True, exist_ok=True)
++                path.write_bytes(data)
++        return raw
++
++    def _k114s_metadata(self, policy=None, allowed=("k114sap",)):
++        metadata = self._target_metadata()
++        metadata["allowed_device_classes"] = list(allowed)
++        metadata["aurora_stage1"] = self.K114S_POLICY if policy is None else policy
++        metadata["recovery_gui"] = "omarchy-native-v1"
++        self._write_metadata([metadata])
++
++    def _k114s_installer(self, ipsw="27.2", device_class="k114sap"):
++        installer = FakeInstaller(FakeDiskUtil([[self.free]]))
++        installer.sysinfo = SimpleNamespace(device_class=device_class, sys_firmware="mBoot-20457.60.65.0.1")
++        installer.ipsw.version = ipsw
++        return installer
++
++    def test_k114s_board_row_is_its_own_and_matches_the_j714s_mechanics(self):
++        board = BOARD_MACHO["k114sap"]
++        self.assertEqual(board.raw, "esp/aurora/stage1-k114s.bin")
++        self.assertEqual(board.macho, "esp/aurora/stage1-k114s.macho")
++        self.assertEqual(board.stage2, "esp/m1n1/boot-ctxr.bin")
++        self.assertEqual((board.window_ms, board.os_firmware, board.compress), (15000, "27.2", True))
++        self.assertIn("K114s", board.macs)
++
++    def test_k114s_installs_its_own_filled_mach_o_stage1(self):
++        raw = self._k114s_payload()
++        self._k114s_metadata()
++        installer = self._k114s_installer()
++        adapter = self._adapter(installer)
++        with patch("omarchy_asahi.omarchy_recovery.validate_payload"):
++            adapter.preflight(self.plan)
++        self.assertTrue(adapter.preflight_complete)
++        adapter.prepare_target(self.plan)
++        partition_disk = adapter.osins.partition_disk
++        def with_a_real_esp_uuid(name, size):
++            partition_disk(name, size)
++            adapter.osins.efi_part.uuid = self.J714S_ESP.upper()
++        adapter.osins.partition_disk = with_a_real_esp_uuid
++        with patch("omarchy_asahi.omarchy_recovery.stage") as stage:
++            adapter.install_stub_and_esp(self.plan)
++        boot_object = Path(installer.ins.boot_obj_path).read_bytes()
++        expected_raw = fill_aurora_stage1(raw, self.J714S_ESP, "m1n1/boot-ctxr.bin", 15000)
++        self.assertEqual(boot_object, aura_macho(expected_raw))
++        self.assertIs(stage.call_args.kwargs["macho_compress"], True)
++        self.assertEqual((self.installed_esp / "m1n1/boot-ctxr.bin").read_bytes(), b"aura ctxr stage2 k114s")
++
++    def test_k114s_and_j714s_images_are_never_crossed(self):
++        # A K114s image on a J714s, and a J714s image on a K114s, are refused before any disk write.
++        self._k114s_payload()
++        self._k114s_metadata()
++        installer = self._k114s_installer(device_class="j714sap")
++        adapter = self._adapter(installer)
++        with self.assertRaises(AsahiAdapterError), patch("omarchy_asahi.omarchy_recovery.validate_payload"):
++            adapter.preflight(self.plan)
++        self.assertEqual(installer.dutil.add_calls, [])
++        self._j714s_payload()
++        self._j714s_metadata()
++        installer = self._k114s_installer()
++        adapter = self._adapter(installer)
++        with self.assertRaisesRegex(AsahiAdapterError, "not qualified for this Mac"), patch(
++                "omarchy_asahi.omarchy_recovery.validate_payload"):
++            adapter.preflight(self.plan)
++        self.assertEqual(installer.dutil.add_calls, [])
++
++    def test_k114s_refuses_wrong_firmware_mixed_metadata_and_missing_objects(self):
++        cases = (
++            ("27.3", {}, None, "qualified only on 27.2"),
++            ("27.2", {"drop": ("esp/aurora/stage1-k114s.macho",)}, None, "no Mach-O Stage 1"),
++            ("27.2", {"drop": ("esp/m1n1/boot-ctxr.bin",)}, None, "no esp/m1n1/boot-ctxr.bin"),
++            ("27.2", {"stage2": b""}, None, "empty esp/m1n1/boot-ctxr.bin"),
++            ("27.2", {}, ("k114sap", "j714sap"), "Mach-O Stage 1"),
++        )
++        for ipsw, case, allowed, message in cases:
++            with self.subTest(ipsw=ipsw, case=sorted(case), message=message):
++                self._k114s_payload(**case)
++                if allowed:
++                    self._k114s_metadata(allowed=allowed)
++                else:
++                    self._k114s_metadata()
++                installer = self._k114s_installer(ipsw)
++                adapter = self._adapter(installer)
++                with self.assertRaisesRegex(AsahiAdapterError, message), patch(
++                        "omarchy_asahi.omarchy_recovery.validate_payload"):
++                    adapter.preflight(self.plan)
++                self.assertEqual(installer.dutil.add_calls, [])
++
++    def test_oled_multitouch_machines_also_collects_k_directories(self):
++        from omarchy_asahi import _oled_multitouch_machines
++        seen = []
++
++        class Collection:
++            # asahi_firmware v0.9.2 MultitouchFWCollection.load: "j" machines only
++            def __init__(self, source_path):
++                self.load(source_path)
++
++            def load(self, source_path):
++                for fname in sorted(os.listdir(source_path)):
++                    if fname.startswith("j"):
++                        self.do_machine(fname, os.path.join(source_path, fname))
++
++            def do_machine(self, machine, path):
++                seen.append(machine)
++
++        multitouch = SimpleNamespace(MultitouchFWCollection=Collection)
++        original = Collection.load
++        with tempfile.TemporaryDirectory() as root, patch(
++                "omarchy_asahi.asahi_firmware", SimpleNamespace(multitouch=multitouch)):
++            for machine in ("j714s", "k114s", "x999"):
++                os.mkdir(os.path.join(root, machine))
++            Collection(root)
++            self.assertEqual(seen, ["j714s"])
++            seen.clear()
++            with _oled_multitouch_machines():
++                Collection(root)
++            self.assertEqual(seen, ["j714s", "k114s"])
++            self.assertIs(Collection.load, original)
++
+     def test_legacy_common_policy_without_common_member_keeps_legacy_preflight(self):
+         metadata = self._target_metadata()
+         metadata["aurora_stage1"] = {
+diff --git a/Engine/patches/0001-omarchy-engine-runtime.patch b/Engine/patches/0001-omarchy-engine-runtime.patch
+index e7bd27d..da15fe2 100644
+--- a/Engine/patches/0001-omarchy-engine-runtime.patch
++++ b/Engine/patches/0001-omarchy-engine-runtime.patch
+@@ -35,7 +35,7 @@ index 21031fd..76c0935 100755
+  
+  echo "Packaging installer..."
+ diff --git a/src/main.py b/src/main.py
+-index 88dd2ab..9f40a4f 100644
++index 88dd2ab..f899b16 100644
+ --- a/src/main.py
+ +++ b/src/main.py
+ @@ -4,11 +4,16 @@ import os, os.path, shlex, subprocess, sys, time, termios, json, getpass, report
+@@ -55,7 +55,7 @@ index 88dd2ab..9f40a4f 100644
+  
+  # Minimum free space to leave when resizing, to allow for OS upgrades
+  MIN_FREE_OS = psize("38GB")
+-@@ -49,9 +54,13 @@ CHIP_MIN_VER = {
++@@ -49,9 +54,16 @@ CHIP_MIN_VER = {
+      0x6030: "14.8.3",   # T6030, M3 Pro
+      0x6031: "14.8.3",   # T6031, M3 Max (16-core)
+      0x6034: "14.8.3",   # T6034, M3 Max (14-core)
+@@ -65,11 +65,14 @@ index 88dd2ab..9f40a4f 100644
+  
+  DEVICES = {
+ +    "j714sap":  Device("27.2", False),  # MacBook Pro (14-inch, M5 Pro)
+++    # EXPERIMENTAL K114s trial (developer build only): MacBook Pro 14-inch
+++    # OLED (M5 Pro), Mac17,13, board 0x14. Not yet booted on hardware.
+++    "k114sap":  Device("27.2", False),
+ +    "j700ap":   Device("26.6", False),  # MacBook Neo (A18 Pro, 2026)
+      "j274ap":   Device("11.0", False),  # Mac mini (M1, 2020)
+      "j293ap":   Device("11.0", False),  # MacBook Pro (13-inch, M1, 2020)
+      "j313ap":   Device("11.0", False),  # MacBook Air (M1, 2020)
+-@@ -95,6 +104,31 @@ if os.environ.get("ALLOW_VM", None):
++@@ -95,6 +107,42 @@ if os.environ.get("ALLOW_VM", None):
+      DEVICES["vma2macosap"] = Device("12.0", False)
+  
+  IPSW_VERSIONS = [
+@@ -98,10 +101,21 @@ index 88dd2ab..9f40a4f 100644
+ +         False,
+ +         ["j714sap"],
+ +         "https://updates.cdn-apple.com/2026FallFCS/c9671975-52db-4fb5-9af2-00217169ba8d/UniversalMac_27.2_26B123_Restore.ipsw"),
+++    # EXPERIMENTAL K114s trial: the OLED MacBook Pros' own 27.2 restore image
+++    # (26B8125; SupportedProductTypes Mac17,10-13), whose k114sap identity is
+++    # ApBoardID 0x14 / ApChipID 0x6050 with iBoot.k114s mBoot-20457.41.3.
+++    # RestoreLongVersion 26.2.125.8.0,0 from its RestoreVersion.plist.
+++    IPSW("27.2",
+++         "27.2",
+++         "mBoot-20457.41.3",
+++         "26.2.125.8.0,0",
+++         False,
+++         ["k114sap"],
+++         "https://updates.cdn-apple.com/2026FallFCS/b83bb963-ebd8-4608-8b5d-fdc70cb24927/UniversalMac_27.2_26B8125_Restore.ipsw"),
+      IPSW("12.3.1",
+           "12.1",
+           "iBoot-7459.101.3",
+-@@ -128,7 +162,10 @@ IPSW_VERSIONS = [
++@@ -128,7 +176,10 @@ IPSW_VERSIONS = [
+  class InstallerMain:
+      def __init__(self, version):
+          self.version = version
+@@ -112,7 +126,7 @@ index 88dd2ab..9f40a4f 100644
+          self.credentials_validated = False
+          self.expert = False
+          self.ipsw = None
+-@@ -585,20 +622,11 @@ class InstallerMain:
++@@ -585,20 +636,11 @@ class InstallerMain:
+          self.step2(report=True)
+  
+      def choose_ipsw(self, supported_fw=None):
+@@ -138,7 +152,7 @@ index 88dd2ab..9f40a4f 100644
+  
+          minver.sort(key=lambda ipsw: split_ver(ipsw.version))
+  
+-@@ -812,18 +840,15 @@ class InstallerMain:
++@@ -812,18 +854,15 @@ class InstallerMain:
+          else:
+              target = resizable[0]
+  
+@@ -166,7 +180,7 @@ index 88dd2ab..9f40a4f 100644
+  
+          min_perc = 100 * min_size / total
+  
+-@@ -922,6 +947,25 @@ class InstallerMain:
++@@ -922,6 +961,25 @@ class InstallerMain:
+  
+          return True
+  
+@@ -192,7 +206,7 @@ index 88dd2ab..9f40a4f 100644
+      def action_select_disk(self):
+          choices = {"1": "Internal storage"}
+  
+-@@ -939,21 +983,22 @@ class InstallerMain:
++@@ -939,21 +997,22 @@ class InstallerMain:
+          return True
+  
+      def main(self):
+@@ -228,7 +242,7 @@ index 88dd2ab..9f40a4f 100644
+              p_message("By default, this installer will hide certain advanced options that")
+              p_message("are only useful for Asahi Linux developers. You can enable expert mode")
+              p_message("to show them. Do not enable this unless you know what you are doing.")
+-@@ -970,7 +1015,23 @@ class InstallerMain:
++@@ -970,7 +1029,26 @@ class InstallerMain:
+  
+          self.chip_min_ver = CHIP_MIN_VER.get(self.sysinfo.chip_id, None)
+          self.device = DEVICES.get(self.sysinfo.device_class, None)
+@@ -238,8 +252,11 @@ index 88dd2ab..9f40a4f 100644
+ +            and self.device
+ +            and (not self.device.expert_only or self.expert)
+ +            and (
+-+                self.sysinfo.device_class != "j714sap"
+-+                or (self.sysinfo.chip_id == 0x6050 and self.sysinfo.board_id == 0x08)
+++                self.sysinfo.device_class not in ("j714sap", "k114sap")
+++                or (self.sysinfo.device_class == "j714sap"
+++                    and self.sysinfo.chip_id == 0x6050 and self.sysinfo.board_id == 0x08)
+++                or (self.sysinfo.device_class == "k114sap"
+++                    and self.sysinfo.chip_id == 0x6050 and self.sysinfo.board_id == 0x14)
+ +            )
+ +        )
+ +        if self.engine_runtime:
+@@ -253,7 +270,7 @@ index 88dd2ab..9f40a4f 100644
+              p_error("This device is not supported yet!")
+              p_error("Please check out the Asahi Linux Blog for updates on device support:")
+              print()
+-@@ -1126,6 +1187,19 @@ class InstallerMain:
++@@ -1126,6 +1204,19 @@ class InstallerMain:
+  
+          if self.cur_os is None and self.sysinfo.boot_mode != "macOS":
+              self.cur_os = default_os
+@@ -273,7 +290,7 @@ index 88dd2ab..9f40a4f 100644
+          self.check_cur_os()
+  
+          actions = {}
+-@@ -1226,7 +1300,11 @@ if __name__ == "__main__":
++@@ -1226,7 +1317,11 @@ if __name__ == "__main__":
+          logging.exception("Process execution failed")
+          p_warning("If you need to file a bug report, please attach the log file:")
+          p_warning(f"  {os.getcwd()}/installer.log")
+diff --git a/Engine/source-lock.json b/Engine/source-lock.json
+index 88e8c14..f783dc4 100644
+--- a/Engine/source-lock.json
++++ b/Engine/source-lock.json
+@@ -141,7 +141,7 @@
+     }
+   },
+   "downstream_overlay": {
+-    "version": "v0.9.2-omarchy.20261113.774d9abc59d3",
++    "version": "v0.9.2-omarchy.20261114.34c0d271c5f0",
+     "capability": "candidate_bound_full_os_stage_one_authenticated_recovery",
+     "minimum_app_version": "2.3.0",
+     "engine_modes": [
+@@ -151,7 +151,7 @@
+     ],
+     "patch": {
+       "path": "patches/0001-omarchy-engine-runtime.patch",
+-      "sha256": "c8887a7f5813184c992b4e2863b2082348e0fb2b2f8213121d4f5c6707c61bdf"
++      "sha256": "e75121118455661602ae51752203f252ea916194fce04e6cc349bf998c64524b"
+     },
+     "files": [
+       {
+@@ -172,7 +172,7 @@
+       {
+         "path": "overlay/src/omarchy_asahi.py",
+         "destination": "src/omarchy_asahi.py",
+-        "sha256": "8cd63eaf17a59681c3a43cb829eb3772c099db1649d94e12092f8d3a81929743"
++        "sha256": "4258dce3173df572546ebb360baa3d41ab33cdaea28ce2eb40cd03665954ecff"
+       },
+       {
+         "path": "overlay/src/omarchy_contract.py",
+@@ -207,7 +207,7 @@
+       {
+         "path": "overlay/tests/test_omarchy_asahi.py",
+         "destination": "tests/test_omarchy_asahi.py",
+-        "sha256": "3088e9cb0bc3c8798b906d8eb3daf47b00bd1236322e6f6f261b14525d22f235"
++        "sha256": "04612c42ec8b043e710d8f2fce660cdb44069e211cdce0ed71cb75bbe0ae9021"
+       },
+       {
+         "path": "overlay/tests/test_omarchy_contract.py",
+@@ -482,9 +482,9 @@
+     }
+   ],
+   "validation_artifact": {
+-    "filename": "installer-v0.9.2-omarchy.20261113.774d9abc59d3.tar.gz",
+-    "size_bytes": 17913790,
+-    "sha256": "927bf3f3a22a3549c807f7526c4e9cfe0626ad716d49e731ae5bac2dd97cfd42",
++    "filename": "installer-v0.9.2-omarchy.20261114.34c0d271c5f0.tar.gz",
++    "size_bytes": 17914560,
++    "sha256": "2cc772dd96aee90d63cbcbb1f7450818abd3e6783f1439c70b8cf74e10e2067d",
+     "reproducibility_scope": "two-identical-python-overlay-repacks-authenticated-base",
+     "signature": "absent",
+     "metadata_sha256": "2e6181ce6b6e17c11039e04bfadade8d10ae0e11889885ad8c9960b68f179a5d"
+@@ -511,7 +511,7 @@
+           "upstream_base_sha256": "c8d4d2a80f3a88a9ba4d6d4024c0001062e35d15d72ae530681a0612e6525984",
+           "upstream_sha256": "894fb8cd2ffc672bb96a14969ee9de2879d250c8c5990fee122ccf66d9b50024",
+           "base_sha256": "95760ed02d44b5457acb81559a4e2d892ffbb7f0f2b7417c0b2eb02937945ae7",
+-          "sha256": "28d102e20103e7063038af5f6eaefc2905c0eee554d45421422b663fd1e2f913"
++          "sha256": "f18ee307e7eb660c67d6dac78a1d55679335770307e999dee2635c6324ed6cfc"
+         }
+       ]
+     },
+diff --git a/Sources/OmarchyInstallerUXCore/MacModelNames.swift b/Sources/OmarchyInstallerUXCore/MacModelNames.swift
+index 2a022f5..05a89a2 100644
+--- a/Sources/OmarchyInstallerUXCore/MacModelNames.swift
++++ b/Sources/OmarchyInstallerUXCore/MacModelNames.swift
+@@ -90,6 +90,7 @@
+       "apple,j700": mac("MacBook Neo (A18 Pro, 2026)", "MacBook Neo", "A18 Pro"),
+       // Developer builds only: no public catalog lists it (scripts/supported-models.json).
+       "apple,j714s": mac("MacBook Pro 14-inch (M5 Pro, 2026)", "MacBook Pro", "M5"),
++      "apple,k114s": mac("MacBook Pro 14-inch OLED (M5 Pro, 2026)", "MacBook Pro", "M5"),
+     ]
+   }
+ #endif
+diff --git a/scripts/supported-models.json b/scripts/supported-models.json
+index 81d436f..2243622 100644
+--- a/scripts/supported-models.json
++++ b/scripts/supported-models.json
+@@ -42,7 +42,8 @@
+     "apple,j614s": "MacBook Pro 14-inch (M4 Pro, 2024): M4 and later Macs are not supported"
+   },
+   "developer": {
+-    "apple,j714s": "Untested developer preview: MacBook Pro 14-inch (M5 Pro, 2026), T6050, on macOS 27.3 firmware only; one J714s developer image, not qualified"
++    "apple,j714s": "Untested developer preview: MacBook Pro 14-inch (M5 Pro, 2026), T6050, on macOS 27.3 firmware only; one J714s developer image, not qualified",
++    "apple,k114s": "EXPERIMENTAL boot trial, never booted: MacBook Pro 14-inch OLED (M5 Pro, 2026), K114s, Mac17,13, T6050, board 0x14, on the 26B8125 macOS 27.2 stub; K114s-only Stage 2 (apple,k114s device tree), Wi-Fi off, not qualified"
+   },
+   "untested": {
+     "apple,j433": "Untested: Omarchy Mac previews are not yet qualified on M3 Macs",
+diff --git a/scripts/tests/test_make_unsigned_catalog.py b/scripts/tests/test_make_unsigned_catalog.py
+index fc852d9..9effd66 100644
+--- a/scripts/tests/test_make_unsigned_catalog.py
++++ b/scripts/tests/test_make_unsigned_catalog.py
+@@ -274,7 +274,7 @@ class CatalogGeneratorTests(unittest.TestCase):
+         self.assertIn("apple,j700", manifest["untested"])
+         self.assertEqual(set(manifest["refused"]), {"apple,j575d", "apple,j614s"})
+         # Developer boards reach only a developer build's sealed catalog.
+-        self.assertEqual(set(manifest["developer"]), {"apple,j714s"})
++        self.assertEqual(set(manifest["developer"]), {"apple,j714s", "apple,k114s"})
+         for template in sorted(MANIFEST.parent.glob("release-inputs*.template.json")):
+             identifiers = json.loads(template.read_text())["device_identifiers"]
+             self.assertEqual(
+-- 
+2.54.0 (Apple Git-157)
+

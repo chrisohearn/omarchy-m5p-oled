@@ -1,0 +1,44 @@
+# Reporting upstream
+
+Results and fixes for this model go back to the projects they belong to, through each project's
+normal public channel, from the owner's GitHub account.
+
+## What is sent
+
+1. **Hardware confirmations** for Mac17,13 / `apple,k114s` / board-id 0x14 when this machine
+   actually shows a capability. Each says what was tested, the date, the exact kernel, loader,
+   device tree and firmware revisions, the steps, the result and the limits.
+2. **Minimal fixes** with their source, dependencies, why the K114s needs them, the tests run and
+   the hardware status. A fix that only passed software tests is offered as hardware-untested.
+3. **Regressions or failures** met when applying upstream changes to the K114s, with our own
+   local changes named.
+
+## Rules
+
+- Evidence is labelled: owner-observed (seen or photographed by the owner), agent-run (a command
+  run by the AI agent on the machine or a build host), or emulator/replica. One machine is not an
+  independent reproduction.
+- Nothing is claimed to work on the Mac because it compiled or booted in QEMU.
+- Read the destination's contributing rules, templates and AI policy first. Prefer the existing
+  thread. One canonical report per result, with a cross-link only where needed.
+- Before sending, check the registry below and the destination for an earlier report of the same
+  result. After sending, read the post back and record its URL.
+- Original authors keep their authorship. No `Signed-off-by`, `Tested-by` or legal assent is
+  written on anyone's behalf. A CLA or DCO that needs the owner is the owner's action.
+- Never included: Apple firmware, tickets or calibration, MAC addresses, network names, serial
+  numbers, credentials, backups, unredacted logs or photos.
+- Posts written by the AI agent say so.
+
+## States
+
+`candidate` → `built/tested` → `hardware-confirmed` → `submitted` → `acknowledged` → `merged`.
+The registry is `ledger/outgoing.json`.
+
+## Candidates
+
+| Item | Destination | Depends on | State |
+| --- | --- | --- | --- |
+| K114s boots: NVMe root, keyboard, boot framebuffer; trackpad fails as on K116s; board-id 0x14 gives the N1 platform ID `0x00146050` | aurora-silicon/linux, the hardware directory discussion | nothing further | see `ledger/outgoing.json` |
+| HID product 0x0361 for the Trackpad26 gate of #1830 | aurora-silicon/linux | the r1a kernel moving the pointer on this Mac | candidate |
+| K114s N1, USB-C and SMC device tree sections | aurora-silicon/linux | Wi-Fi associating and a USB device enumerating on this Mac | candidate |
+| `apple,k114s` admission in the installer build | betizzel/omarchy-m5 | the r2 boot | candidate |

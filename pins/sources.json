@@ -1,0 +1,30 @@
+{
+  "evaluated": "2026-11-14",
+  "in_use": {
+    "kernel": {"repository": "https://github.com/aurora-silicon/linux", "commit": "a34d26c255c29bdd5548ace985d0d9c8e083aab1", "plus": "betizzel/omarchy-m5 linux-j714s-27.2.patch as in release omarchy-j714s-3 (v272-4, 19 patches)", "release": "7.3.0-17.v272-4-ARCH"},
+    "kernel_trackpad_r1": {"repository": "https://github.com/aurora-silicon/linux", "pull": 1568, "head": "1e065585d3dabe3aa77dccf5a8e4a9d9f34d2f9c"},
+    "kernel_trackpad_r1a": {"repository": "https://github.com/aurora-silicon/linux", "pull": 1830, "commits": ["07687621d1ce326d88680643245cb99d04b6eeb6", "a68b43218e4143595997c5c792b927daefd3b6fb"], "plus": "HID product 0x0361 admitted beside 0x0362"},
+    "device_tree": {"repository": "https://github.com/aurora-silicon/linux", "base": "t6050-k114s.dts at a34d26c2 with the host iommu-map of b0d53446f84db5a452b782fdca6cb64ae2d1c1b0", "ported_from": "t6050-k116s.dts of pull 1648 at cd2c9f5240787ae93105767445d27274a0a9cdba"},
+    "loader": {"repository": "https://github.com/aurora-silicon/aura", "commit": "22b71758dfd048f6a874073db55fbe6bd1d17f44", "plus": "betizzel/omarchy-m5 aura-j714s-27.2.patch (7 patches)"},
+    "image_and_installer": {"repository": "https://github.com/betizzel/omarchy-m5", "release": "omarchy-j714s-3", "commit": "cfbe533c8b", "set": "j714s-dev-runtime-7cd4572ff7ef", "installer_base": "omacom/omarchy-mac-installer c07e54c2134a8ec1415e7e2b917589ae1d3d7dc9"},
+    "omarchy": {"repository": "https://github.com/omacom/omarchy", "commit": "a948d8a6871f446b335258c827648ac5f4e9428b", "ref": "v4.5.0"},
+    "omarchy_mac_boot": {"repository": "https://github.com/omacom/omarchy-mac-pkgs", "commit": "7e50e937b5f32a62f1c8fee9699467d23faa74d5", "package": "omarchy-mac-boot 20261104-1"},
+    "apple_firmware": {"restore_image": "UniversalMac 27.2 (26B8125)", "identity": "k114sap, board-id 0x14", "note": "extracted on the owner's machine; not in this repository"}
+  },
+  "tracked_heads": {
+    "betizzel/omarchy-m5": "886269a9591486c4cfc45631c07ff20fa291ef00",
+    "aurora-silicon/linux@integration/aurora": "7c71d6df6563fb35a07fb1a5262951d1e6579380",
+    "aurora-silicon/aura@main": "be9469167b919e45dc906e3dba1dda79cbe35dea",
+    "aurora-silicon/m1n1@main": "cf57aebc36b2c51c546d97f09e9bf390ff3f7be7",
+    "aurora-silicon/alarm-aurora": "177d43ca7fd4d083b6f9650c79832d884d3f1cea",
+    "aurora-silicon/aurora-installer": "5fc3946ad858f210ff3e9861b15929564bc56bfb",
+    "omacom/omarchy-mac-installer": "c07e54c2134a8ec1415e7e2b917589ae1d3d7dc9",
+    "omacom/linux-aurora@integration/aurora": "39d5f88ab4e54bb61eecd3fba79e3242005f2f76",
+    "omacom/omarchy-mac": "667500c5eefab78424af66350f5ea7bf40fdede6",
+    "rolotrealanis98/m5pro-linux": "b4b5bd5de6eebd3265e3068e850ffc3bcf40482d",
+    "rolotrealanis98/m4-m5-linux": "a3cd89378acf94edbf3f35186ea010804518b9be",
+    "edimoldovan/linux-aurora@integration/aurora": "31748f0e157720f4a2151b7e314d2722c05cffd4",
+    "nickfoy/omarchy-m3-max": "8c16310fb57886f276d7f99d34833317c345b476"
+  },
+  "next_base_candidate": {"kernel": "aurora-silicon/linux 5b36eff41af7 or later (betizzel v272-5 pins a31b32f72efd, which still contains f8a53798bbfd, reverted upstream by 018c588abf8)", "status": "betizzel v272-5 is built, not booted, not released"}
+}

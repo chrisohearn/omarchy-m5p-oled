@@ -1,0 +1,42 @@
+#!/bin/sh
+# K114s (omarchy-m5p-oled): is the ESP mounted at /boot/efi the one this boot came from?
+#
+# Every Omarchy image carries the same filesystem IDs for the ESP and /boot, and /etc/fstab
+# mounts by them. With a second Omarchy image on a disk the system can see, either pair can
+# end up mounted, and a boot-file update then lands on the other one (betizzel/omarchy-m5
+# docs/duplicate-boot-ids.md). The loader names the ESP it booted from in the device tree.
+#
+#   exit 0  it is that ESP, or it cannot be told (the loader named none, or nothing readable)
+#   exit 3  it is NOT: the loader names another partition
+#
+# The identity test is the one in betizzel/omarchy-m5's aurora-boot-mounts-generator (MIT,
+# firmware j714s10): PARTUUID of the mounted ESP against chosen/asahi,efi-system-partition.
+# Here it only refuses a write; it mounts nothing and writes nothing.
+set -u
+root=${OMARCHY_ROOT:-${K114S_ROOT:-}}
+dt=${K114S_ESP_DT:-/proc/device-tree/chosen/asahi,efi-system-partition}
+say() { echo "k114s-booted-esp: $*"; }
+
+[ -r "$dt" ] || { say "the loader did not name its ESP; not checked"; exit 0; }
+want=$(tr -d '\0' < "$dt" | tr 'A-F' 'a-f')
+case $want in
+  ????????-????-????-????-????????????) ;;
+  *) say "the loader's ESP name is not a partition ID; not checked"; exit 0 ;;
+esac
+
+if [ -n "${K114S_ESP_PARTUUID:-}" ]; then
+  have=$K114S_ESP_PARTUUID
+else
+  source=$(findmnt -n -o SOURCE "$root/boot/efi" 2>/dev/null | head -n 1)
+  [ -n "$source" ] || { say "$root/boot/efi is not a mount point; not checked"; exit 0; }
+  have=$(lsblk -n -o PARTUUID "$source" 2>/dev/null | head -n 1)
+fi
+have=$(printf '%s' "$have" | tr 'A-F' 'a-f')
+[ -n "$have" ] || { say "cannot read the partition ID of the mounted ESP; not checked"; exit 0; }
+
+if [ "$have" = "$want" ]; then
+  say "/boot/efi is the ESP this boot came from ($want)"
+  exit 0
+fi
+say "/boot/efi is partition $have, but this boot came from $want"
+exit 3

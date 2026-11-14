@@ -1,0 +1,62 @@
+331
+#!/bin/bash
+set -euo pipefail
+source $HOME/k114s-build/env.sh
+cd $B
+if [[ ! -d src/r1 ]]; then
+  cp -a --reflink=auto src/base src/r1
+  (cd src/r1 && patch -Np1 --no-backup-if-mismatch < $B/patches/pr1568.patch && touch .k114s-pr1568-applied)
+fi
+cd $B/src/r1
+O=$B/build/r1b; mkdir -p $O
+if [[ ! -f $O/.config ]]; then cp $B/recipe/config $O/.config; kmake O=$O olddefconfig; fi
+python3 $B/recipe/validate-config.py $B/recipe/j714s-required.config $O/.config
+kmake O=$O prepare
+rel=$(kmake -s O=$O kernelrelease); echo "kernelrelease=$rel"
+[[ $rel == 7.3.0-17.v272-4-ARCH ]] || { echo "unexpected kernelrelease"; exit 1; }
+diff <(grep -v -E "^(CONFIG_(CC|LD|RUSTC|CLANG|PAHOLE|AS|TOOLS|GCC)_|# )" $B/recipe/config | sort) <(grep -v -E "^(CONFIG_(CC|LD|RUSTC|CLANG|PAHOLE|AS|TOOLS|GCC)_|# )" $O/.config | sort) > $B/logs/config-diff-r1b.txt || true
+echo "config lines differing (excluding toolchain probes): $(wc -l < $B/logs/config-diff-r1b.txt)"
+time kmake O=$O -j24 Image modules
+kmake O=$O apple/t6050-k114s.dtb apple/t6050-j714s.dtb apple/t6050-k116s.dtb
+echo BUILD-OK
+#!/bin/bash
+# K114s repair kernel variant A: base + aurora-silicon/linux#1830 (merged upstream) + K114s product 0x0361
+set -euo pipefail
+source $HOME/k114s-build/env.sh
+export KBUILD_BUILD_TIMESTAMP="K114S-R1A Sat Nov 14 2026"
+cd $B
+if [[ ! -d src/r1a ]]; then
+  cp -a --reflink=auto src/base src/r1a
+  cd src/r1a
+  patch -Np1 --no-backup-if-mismatch < $B/patches/pr1830.patch
+  python3 - <<"PY"
+p="drivers/hid/hid-magicmouse.c"; s=open(p).read()
+a="#define MTP_TP26_PRODUCT_ID 0x0362\n"
+assert s.count(a)==1
+s=s.replace(a,a+"/* K114s repair: the 14-inch M5 Pro (K114s) trackpad is HID product 0x0361 (dmesg, 2026-11-14) */\n#define MTP_TP26_PRODUCT_ID_K114S 0x0361\n")
+b="hdev->product == MTP_TP26_PRODUCT_ID;"
+assert s.count(b)==1
+s=s.replace(b,"(hdev->product == MTP_TP26_PRODUCT_ID ||\n\t\t\t\t hdev->product == MTP_TP26_PRODUCT_ID_K114S);")
+open(p,"w").write(s)
+PY
+  grep -n "MTP_TP26_PRODUCT_ID" drivers/hid/hid-magicmouse.c
+  cd $B
+fi
+cd $B/src/r1a
+O=$B/build/r1a; mkdir -p $O
+if [[ ! -f $O/.config ]]; then cp $B/recipe/config $O/.config; kmake O=$O olddefconfig; fi
+kmake O=$O prepare
+rel=$(kmake -s O=$O kernelrelease); echo "kernelrelease=$rel"; [[ $rel == 7.3.0-17.v272-4-ARCH ]]
+time kmake O=$O -j16 Image modules
+llvm-strip --strip-debug -o $B/out/hid-magicmouse-r1a.ko $O/drivers/hid/hid-magicmouse.ko
+cp $O/arch/arm64/boot/Image $B/out/Image-k114s-r1a
+echo BUILD-A-OK
+# K114s repair build environment (task-local tools only)
+export B=$HOME/k114s-build
+export PATH=$B/cargo/bin:$B/tools/llvm/usr/bin:$B/tools/lld/usr/bin:$B/tools/bc/usr/bin:/usr/bin:/bin
+export LD_LIBRARY_PATH=$B/tools/llvm/usr/lib:$B/tools/lld/usr/lib
+export LIBCLANG_PATH=$B/tools/llvm/usr/lib
+export RUSTUP_HOME=$B/rustup CARGO_HOME=$B/cargo RUSTUP_TOOLCHAIN=1.98.1
+export ARCH=arm64 KBUILD_BUILD_HOST=archlinux KBUILD_BUILD_USER=linux-aurora
+export KBUILD_BUILD_TIMESTAMP="K114S-R1 Sat Nov 14 2026"
+kmake() { make LLVM=1 BINDGEN="$B/private-bindgen/bin/bindgen" RUSTFMT="$(rustup which --toolchain 1.98.1 rustfmt)" LOCALVERSION= "$@"; }

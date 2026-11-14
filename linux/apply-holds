@@ -1,0 +1,68 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled): put the package holds (back) into /etc/pacman.conf. Idempotent.
+#
+# The hold list is holds.list beside this script, written by linux-persist.sh: every package
+# the installed image pinned itself, plus the K114s boot stack. Omarchy's channel refresh
+# copies a template over pacman.conf; its supported customization point is the user hook
+# pre-refresh-pacman, which calls this (omacom/omarchy bin/omarchy-refresh-pacman).
+#
+#   apply-holds            add the block, or replace it when holds.list changed
+#   apply-holds --remove   take the block out again
+#   apply-holds --show     print the names it would hold
+set -euo pipefail
+root=${K114S_ROOT:-}
+conf=$root/etc/pacman.conf
+list=${K114S_HOLDS_LIST:-$root/usr/local/lib/omarchy-k114s/holds.list}
+CORE="linux-aurora m1n1-aurora uboot-aurora"
+BEGIN='# >>> K114s holds (omarchy-m5p-oled): written by /usr/local/lib/omarchy-k114s/apply-holds; edit holds.list, not these lines'
+END='# <<< K114s holds'
+say() { echo "k114s apply-holds: $*"; }
+die() { say "$*" >&2; exit 1; }
+
+names() { # the hold list, one valid package name per line, with the boot stack always in it
+  {
+    printf '%s\n' $CORE
+    if [[ -f $list ]]; then cat "$list"; fi
+  } | { grep -E '^[A-Za-z0-9@._+-]+$' || true; } | LC_ALL=C sort -u
+}
+strip() { # print FILE without our block
+  awk -v begin="$BEGIN" -v end="$END" '
+    $0 == begin { skip = 1; next }
+    skip && $0 == end { skip = 0; next }
+    !skip { print }' "$1"
+}
+
+[[ -f $conf ]] || die "$conf is missing"
+case ${1:-} in
+  --show) names; exit 0 ;;
+  --remove)
+    grep -Fxq "$BEGIN" "$conf" || exit 0
+    strip "$conf" > "$conf.k114s-new"
+    chmod 644 "$conf.k114s-new"; mv "$conf.k114s-new" "$conf"
+    say "holds removed from $conf"
+    exit 0 ;;
+  "") ;;
+  *) die "unknown argument $1" ;;
+esac
+
+held=$(names | tr '\n' ' ')
+held=${held% }
+block="$BEGIN
+IgnorePkg = $held
+NoUpgrade = usr/local/lib/omarchy-j714s/update-boot-ctxr
+$END"
+if grep -Fxq "$BEGIN" "$conf"; then
+  current=$(awk -v begin="$BEGIN" -v end="$END" '$0 == begin { on = 1 } on { print } on && $0 == end { exit }' "$conf")
+  [[ $current == "$block" ]] && exit 0
+fi
+grep -q '^\[options\]' "$conf" || die "no [options] section in $conf"
+[[ -f $list ]] || say "note: $list is missing, holding the K114s boot stack only" >&2
+tmp=$conf.k114s-new
+strip "$conf" | K114S_BLOCK=$block awk '
+  { print }
+  /^\[options\]/ && !done { print ENVIRON["K114S_BLOCK"]; done = 1 }' > "$tmp"
+grep -Fxq "IgnorePkg = $held" "$tmp" || { rm -f "$tmp"; die "could not add the holds"; }
+chmod 644 "$tmp"
+mv "$tmp" "$conf"
+say "holds in $conf: $held"
+exit 0

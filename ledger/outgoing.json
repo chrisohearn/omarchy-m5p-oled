@@ -1,0 +1,5 @@
+{
+  "policy": "UPSTREAM.md",
+  "states": ["candidate", "built_tested", "hardware_confirmed", "submitted", "acknowledged", "merged"],
+  "reports": []
+}

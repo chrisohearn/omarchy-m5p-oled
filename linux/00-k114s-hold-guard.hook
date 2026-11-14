@@ -1,0 +1,29 @@
+# K114s (omarchy-m5p-oled): keep the boot-chain packages from changing by accident.
+# Installed by linux-persist.sh into /etc/pacman.d/hooks/, which Omarchy's pacman.conf
+# template does not touch. See /usr/local/lib/omarchy-k114s/hold-guard.
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Target = linux-aurora
+Target = m1n1-aurora
+Target = uboot-aurora
+Target = omarchy-aurora-firmware
+Target = omarchy-mac-boot
+Target = limine-mkinitcpio-hook
+
+# A channel switch (Update > Channel) swaps the image's Omarchy build for Edge's omarchy-dev by
+# removing these two. That combination has not run on a K114s; stop it until it has.
+[Trigger]
+Type = Package
+Operation = Remove
+Target = omarchy
+Target = omarchy-settings
+
+[Action]
+Description = K114s: checking that the packages this install is built on are not being changed...
+When = PreTransaction
+Exec = /usr/local/lib/omarchy-k114s/hold-guard
+AbortOnFail
+NeedsTargets

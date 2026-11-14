@@ -1,0 +1,62 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled): what would the next package update change? Read-only.
+#
+#     sudo /usr/local/lib/omarchy-k114s/k114s-edge-check
+#
+# It copies the package database to a private folder, refreshes the repository lists THERE,
+# and asks pacman to solve the full upgrade against the copy. The live package database, the
+# package cache and /etc/pacman.conf are not written; nothing is downloaded but the lists and
+# nothing is installed. The method is nickfoy/omarchy-m3-max's report-only preflight
+# (lib/update_preflight.py), reduced to the K114s question.
+#
+# Limits: pacman's solve shows which packages change. It does not show the files inside them,
+# their install scripts, or removals that a later step of `omarchy update` makes (orphans).
+#
+#   exit 0  the upgrade solves and leaves the K114s boot chain and every held package alone
+#   exit 1  it would change one of them, or the holds are missing from pacman.conf
+#   exit 2  it could not be worked out (no network, or pacman could not solve the upgrade)
+set -euo pipefail
+root=${K114S_ROOT:-}
+lib=$root/usr/local/lib/omarchy-k114s
+conf=$root/etc/pacman.conf
+PACMAN=${K114S_PACMAN:-pacman}
+GUARDED="linux-aurora m1n1-aurora uboot-aurora omarchy-aurora-firmware omarchy-mac-boot limine-mkinitcpio-hook"
+say() { echo "k114s-edge-check: $*"; }
+[[ $(id -u) == 0 || -n ${K114S_ROOT:-} ]] || { say "run with sudo (pacman refreshes repository lists only as root; it writes to a private copy)"; exit 2; }
+
+work=$(mktemp -d /tmp/k114s-edge-check.XXXXXX)
+trap 'rm -rf "$work"' EXIT
+chmod 755 "$work"
+mkdir -p "$work/db" "$work/cache"
+cp -a "$root/var/lib/pacman/local" "$work/db/local"
+before=$("$PACMAN" -Q 2>/dev/null | sha256sum)
+
+if ! "$PACMAN" -Sy --config "$conf" --dbpath "$work/db" --cachedir "$work/cache" --logfile "$work/pacman.log" --noconfirm > "$work/refresh.out" 2>&1; then
+  say "could not refresh the repository lists (network?):"; tail -n 5 "$work/refresh.out"
+  exit 2
+fi
+if ! "$PACMAN" -Sup --config "$conf" --dbpath "$work/db" --cachedir "$work/cache" --logfile "$work/pacman.log" \
+    --print-format '%n %v %r' > "$work/plan" 2> "$work/solve.err"; then
+  say "pacman could not solve the upgrade; nothing would be installed as it stands:"; tail -n 12 "$work/solve.err"
+  exit 2
+fi
+[[ $before == "$("$PACMAN" -Q 2>/dev/null | sha256sum)" ]] || { say "the installed packages changed while this ran; run it again"; exit 2; }
+
+held=$( { if [[ -f $lib/holds.list ]]; then cat "$lib/holds.list"; fi; printf '%s\n' $GUARDED; } | LC_ALL=C sort -u)
+changing=$(awk '{print $1}' "$work/plan" | LC_ALL=C sort -u)
+count=$(grep -c . "$work/plan" || true)
+hit=$(LC_ALL=C comm -12 <(printf '%s\n' "$held") <(printf '%s\n' "$changing") || true)
+status=0
+if [[ -x $lib/apply-holds ]] && ! grep -q '^# >>> K114s holds' "$conf"; then
+  say "the K114s holds are NOT in $conf. Put them back: sudo $lib/apply-holds"
+  status=1
+fi
+if [[ -n $hit ]]; then
+  say "this update WOULD CHANGE held or boot-chain packages:"
+  awk 'NR == FNR { want[$1] = 1; next } ($1 in want) { print "  " $0 }' <(printf '%s\n' "$hit") "$work/plan"
+  status=1
+fi
+say "$count package(s) would change$( ((count)) && echo ':' )"
+sed 's/^/  /' "$work/plan"
+if ((status == 0)); then say "OK: the K114s boot chain and every held package stay as they are"; fi
+exit $status

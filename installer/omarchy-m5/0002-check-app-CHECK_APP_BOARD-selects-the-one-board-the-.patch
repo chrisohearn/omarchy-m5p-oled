@@ -1,0 +1,36 @@
+From 626901f31f719f1cafbd2e5541ec3253f685bb93 Mon Sep 17 00:00:00 2001
+From: k114s-trial <k114s-trial@localhost>
+Date: Fri, 13 Nov 2026 23:55:36 -0700
+Subject: [PATCH 2/2] check-app: CHECK_APP_BOARD selects the one board the
+ sealed catalog must enable (K114s trial)
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ installer/app/check-app.sh | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/installer/app/check-app.sh b/installer/app/check-app.sh
+index 625ce87..37f006c 100755
+--- a/installer/app/check-app.sh
++++ b/installer/app/check-app.sh
+@@ -40,11 +40,14 @@ decoder=$app/Contents/Helpers/omarchy-restore-image
+ [[ $(/usr/bin/lipo -archs "$app/Contents/MacOS/OmarchyAppleInstallerApp") == arm64* ]] || fail "app is not arm64"
+ 
+ python3 - "$release/catalog.json" "$app/Contents/Resources" "$mode" <<'PY'
+-import hashlib, json, pathlib, sys
++import hashlib, json, os, pathlib, sys
+ catalog, resources, mode = json.load(open(sys.argv[1])), pathlib.Path(sys.argv[2]), sys.argv[3]
+ models = catalog["models"]
+-if [m["deviceIdentifier"] for m in models] != ["apple,j714s"] or models[0]["status"] != "enabled":
+-    raise SystemExit("check-app: the sealed catalog must enable exactly apple,j714s")
++board = os.environ.get("CHECK_APP_BOARD", "apple,j714s")
++if board not in ("apple,j714s", "apple,k114s"):
++    raise SystemExit("check-app: CHECK_APP_BOARD must be apple,j714s or apple,k114s")
++if [m["deviceIdentifier"] for m in models] != [board] or models[0]["status"] != "enabled":
++    raise SystemExit("check-app: the sealed catalog must enable exactly " + board)
+ model = models[0]
+ def check(path, digest, size):
+     if not path.is_file() or path.stat().st_size != size:
+-- 
+2.54.0 (Apple Git-157)
+

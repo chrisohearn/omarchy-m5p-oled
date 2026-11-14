@@ -1,0 +1,73 @@
+#!/bin/sh
+# K114s: keep /boot/efi/m1n1/boot-ctxr.bin a K114s-only Aura Stage 2 that carries the pinned
+# K114s device tree, instead of a copy of m1n1/boot.bin (the image's J714s hook copies boot.bin,
+# whose packaged K114s tree lacks what the K114s needs, and Aura then refuses to start Linux).
+#
+# boot.bin is  <Aura Stage 2> <device trees...> <gzip U-Boot>  as update-m1n1 writes it.
+# This writes   <Aura Stage 2> <pinned K114s device tree> <the same gzip U-Boot>.
+# Any doubt leaves the existing boot-ctxr.bin untouched and exits non-zero.
+#
+# To go back to the packaged K114s device tree once upstream carries the fixes:
+#   touch /usr/local/lib/omarchy-k114s/use-packaged-dtb
+set -eu
+root=${OMARCHY_ROOT:-}
+esp=$root/boot/efi/m1n1
+boot=$esp/boot.bin
+lib=$root/usr/local/lib/omarchy-k114s
+# The pinned tree: the copy on the ESP (kept in step with the Stage 2 by the macOS repair tool),
+# else the copy linux-persist.sh installed.
+pinned=$root/boot/efi/k114s-repair/k114s.dtb
+[ -s "$pinned" ] || pinned=$lib/k114s.dtb
+m1n1=$root/usr/lib/asahi-boot/m1n1.bin
+[ -s "$root/usr/lib/asahi-boot/m1n1-ctxr.bin" ] && m1n1_out=$root/usr/lib/asahi-boot/m1n1-ctxr.bin || m1n1_out=$m1n1
+fail() { echo "update-boot-ctxr-k114s: $*; boot-ctxr.bin left as it was" >&2; exit 1; }
+be32() { od -An -tu1 -j "$2" -N 4 "$1" | awk '{print (($1*256+$2)*256+$3)*256+$4}'; }
+magic() { od -An -tx1 -j "$2" -N 4 "$1" | tr -d ' \n'; }
+
+[ -s "$boot" ] || fail "$boot is missing; is the ESP mounted?"
+# Refuse to write to an ESP this boot did not come from (another Omarchy image on a visible disk
+# carries the same filesystem IDs). Exit 3 is the only "no"; anything unknowable passes.
+if [ -x "$lib/k114s-booted-esp" ]; then
+  OMARCHY_ROOT=$root "$lib/k114s-booted-esp" >/dev/null || fail "/boot/efi is not the ESP this boot came from"
+fi
+[ -s "$m1n1" ] || fail "$m1n1 is missing"
+size=$(stat -c %s "$m1n1")
+total=$(stat -c %s "$boot")
+[ "$total" -gt "$size" ] && cmp -s -n "$size" "$m1n1" "$boot" || fail "$boot does not start with $m1n1"
+off=$size
+count=0
+found_off=
+found_len=
+while [ "$(magic "$boot" "$off")" = d00dfeed ]; do
+  len=$(be32 "$boot" $((off + 4)))
+  [ "$len" -ge 40 ] && [ $((off + len)) -le "$total" ] || fail "bad device tree length at $off"
+  if dd if="$boot" bs=1M iflag=skip_bytes,count_bytes skip="$off" count="$len" 2>/dev/null | grep -aq 'apple,k114s'; then
+    found_off=$off; found_len=$len
+  fi
+  off=$((off + len)); count=$((count + 1))
+  [ "$count" -le 512 ] || fail "too many device trees"
+done
+[ "$count" -ge 1 ] || fail "no device trees after the Aura Stage 2"
+[ "$(od -An -tx1 -j "$off" -N 3 "$boot" | tr -d ' \n')" = 1f8b08 ] || fail "no gzip next stage after the device trees"
+
+tmp=$esp/.boot-ctxr.bin.k114s-new
+trap 'rm -f "$tmp" "$tmp.dtb"' EXIT
+if [ -e "$lib/use-packaged-dtb" ]; then
+  [ -n "$found_off" ] || fail "boot.bin has no apple,k114s device tree"
+  dd if="$boot" of="$tmp.dtb" bs=1M iflag=skip_bytes,count_bytes skip="$found_off" count="$found_len" 2>/dev/null
+  dtb=$tmp.dtb
+else
+  dtb=$pinned
+fi
+[ -s "$dtb" ] || fail "$dtb is missing"
+[ "$(magic "$dtb" 0)" = d00dfeed ] && [ "$(be32 "$dtb" 4)" = "$(stat -c %s "$dtb")" ] || fail "$dtb is not one device tree blob"
+grep -aq 'apple,k114s' "$dtb" || fail "$dtb is not an apple,k114s device tree"
+{ cat "$m1n1_out"; cat "$dtb"; tail -c +"$((off + 1))" "$boot"; } >"$tmp"
+out_size=$(stat -c %s "$tmp")
+[ "$out_size" -le 16777216 ] || fail "Stage 2 would exceed Aura's 16 MiB slot"
+[ "$out_size" -eq $(( $(stat -c %s "$m1n1_out") + $(stat -c %s "$dtb") + total - off )) ] || fail "assembled size is wrong"
+sync "$tmp"
+mv -f "$tmp" "$esp/boot-ctxr.bin"
+trap - EXIT
+rm -f "$tmp.dtb"
+echo "update-boot-ctxr-k114s: wrote $esp/boot-ctxr.bin ($out_size bytes, K114s device tree $(sha256sum "$dtb" | cut -c1-16))"

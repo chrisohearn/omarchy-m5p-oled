@@ -1,0 +1,47 @@
+{
+ "schema": 1,
+ "name": "K114s repair r1",
+ "built": "2026-11-14",
+ "target": {
+  "model": "Mac17,13",
+  "compatible": "apple,k114s",
+  "board_id": "0x14",
+  "kernel_release": "7.3.0-17.v272-4-ARCH"
+ },
+ "original_kernel_sha256": "f8efc633d50e1017902f46cdaa9bca25fd5009a866dae78a98a563532718d349",
+ "aura_prefix_bytes": 3997696,
+ "aura_prefix_sha256": "1546dd5079cefe0f9bbdee9d1c95dcdbad39a73ae140612cd6dfab4596c2f7a3",
+ "uboot_trailer_sha256": "9d8dc11ea755e8405a7380683bd82cfeb7391b1fc68245e56e10bf5155a746ad",
+ "stage2_sha256": {
+  "trial1": "2bf4d5f3e1f744e7adc540ddce2fe02be65edfa47848dc79d04069a20df8adef",
+  "r1": "45a5dbef19c14898e73e79a42af360def638c319d14e2bae97a79f7962e4bfb4",
+  "r1-wifi": "65df7de90ea8d22a8b9b5f310617fddbb38fbe01714de8344908feacbb858060",
+  "r1-gp1c": "73c1a960a673e7757f6a2e5949e48fa276be1a8e97515deef06c7f3fb6b73cfe",
+  "image-combined": "3bfbff92990e4846255b9af57f1c73202716b96fcfcf1850316d5d62b4dc5bfa"
+ },
+ "payload": {
+  "Image-k114s-r1": "92eabcf419933567cbe2b781faf9263a1820abe58ac7e04e6078d7cc4d0262e8",
+  "Image-k114s-r1a": "d0c77904c4c1a8312c3ca070173fbd8001cf6faef59f8d236922840cec617e10",
+  "aura-stage2-prefix.bin": "1546dd5079cefe0f9bbdee9d1c95dcdbad39a73ae140612cd6dfab4596c2f7a3",
+  "boot-ctxr-k114s-r1-gp1c.bin": "73c1a960a673e7757f6a2e5949e48fa276be1a8e97515deef06c7f3fb6b73cfe",
+  "boot-ctxr-k114s-r1-wifi.bin": "65df7de90ea8d22a8b9b5f310617fddbb38fbe01714de8344908feacbb858060",
+  "boot-ctxr-k114s-r1.bin": "45a5dbef19c14898e73e79a42af360def638c319d14e2bae97a79f7962e4bfb4",
+  "boot-ctxr-k114s-trial1.bin": "2bf4d5f3e1f744e7adc540ddce2fe02be65edfa47848dc79d04069a20df8adef",
+  "hid-magicmouse-r1.ko": "7ceb1b34c9147b47ef861d7522b26a61b7fb30cf31cfa20bb3852ab7c9bee61a",
+  "hid-magicmouse-r1a.ko": "ce7f6d89ed9abce68d7f75c12c2d9ab3cef626077f3d5b28293f334eccadd718",
+  "k114s-ftab.bin": "9fae426d275637d07751a2fe2deb78079895db4aee8c951542b28312bdba11f5",
+  "t6050-k114s-r1-gp1c.dtb": "285baf26d9f9b962d556668eb719518b5ccaa6a1967bfc2672cf26233970e551",
+  "t6050-k114s-r1-wifi.dtb": "b9ce372f8f757c04d991591ca153201ecf885a940a3c539b8b8ba660795fc680",
+  "t6050-k114s-r1.dtb": "2ea22d26b2a1c81526e77e7f29eaff46def5310a9512be769ff3ed50465f4dd2",
+  "t6050-k114s-trial1.dtb": "a8c82b27b478b61cb8e92f6d06e316ae9c5575207f0fe3fba4e3fb0d9a1d27a9",
+  "tpmtfw-k114s.bin": "fb7b969941a05b145626faa0ecd8951291cedf4b4ca71f23cd2b47ed9d165c9b",
+  "uboot-trailer.gz": "9d8dc11ea755e8405a7380683bd82cfeb7391b1fc68245e56e10bf5155a746ad"
+ },
+ "sources": {
+  "kernel": "base for both: aurora-silicon/linux a34d26c255c29bdd5548ace985d0d9c8e083aab1 + betizzel/omarchy-m5 linux-j714s-27.2.patch (as in omarchy-j714s-3/4); config identical to the installed kernel; clang/LLD 23.1.3, rustc 1.98.1. r1 = base + aurora-silicon/linux#1568 (1e065585d3dabe3aa77dccf5a8e4a9d9f34d2f9c). r1a = base + aurora-silicon/linux#1830 (07687621d1ce326d88680643245cb99d04b6eeb6, a68b43218e4143595997c5c792b927daefd3b6fb, merged upstream) + HID product 0x0361 admitted beside 0x0362.",
+  "device_tree": "base t6050-k114s + host iommu-map (b0d53446) + N1/USB-C/SMC sections of aurora-silicon/linux#1648 (cd2c9f5240787ae93105767445d27274a0a9cdba) with K114s identity (platform id 0x00146050); gp1c variant: trackpad AFE reset as in #1648 377b2a2d / base J714s",
+  "loader": "Aura Stage 2 prefix and U-Boot bytes taken unchanged from the installed image (aura 22b71758 + aura-j714s-27.2.patch)",
+  "wifi_firmware": "UniversalMac_27.2_26B8125_Restore.ipsw, k114sap identity, Firmware/t2026macG2/Release/ftab.bin + centauri.k114sap.im4m (38 segments verified)",
+  "wifi_driver": "apple_centauri_t6050 (already in the installed kernel; autoloads from the root filesystem by PCI id 106b:1900 once the device tree describes the N1); no script change is needed or shipped"
+ }
+}

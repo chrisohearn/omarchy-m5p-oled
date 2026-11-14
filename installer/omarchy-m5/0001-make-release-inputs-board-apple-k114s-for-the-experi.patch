@@ -1,0 +1,47 @@
+From ee5b6c16f9525b13e788f00cf87610c006069475 Mon Sep 17 00:00:00 2001
+From: k114s-trial <k114s-trial@localhost>
+Date: Fri, 13 Nov 2026 23:36:32 -0700
+Subject: [PATCH 1/2] make-release-inputs: --board apple,k114s for the
+ experimental K114s developer build
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ installer/app/make-release-inputs.py | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/installer/app/make-release-inputs.py b/installer/app/make-release-inputs.py
+index 61e05fe..fdd788b 100755
+--- a/installer/app/make-release-inputs.py
++++ b/installer/app/make-release-inputs.py
+@@ -45,6 +45,10 @@ import tempfile
+ 
+ BOARD = "apple,j714s"
+ DEVICE_CLASS = "j714sap"
++# --board selects one of these; each is a developer-only single-board build.
++# apple,k114s is the EXPERIMENTAL K114s boot trial (MacBook Pro 14-inch OLED,
++# M5 Pro, Mac17,13, board 0x14): never booted before this trial.
++BOARDS = {"apple,j714s": "j714sap", "apple,k114s": "k114sap"}
+ READ_BLOCK = 8 * 1024 * 1024
+ VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+ EVIDENCE = re.compile(r"^[0-9a-z.-]+$")
+@@ -258,6 +262,8 @@ def place(source: Path, target: Path, link: bool) -> None:
+ def main() -> None:
+     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+     parser.add_argument("--tree", type=Path, required=True, help="patched installer tree (with patches-j714s)")
++    parser.add_argument("--board", choices=sorted(BOARDS), default="apple,j714s",
++                        help="the one developer board this build admits (default apple,j714s)")
+     parser.add_argument("--mode", choices=("offline", "online"), required=True)
+     parser.add_argument("--engine", type=Path, required=True)
+     parser.add_argument("--metadata", type=Path, required=True, help="the image's installer_data.json")
+@@ -281,6 +287,8 @@ def main() -> None:
+     key.add_argument("--generate-throwaway-key", action="store_true")
+     arguments = parser.parse_args()
+ 
++    global BOARD, DEVICE_CLASS
++    BOARD, DEVICE_CLASS = arguments.board, BOARDS[arguments.board]
+     tree = arguments.tree.resolve()
+     lock = check_tree(tree)
+     engine = regular(arguments.engine, "engine")
+-- 
+2.54.0 (Apple Git-157)
+
