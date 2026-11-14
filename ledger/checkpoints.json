@@ -1,35 +1,87 @@
 {
-  "target": {"model": "Mac17,13", "compatible": "apple,k114s", "board_id": "0x14", "soc": "T6050", "macos": "27.3 (26C5035r)", "linux_stub_firmware": "27.2 (26B8125)"},
-  "states": ["evaluated", "integrated", "built_tested", "staged", "applied", "awaiting_reboot", "hardware_verified"],
+  "target": {
+    "model": "Mac17,13",
+    "compatible": "apple,k114s",
+    "board_id": "0x14",
+    "soc": "T6050",
+    "macos": "27.3 (26C5035r)",
+    "linux_stub_firmware": "27.2 (26B8125)"
+  },
+  "states": [
+    "evaluated",
+    "integrated",
+    "built_tested",
+    "staged",
+    "applied",
+    "awaiting_reboot",
+    "hardware_verified"
+  ],
   "changes": [
     {
       "id": "trial-1",
       "what": "First boot: betizzel release 3 image with apple,k114s admitted in the installer build; preliminary K114s device tree, PCIe host disabled",
-      "evaluated": "2026-11-13", "integrated": "2026-11-13", "built_tested": "2026-11-13", "staged": "2026-11-13", "applied": "2026-11-13",
+      "evaluated": "2026-11-13",
+      "integrated": "2026-11-13",
+      "built_tested": "2026-11-13",
+      "staged": "2026-11-13",
+      "applied": "2026-11-13",
       "hardware_verified": "2026-11-14, owner-observed: boots to Hyprland from the encrypted NVMe root, built-in keyboard works; trackpad fails (invalid report_size 524288, product 0x0361); no network (radio and USB off in that tree)"
     },
     {
       "id": "r1",
       "what": "Trackpad (two kernels), N1 Wi-Fi/Bluetooth, USB-C host, SMC sensors, K114s Wi-Fi firmware, macOS apply/rollback tool",
       "bundle_sha256sums_sha256": "see releases/r1/SHA256SUMS",
-      "evaluated": "2026-11-14", "integrated": "2026-11-14",
+      "evaluated": "2026-11-14",
+      "integrated": "2026-11-14",
       "built_tested": "2026-11-14: kernels boot in QEMU; macOS tool 67 replica tests; linux-persist 36, hook 14 fake-root tests",
-      "staged": "2026-11-14", "applied": null, "awaiting_reboot": null, "hardware_verified": null,
+      "staged": "2026-11-14",
+      "applied": null,
+      "awaiting_reboot": null,
+      "hardware_verified": null,
       "note": "Superseded as the thing to apply by r2, which carries the same boot files"
     },
     {
       "id": "r2",
       "what": "r1's boot files unchanged; Linux-side update handling: full pinned set held across a channel refresh, pre-transaction hold guard (boot chain, and the Omarchy swap a channel switch makes), owner-boot-chain declaration, explicit install reasons, booted-ESP check, read-only upgrade solve, state record",
-      "sources": ["betizzel/omarchy-m5 0abeef96 (booted-ESP identity test)", "omacom/omarchy a948d8a6 (refresh and update flow)", "omacom/omarchy-mac-pkgs 7e50e937 (update-verify, owner-boot-chain)", "nickfoy/omarchy-m3-max 8c16310 (preflight method)"],
+      "sources": [
+        "betizzel/omarchy-m5 0abeef96 (booted-ESP identity test)",
+        "omacom/omarchy a948d8a6 (refresh and update flow)",
+        "omacom/omarchy-mac-pkgs 7e50e937 (update-verify, owner-boot-chain)",
+        "nickfoy/omarchy-m3-max 8c16310 (preflight method)"
+      ],
       "bundle_sha256sums_sha256": "see manifests/r2.json and docs/edge-update-path.md",
-      "evaluated": "2026-11-14", "integrated": "2026-11-14",
+      "evaluated": "2026-11-14",
+      "integrated": "2026-11-14",
       "built_tested": "2026-11-14: macOS tool 85 replica tests (including on top of r1); linux-persist 79 and hook 18 fake-root tests; isolation run inside a copy of the installed image against the live Edge repositories (docs/edge-update-path.md)",
-      "staged": "2026-11-14", "applied": null, "awaiting_reboot": null, "hardware_verified": null
+      "staged": "2026-11-14",
+      "applied": null,
+      "awaiting_reboot": null,
+      "hardware_verified": null,
+      "note": "Its check on the real ESP stopped on 2026-11-14 20:15 UTC: need about 477 MB, have 139 MB (524 MB partition). Nothing written. Superseded by r2c."
+    },
+    {
+      "id": "r2c",
+      "what": "r2 compact: ONE repair kernel image (r1 by default, r1a by command) with the K114s Wi-Fi firmware inside its initramfs at /vendorfw (copied to /lib/firmware/vendor by the image's omarchy-vendorfw.service); vendor firmware archives untouched; exact step-by-step space plan; space-safe rollback order; Linux finish step takes kernel and firmware from the image by checked byte ranges; low-space package guard",
+      "bundle_sha256sums_sha256": "cd45a81aa79f247b0b2002731d671c31571dd8485094c7fdab6e6fa511180ac8",
+      "evaluated": "2026-11-14",
+      "integrated": "2026-11-14",
+      "built_tested": "2026-11-14: 45 tests on a FAT32 image with the live ESP's 34 files, size, 4 KB clusters and free space (r2's refusal reproduced; check, apply, kernel swap, rollback, 1 MB-short refusal, interrupted write); linux-persist 95 and hook 18 fake-root tests with images built by the tool; QEMU boots of r1 and r1a: firmware and module arrive intact in the initramfs, 77 modules load",
+      "space_plan": "live ESP 138,522,624 bytes free: peak 120,954,880 + 8 MiB margin; 21.9 MB free afterwards",
+      "staged": "2026-11-14",
+      "applied": null,
+      "awaiting_reboot": null,
+      "hardware_verified": null
     },
     {
       "id": "r3",
       "what": "Display coprocessor and GPU at K116s parity, with the sleep and lid fixes (docs/matrix.md, 'Next candidate')",
-      "evaluated": "2026-11-14", "integrated": null, "built_tested": null, "staged": null, "applied": null, "awaiting_reboot": null, "hardware_verified": null
+      "evaluated": "2026-11-14",
+      "integrated": null,
+      "built_tested": null,
+      "staged": null,
+      "applied": null,
+      "awaiting_reboot": null,
+      "hardware_verified": null
     }
   ]
 }

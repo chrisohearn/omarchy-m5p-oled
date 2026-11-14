@@ -19,7 +19,10 @@ boot, input, radios, display, graphics, media, sound, power, updates.
   rollback tool that runs from macOS. Kept as delivered in `releases/r1/`.
 - **Bundle r2** (2026-11-14): r1's boot files unchanged, plus update handling that keeps the K114s
   boot chain intact through `omarchy update` and a channel refresh.
-- **Not yet proven on hardware:** everything in r1 and r2. The first test is the next Linux boot.
+- **Bundle r2c** (2026-11-14): r2 did not fit the 524 MB EFI partition (about 139 MB free). r2c
+  carries the same fixes in about 112 MB: one repair kernel image with the Wi-Fi firmware inside
+  its own initramfs. See [docs/bundle-r2c.md](docs/bundle-r2c.md).
+- **Not yet proven on hardware:** everything in r1, r2 and r2c. The first test is the next Linux boot.
 - Everything else (display coprocessor, GPU, sound, camera, sleep, ...) is tracked per subsystem
   in [docs/matrix.md](docs/matrix.md), with the next candidate planned there.
 

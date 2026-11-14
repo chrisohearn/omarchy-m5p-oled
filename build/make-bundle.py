@@ -21,9 +21,9 @@ import shutil
 import sys
 import time
 
-REVISION = "r2"
+REVISION = "r2c"
 LINUX = ("linux-persist.sh", "update-boot-ctxr-k114s", "apply-holds", "hold-guard", "00-k114s-hold-guard.hook",
-         "k114s-booted-esp", "k114s-edge-check", "README-linux.txt")
+         "esp-space-guard", "01-k114s-esp-space.hook", "k114s-booted-esp", "k114s-edge-check", "README-linux.txt")
 
 
 def sha(path):
@@ -61,13 +61,17 @@ def main(repo, payload_dir, out):
     manifest["name"] = "K114s repair " + REVISION
     manifest["revision"] = REVISION
     manifest["built"] = time.strftime("%Y-%m-%d")
-    manifest["boot_files"] = "identical to r1 (same payload hashes)"
+    manifest["boot_files"] = ("same payload as r1 and r2; ONE repair kernel image is built on the Mac from it, "
+                              "with the K114s Wi-Fi firmware inside that image's initramfs")
     manifest["linux"] = {name: sha(os.path.join(out, "linux", name)) for name in LINUX}
     sources = dict(base["sources"])
     sources["linux_side"] = ("omarchy-m5p-oled linux/: hold set and guard hook, owner-boot-chain declaration "
                              "(omacom/omarchy-mac-pkgs 7e50e937 update-verify), booted-ESP check adapted from "
                              "betizzel/omarchy-m5 aurora-boot-mounts-generator (0abeef96, MIT), read-only upgrade "
                              "solve after nickfoy/omarchy-m3-max lib/update_preflight.py (8c16310)")
+    sources["wifi_firmware_delivery"] = ("vendorfw/apple/centauri/k114s-ftab.bin in the repair kernel's initramfs; the image's "
+                                         "omarchy-vendorfw.service (omacom/omarchy-mac-pkgs 7e50e937) copies /vendorfw to "
+                                         "/lib/firmware/vendor before switch_root, the kernel's first firmware path")
     manifest["sources"] = sources
     with open(os.path.join(out, "manifest.json"), "w") as stream:
         json.dump(manifest, stream, indent=1)

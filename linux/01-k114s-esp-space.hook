@@ -1,0 +1,14 @@
+# K114s (omarchy-m5p-oled): no package changes while the EFI partition is nearly full.
+# Installed by linux-persist.sh into /etc/pacman.d/hooks/. See /usr/local/lib/omarchy-k114s/esp-space-guard.
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Target = *
+
+[Action]
+Description = K114s: checking free space on the EFI partition...
+When = PreTransaction
+Exec = /usr/local/lib/omarchy-k114s/esp-space-guard
+AbortOnFail

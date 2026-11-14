@@ -1,4 +1,4 @@
 #!/bin/bash
-# K114s repair, bundle r2 (macOS side). Usage: sudo ./k114s-repair status|check|apply|rollback [...]
+# K114s repair, bundle r2c (macOS side). Usage: sudo ./k114s-repair status|check|apply|kernel|stage2|default|rollback [...]
 here=$(cd -- "$(dirname -- "$0")" && pwd)
 exec /usr/bin/python3 -I "$here/tools/k114s_repair.py" "$@"

@@ -1,0 +1,21 @@
+#!/bin/sh
+# K114s (omarchy-m5p-oled): pacman PreTransaction hook, AbortOnFail (01-k114s-esp-space.hook).
+#
+# Stops package changes while the EFI partition has too little room. Package updates can rebuild
+# the 80 MB boot image on it (mkinitcpio and the Limine hooks) and copy it for snapshots; on a
+# nearly full partition that copy would fail half-way. pacman runs this before it changes
+# anything, so a stop leaves the system as it was.
+#
+# To go ahead anyway:  sudo touch /etc/omarchy-k114s/allow-low-esp   and remove it afterwards.
+root=${K114S_ROOT:-}
+min=${K114S_ESP_MIN_FREE:-104857600}
+[ -e "$root/etc/omarchy-k114s/allow-low-esp" ] && exit 0
+free=$(df -B1 --output=avail "$root/boot/efi" 2>/dev/null | tail -n 1 | tr -d ' ')
+case $free in '' | *[!0-9]*) exit 0 ;; esac
+[ "$free" -ge "$min" ] && exit 0
+cat >&2 <<MSG
+K114s space guard: stopped. The EFI partition (/boot/efi) has $((free / 1000000)) MB free, and a package
+update can rebuild an 80 MB boot image there; it needs at least $((min / 1000000)) MB. Nothing has been changed.
+This is expected on this Mac until the EFI partition has more room.
+MSG
+exit 1

@@ -56,6 +56,11 @@ if [[ -n $hit ]]; then
   awk 'NR == FNR { want[$1] = 1; next } ($1 in want) { print "  " $0 }' <(printf '%s\n' "$hit") "$work/plan"
   status=1
 fi
+esp_free=$(df -B1 --output=avail "$root/boot/efi" 2>/dev/null | tail -n 1 | tr -d ' ')
+if [[ $esp_free =~ ^[0-9]+$ ]] && (( esp_free < 104857600 )); then
+  say "the EFI partition has $((esp_free / 1000000)) MB free: the space guard stops package changes until it has 100 MB"
+  status=1
+fi
 say "$count package(s) would change$( ((count)) && echo ':' )"
 sed 's/^/  /' "$work/plan"
 if ((status == 0)); then say "OK: the K114s boot chain and every held package stay as they are"; fi

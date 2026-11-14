@@ -195,13 +195,16 @@ def newc_parse(data):
 
 
 def cpio_make(items):
-    """items: [(arcname, bytes)] -> newc archive of regular files (parents must exist already)."""
+    """items: [(arcname, bytes)] -> newc archive. DATA None makes a directory (the kernel's
+    initramfs unpacker does not create missing parents, so list new directories first)."""
     out = b""
     for index, (name, data) in enumerate(items):
         if name.startswith("/") or ".." in name.split("/"):
             fail("bad archive name " + name)
         mode = 0o100644
-        if name.endswith("+x"):  # ARCNAME+x: an executable (used by the QEMU test init only)
+        if data is None:
+            mode, data = 0o040755, b""
+        elif name.endswith("+x"):  # ARCNAME+x: an executable (used by the QEMU test init only)
             name, mode = name[:-2], 0o100755
         out += newc_entry(name, data, mode, 0x4B114500 + index)
     out += newc_entry("TRAILER!!!", b"", 0, 0)
