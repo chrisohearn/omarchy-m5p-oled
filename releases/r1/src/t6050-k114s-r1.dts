@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/* K114s repair r1: trial 1 plus the N1, two USB-C host ports and SMC sensors. */
+#define K114S_R1_N1
+#define K114S_R1_USB
+#include "t6050-k114s-common.dtsi"

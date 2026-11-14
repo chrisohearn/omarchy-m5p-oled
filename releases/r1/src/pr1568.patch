@@ -1,0 +1,421 @@
+From d2ba21552e33ba16d11a5c58c51a8746c7b38d09 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 10:53:52 -0600
+Subject: [PATCH 1/4] HID: dockchannel-hid: clamp oversized Report Size items
+
+The multi-touch interface of the 14-inch M5 Max MacBook Pro (t6050)
+declares its raw touch report as a single Report Size item of 0x80000
+bits. hid-core rejects any Report Size above 16384 with "invalid
+report_size 524288", so the trackpad never registered although the
+firmware, the interface and the keyboard all came up.
+
+hid-magicmouse consumes these reports in raw_event() and never uses the
+parsed field layout. Clamp each Report Size item in the copied descriptor
+to the hid-core limit before parsing, and log the clamp once per item.
+
+A KUnit case feeds a descriptor with a long item whose data looks like a
+Report Size prefix, a normal Report Size and the oversized one, and checks
+that only the oversized item changes.
+
+Signed-off-by: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+---
+ .../dockchannel-hid-parser-test.c             | 28 +++++++++++
+ drivers/hid/dockchannel-hid/dockchannel-hid.c | 46 +++++++++++++++++++
+ 2 files changed, 74 insertions(+)
+
+diff --git a/drivers/hid/dockchannel-hid/dockchannel-hid-parser-test.c b/drivers/hid/dockchannel-hid/dockchannel-hid-parser-test.c
+index 64fde481641cd..9a8e2e897c215 100644
+--- a/drivers/hid/dockchannel-hid/dockchannel-hid-parser-test.c
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid-parser-test.c
+@@ -170,6 +170,33 @@ static void dchid_init_descriptor_test(struct kunit *test)
+ 	KUNIT_EXPECT_MEMEQ(test, iface->hid_desc, msg.descriptor, sizeof(msg.descriptor));
+ }
+ 
++/* Only real Report Size items above the hid-core limit change. */
++static void dchid_report_size_clamp_test(struct kunit *test)
++{
++	struct dchid_iface *iface = test->priv;
++	static const u8 want[] = {
++		0xfe, 0x02, 0x00, 0x77, 0x00,	/* long item, data looks like Report Size */
++		0x75, 0x08,			/* Report Size (8) */
++		0x77, 0x00, 0x40, 0x00, 0x00,	/* Report Size (0x80000), now 16384 */
++		0x95, 0x01,			/* Report Count (1) */
++	};
++	struct {
++		struct dchid_init_hdr hdr;
++		struct dchid_init_block_hdr block;
++		u8 descriptor[sizeof(want)];
++	} __packed msg = {
++		.hdr = { .iface = 1, .more_packets = 1 },
++		.block = { .type = INIT_HID_DESCRIPTOR, .length = sizeof(want) },
++		.descriptor = { 0xfe, 0x02, 0x00, 0x77, 0x00, 0x75, 0x08,
++				0x77, 0x00, 0x00, 0x08, 0x00, 0x95, 0x01 },
++	};
++
++	dchid_handle_init(iface->dchid, &msg, sizeof(msg));
++	KUNIT_ASSERT_NOT_NULL(test, iface->hid_desc);
++	KUNIT_EXPECT_EQ(test, iface->hid_desc_len, sizeof(want));
++	KUNIT_EXPECT_MEMEQ(test, iface->hid_desc, want, sizeof(want));
++}
++
+ static void dchid_packet_checksum_test(struct kunit *test)
+ {
+ 	struct dchid_hdr hdr = { .hdr_len = sizeof(hdr), .length = 8 };
+@@ -265,6 +292,7 @@ static struct kunit_case dchid_parser_cases[] = {
+ 	KUNIT_CASE(dchid_init_bounds_test),
+ 	KUNIT_CASE(dchid_short_input_test),
+ 	KUNIT_CASE(dchid_init_descriptor_test),
++	KUNIT_CASE(dchid_report_size_clamp_test),
+ 	KUNIT_CASE(dchid_packet_checksum_test),
+ 	KUNIT_CASE(dchid_ring_wrap_test),
+ 	KUNIT_CASE(dchid_ring_bad_header_test),
+diff --git a/drivers/hid/dockchannel-hid/dockchannel-hid.c b/drivers/hid/dockchannel-hid/dockchannel-hid.c
+index a752c224959de..9ae3ae3ffa168 100644
+--- a/drivers/hid/dockchannel-hid/dockchannel-hid.c
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid.c
+@@ -977,6 +977,51 @@ static int dchid_create_interface(struct dchid_iface *iface)
+ 	return queue_work(iface->dchid->new_iface_wq, &iface->create_work);
+ }
+ 
++/* hid-core rejects any Report Size above this (see hid_parser_global()). */
++#define DCHID_MAX_REPORT_SIZE	16384
++
++/*
++ * The T6050 multi-touch firmware declares its raw touch report as one item of
++ * 0x80000 bits. The magicmouse driver reads those reports in raw_event() and
++ * never looks at the field layout, so clamp every Report Size item to what
++ * hid-core accepts instead of failing the whole interface.
++ */
++static void dchid_clamp_report_sizes(struct dchid_iface *iface, u8 *desc, size_t len)
++{
++	size_t i = 0;
++
++	while (i < len) {
++		u8 prefix = desc[i];
++		size_t n = prefix & 3;
++		u32 val = 0;
++		size_t j;
++
++		if (prefix == 0xfe) {
++			if (i + 1 >= len)
++				return;
++			i += 3 + desc[i + 1];
++			continue;
++		}
++		if (n == 3)
++			n = 4;
++		if (i + 1 + n > len)
++			return;
++
++		if ((prefix & 0xfc) == 0x74 && n >= 2) {
++			for (j = 0; j < n; j++)
++				val |= (u32)desc[i + 1 + j] << (8 * j);
++			if (val > DCHID_MAX_REPORT_SIZE) {
++				dev_info(iface->dchid->dev,
++					 "%s: clamping Report Size %u to %u\n",
++					 iface->name, val, DCHID_MAX_REPORT_SIZE);
++				for (j = 0; j < n; j++)
++					desc[i + 1 + j] = (DCHID_MAX_REPORT_SIZE >> (8 * j)) & 0xff;
++			}
++		}
++		i += 1 + n;
++	}
++}
++
+ static void dchid_handle_descriptor(struct dchid_iface *iface, void *hid_desc, size_t desc_len)
+ {
+ 	if (iface->hid) {
+@@ -990,6 +1035,7 @@ static void dchid_handle_descriptor(struct dchid_iface *iface, void *hid_desc, s
+ 		return;
+ 
+ 	iface->hid_desc_len = desc_len;
++	dchid_clamp_report_sizes(iface, iface->hid_desc, desc_len);
+ }
+ 
+ static void dchid_handle_ready(struct dockchannel_hid *dchid, void *data, size_t length)
+
+From 5497fae9e4307a3b3b1feb3bc81650212c23023f Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 10:53:52 -0600
+Subject: [PATCH 2/4] HID: magicmouse: do not mark the MTP trackpad as a direct
+ device
+
+The K114c multi-touch descriptor has a Digitizer-page field under a Mouse
+application. hid-input reads that as a pen and sets INPUT_PROP_DIRECT, and
+udev then tags the trackpad as a touchscreen instead of a touchpad. The
+pad is an indirect pointing device: clear the property.
+
+Signed-off-by: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+---
+ drivers/hid/hid-magicmouse.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/hid/hid-magicmouse.c b/drivers/hid/hid-magicmouse.c
+index e7373d36b141b..0a151b5a42bbf 100644
+--- a/drivers/hid/hid-magicmouse.c
++++ b/drivers/hid/hid-magicmouse.c
+@@ -1355,6 +1355,12 @@ static int magicmouse_setup_input_mtp(struct input_dev *input,
+ 	int mt_flags = 0;
+ 	struct magicmouse_sc *msc = hid_get_drvdata(hdev);
+ 
++	/*
++	 * The K114c descriptor puts a Digitizer-page field under a Mouse
++	 * application. hid-input takes that for a pen and sets DIRECT, which
++	 * makes udev call the pad a touchscreen. This is an indirect touchpad.
++	 */
++	__clear_bit(INPUT_PROP_DIRECT, input->propbit);
+ 	__set_bit(INPUT_PROP_BUTTONPAD, input->propbit);
+ 	/* The C1FE controller reports no force: it is not a pressure pad. */
+ 	if (!msc->mtp_c1fe)
+
+From 1f586b0ef993e6ec458d38a5a4b3f370bc5305b2 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 10:53:52 -0600
+Subject: [PATCH 3/4] HID: magicmouse: drop the GD Mouse usages on dockchannel
+ MTP devices
+
+The dockchannel MTP descriptor of the K114c opens with a Generic Desktop
+Mouse collection next to the multi-touch part. hid-input maps its
+buttons and axes, so the input device is a mouse and a multi-touch pad
+at once, and libinput refuses that hybrid.
+
+raw_event() drives every event of these devices. Ignore the usages of
+the Mouse application on dockchannel MTP devices so the input device is
+a plain touchpad. The keyboard interface is a GD Keyboard and is not
+affected.
+
+Signed-off-by: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+---
+ drivers/hid/hid-magicmouse.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/drivers/hid/hid-magicmouse.c b/drivers/hid/hid-magicmouse.c
+index 0a151b5a42bbf..931bfa1db31dd 100644
+--- a/drivers/hid/hid-magicmouse.c
++++ b/drivers/hid/hid-magicmouse.c
+@@ -1495,6 +1495,17 @@ static int magicmouse_input_mapping(struct hid_device *hdev,
+ 	if (!msc->input)
+ 		msc->input = hi->input;
+ 
++	/*
++	 * The dockchannel MTP descriptors (K114c and later) open with a GD
++	 * Mouse collection. raw_event() drives the pad, and libinput refuses
++	 * a mouse and multi-touch hybrid, so drop the Mouse usages. The
++	 * keyboard interface is a GD Keyboard, and kiwi never gets here
++	 * (type guard in magicmouse_probe()).
++	 */
++	if (hdev->bus == BUS_HOST && !strncmp(hdev->name, "Apple MTP", 9) &&
++	    field->application == HID_GD_MOUSE)
++		return -1;
++
+ 	/* Magic Trackpad does not give relative data after switching to MT */
+ 	if ((hi->input->id.product == USB_DEVICE_ID_APPLE_MAGICTRACKPAD ||
+ 	     hi->input->id.product == USB_DEVICE_ID_APPLE_MAGICTRACKPAD2 ||
+
+From 1e065585d3dabe3aa77dccf5a8e4a9d9f34d2f9c Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 10:53:53 -0600
+Subject: [PATCH 4/4] HID: magicmouse: parse the 0x5a MTP report of the K114c
+
+The K114c MTP firmware (personality K2C1, "AppleMTPFirmwareMac-6320.86.1")
+does not send the 0x75 report that magicmouse registers. It sends report
+0x5a. hid_get_report() finds no report with that id, so hid_input_report()
+returned -1 for every packet and the trackpad never produced an input
+event, although the dockchannel interrupt fired on every touch.
+
+Register 0x5a next to 0x75 and parse it on dockchannel devices. 0x75
+devices keep the old parser.
+
+Report layout. Offsets are bytes from the report id, little endian:
+
+  0       report id, 0x5a
+  1-47    firmware header: counter, timestamp. Not used.
+  48      contact section tag, 0x02
+  49      section header size, 8
+  50      contact record size, 48
+  51      section payload size, header size + count * record size
+  53      number of contact records
+  59      bit 4: physical button
+  60      start of the first record
+  total   113 + 48 * count bytes, so 113, 161, 209, 257 for 0 to 3 contacts
+
+Contact record, 48 bytes:
+
+  +1      tracking id, rolling
+  +2      phase: 1 start, 2-3 approach, 4 touching, 5-7 lifting, 0 gone
+  +5      f32 x, in micrometres
+  +9      f32 y
+  +13     f32 velocity x
+  +17     f32 velocity y
+  +21     f32 major axis
+  +25     f32 minor axis
+  +29     three f32 whose meaning is not known
+  +41     f32 force, 0 to about 840 at a hard click
+  +45     three bytes, not used
+
+A contact counts in phases 3 and 4. The floats are converted by hand
+because the kernel avoids the FPU. Positions and axes go out in tens of
+micrometres, which fits the J314 ranges the input device already
+advertises.
+
+The layout was read from kprobe captures of hid_input_report() on a 14-inch
+M5 Max MacBook Pro with one, two and three fingers and clicks. With the
+parser loaded, the input device reported 929 frames, X -5896 to 5875, four
+clicks and the two-finger tool bit. The button bit and the phase rule are
+read from those captures, not from documentation.
+
+Signed-off-by: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+---
+ drivers/hid/hid-magicmouse.c | 118 ++++++++++++++++++++++++++++++++++-
+ 1 file changed, 117 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/hid/hid-magicmouse.c b/drivers/hid/hid-magicmouse.c
+index 931bfa1db31dd..08e245039ffcb 100644
+--- a/drivers/hid/hid-magicmouse.c
++++ b/drivers/hid/hid-magicmouse.c
+@@ -171,6 +171,7 @@ MODULE_PARM_DESC(haptic_pulse_gap_ms, "milliseconds between pulses when more tha
+ #define SPI_REPORT_ID      0x02
+ #define SPI_RESET_REPORT_ID 0x60
+ #define MTP_REPORT_ID      0x75
++#define MTP_V2_REPORT_ID   0x5a
+ #define SENSOR_DIMENSIONS_REPORT_ID 0xd9
+ #define USB_BATTERY_TIMEOUT_SEC 60
+ 
+@@ -1123,6 +1124,116 @@ static int magicmouse_raw_event_mtp(struct hid_device *hdev,
+ 	return 1;
+ }
+ 
++/*
++ * The K114c MTP firmware (personality K2C1) sends report 0x5a. Its contact
++ * section sits at a fixed offset and holds 48-byte records of IEEE 754
++ * floats, in micrometres. All offsets are bytes from the report id.
++ *
++ *   48       section tag, 0x02
++ *   49       section header size (8)
++ *   50       contact record size (48)
++ *   51       section payload size, header + count * record size
++ *   53       number of contact records
++ *   59       bit 4: physical button
++ *   52       section header, 8 bytes, then count records of 48 bytes:
++ *   record n:
++ *     +1       tracking id, rolling
++ *     +2       phase: 1 start, 2-3 approach, 4 touching, 5-7 lifting, 0 gone
++ *     +5       float x, y; velocity x, y; major, minor axis; three unnamed
++ *              floats; force
++ */
++#define MTP_V2_SECTION		48
++#define MTP_V2_SECTION_TAG	0x02
++#define MTP_V2_COUNT		53
++#define MTP_V2_BUTTONS		59
++#define MTP_V2_BUTTON_MASK	0x10
++#define MTP_V2_PAYLOAD		52
++#define MTP_V2_RECORD_SIZE	48
++#define MTP_V2_PHASE_TOUCH	3
++#define MTP_V2_PHASE_LEAVE	5
++
++enum { MTP_V2_X = 5, MTP_V2_Y = 9, MTP_V2_MAJOR = 21, MTP_V2_MINOR = 25, MTP_V2_FORCE = 41 };
++
++/* Integer part of an IEEE 754 single, without touching the FPU. */
++static int magicmouse_f32_to_int(const u8 *p)
++{
++	u32 bits = get_unaligned_le32(p);
++	int exp = (int)((bits >> 23) & 0xff) - 127;
++	u32 mant = (bits & 0x7fffff) | 0x800000;
++	u32 v;
++
++	if (exp < 0 || exp > 30)
++		return 0;
++	v = exp >= 23 ? mant << (exp - 23) : mant >> (23 - exp);
++	return (bits >> 31) ? -(int)v : (int)v;
++}
++
++static int magicmouse_raw_event_mtp_v2(struct hid_device *hdev, u8 *data, int size)
++{
++	struct magicmouse_sc *msc = hid_get_drvdata(hdev);
++	struct input_dev *input = msc->input;
++	int count, i, n = 0;
++	int major[MAX_CONTACTS], minor[MAX_CONTACTS], force[MAX_CONTACTS];
++	u32 pressure = 0;
++
++	/* The button byte is the last fixed field before the records. */
++	if (size <= MTP_V2_BUTTONS || data[MTP_V2_SECTION] != MTP_V2_SECTION_TAG ||
++	    data[MTP_V2_SECTION + 2] < MTP_V2_FORCE + 4)
++		return 0;
++
++	count = data[MTP_V2_COUNT];
++	if (count > MAX_CONTACTS ||
++	    data[MTP_V2_SECTION + 3] !=
++	    data[MTP_V2_SECTION + 1] + count * data[MTP_V2_SECTION + 2] ||
++	    size < MTP_V2_SECTION + 4 + data[MTP_V2_SECTION + 3])
++		return 0;
++
++	for (i = 0; i < count; i++) {
++		const u8 *rec = data + MTP_V2_PAYLOAD + data[MTP_V2_SECTION + 1] +
++				    i * data[MTP_V2_SECTION + 2];
++
++		if (rec[2] < MTP_V2_PHASE_TOUCH || rec[2] >= MTP_V2_PHASE_LEAVE)
++			continue;
++
++		/* Micrometres to the hundredths of a millimetre of the J314 ranges. */
++		msc->pos[n].x = magicmouse_f32_to_int(rec + MTP_V2_X) / 10;
++		msc->pos[n].y = -magicmouse_f32_to_int(rec + MTP_V2_Y) / 10;
++		major[n] = magicmouse_f32_to_int(rec + MTP_V2_MAJOR) / 10;
++		minor[n] = magicmouse_f32_to_int(rec + MTP_V2_MINOR) / 10;
++		force[n] = magicmouse_f32_to_int(rec + MTP_V2_FORCE);
++		n++;
++	}
++
++	input_mt_assign_slots(input, msc->tracking_ids, msc->pos, n, 0);
++
++	for (i = 0; i < n; i++) {
++		input_mt_slot(input, msc->tracking_ids[i]);
++		input_mt_report_slot_state(input, MT_TOOL_FINGER, true);
++		input_report_abs(input, ABS_MT_TOUCH_MAJOR, major[i]);
++		input_report_abs(input, ABS_MT_TOUCH_MINOR, minor[i]);
++		input_report_abs(input, ABS_MT_PRESSURE, force[i]);
++		input_report_abs(input, ABS_MT_POSITION_X, msc->pos[i].x);
++		input_report_abs(input, ABS_MT_POSITION_Y, msc->pos[i].y);
++		pressure += force[i];
++	}
++
++	input_mt_sync_frame(input);
++	input_report_key(input, BTN_MOUSE,
++			 magicmouse_haptic_click(msc, pressure,
++						 data[MTP_V2_BUTTONS] & MTP_V2_BUTTON_MASK));
++	input_sync(input);
++	return 1;
++}
++
++static int magicmouse_raw_event_dockchannel(struct hid_device *hdev,
++		struct hid_report *report, u8 *data, int size)
++{
++	if (size && data[0] == MTP_V2_REPORT_ID)
++		return magicmouse_raw_event_mtp_v2(hdev, data, size);
++
++	return magicmouse_raw_event_mtp(hdev, report, data, size);
++}
++
+ static int magicmouse_raw_event_spi(struct hid_device *hdev,
+ 		struct hid_report *report, u8 *data, int size)
+ {
+@@ -2416,7 +2527,7 @@ static int magicmouse_probe(struct hid_device *hdev,
+ 				 of_machine_is_compatible("apple,t6041");
+ 		of_node_put(np);
+ 
+-		msc->input_ops.raw_event = magicmouse_raw_event_mtp;
++		msc->input_ops.raw_event = magicmouse_raw_event_dockchannel;
+ 		msc->input_ops.setup_input = magicmouse_setup_input_mtp;
+ 	} else if (id->bus == BUS_SPI) {
+ 		msc->input_ops.raw_event = magicmouse_raw_event_spi;
+@@ -2503,6 +2614,11 @@ static int magicmouse_probe(struct hid_device *hdev,
+ 		switch (id->bus) {
+ 		case BUS_HOST:
+ 			report = hid_register_report(hdev, HID_INPUT_REPORT, MTP_REPORT_ID, 0);
++			if (report) {
++				report->size = 6;
++				report = hid_register_report(hdev, HID_INPUT_REPORT,
++					MTP_V2_REPORT_ID, 0);
++			}
+ 			break;
+ 		case BUS_SPI:
+ 			report = hid_register_report(hdev, HID_INPUT_REPORT, SPI_REPORT_ID, 0);

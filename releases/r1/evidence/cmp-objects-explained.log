@@ -1,0 +1,11 @@
+# The nine unexpected DIFF lines in cmp-objects-r1a-r1b.log, compared again with debug info stripped (objdump -s of every remaining section).
+# They are identical: the first comparison picked up debug path strings (src/r1a vs src/r1).
+fs/nfs/filelayout/filelayoutdev.o r1a=ad41055ab5bbbcd4 r1b=ad41055ab5bbbcd4 IDENTICAL
+fs/nfs/flexfilelayout/flexfilelayout.o r1a=43f3fb6f154de0f0 r1b=43f3fb6f154de0f0 IDENTICAL
+fs/nfs/flexfilelayout/flexfilelayoutdev.o r1a=d6a647a10f2c58ca r1b=d6a647a10f2c58ca IDENTICAL
+fs/nfs/fs_context.o r1a=2208800f59ef5bd1 r1b=2208800f59ef5bd1 IDENTICAL
+fs/nfs/inode.o r1a=6505ac60e837c111 r1b=6505ac60e837c111 IDENTICAL
+io_uring/io_uring.o r1a=3b69001af70bc5c8 r1b=3b69001af70bc5c8 IDENTICAL
+io_uring/kbuf.o r1a=8762f83ffcca9f5c r1b=8762f83ffcca9f5c IDENTICAL
+io_uring/loop.o r1a=2322c2889a894b15 r1b=2322c2889a894b15 IDENTICAL
+net/ipv6/netfilter/nf_conntrack_reasm.o r1a=77f7cedd74aa0a95 r1b=77f7cedd74aa0a95 IDENTICAL

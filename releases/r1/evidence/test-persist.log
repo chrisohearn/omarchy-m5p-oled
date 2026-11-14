@@ -1,0 +1,37 @@
+PASS persist succeeds
+PASS kernel image installed
+PASS /boot kernel copy updated
+PASS module in updates/
+PASS depmod ran for the kernel
+PASS J714s hook script now runs the K114s one
+PASS pinned device tree installed
+PASS IgnorePkg under [options]
+PASS other pacman.conf lines kept
+PASS second run refused
+PASS hook chain writes the r1 Stage 2
+PASS undo succeeds
+PASS undo restores every file
+PASS refused on the original kernel
+PASS refusal changes nothing
+PASS refused on another board
+PASS other board: nothing changed
+PASS damaged files refused
+PASS damaged files: nothing changed
+PASS pacman.conf without [options]: stops
+PASS r1a: persist succeeds
+PASS r1a: its kernel image installed
+PASS r1a: its module installed
+PASS hook follows the ESP pinned tree (gp1c)
+PASS hook falls back to the installed pinned tree (r1)
+PASS channel-refresh hook installed for the user
+PASS holds re-applied after a template replaced pacman.conf
+PASS NoUpgrade re-applied
+PASS apply-holds is idempotent
+PASS template lines kept
+PASS apply-holds refuses a file without [options]
+PASS and leaves it unchanged
+PASS undo removes the user hook
+PASS undo removes apply-holds
+PASS undo removes only the K114s hold lines
+PASS undo keeps later edits to pacman.conf
+linux-persist tests: 36 passed, 0 failed

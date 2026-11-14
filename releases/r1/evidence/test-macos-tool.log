@@ -1,0 +1,68 @@
+PASS status: original kernel
+PASS status: trial1 Stage 2
+PASS status: trackpad firmware present
+PASS check passes
+PASS check writes nothing to the ESP
+PASS check leaves no repair dir
+PASS stage2 switch refused before apply
+PASS refused switch wrote nothing
+PASS apply verifies
+PASS after apply: Stage 2 r1
+PASS after apply: N1 firmware present
+PASS after apply: repair entries
+PASS after apply: default is r1
+PASS applied files are exactly as intended
+PASS Linux-side files match their SHA256SUMS
+PASS second apply refused
+PASS default r1a
+PASS default original
+PASS default r1
+PASS stage2 gp1c
+PASS stage2 wifi
+PASS stage2 trial1
+PASS stage2 r1
+PASS pinned tree follows the Stage 2
+PASS rollback stage2
+PASS rollback stage2 keeps kernel entries
+PASS rollback all
+PASS rollback all restores every original boot file
+PASS rollback all resets the pinned tree to trial 1
+PASS apply again after rollback all
+PASS second rollback all restores originals again
+PASS unknown rollback target refused cleanly
+PASS missing option value refused cleanly
+PASS apply --stage2 wifi
+PASS rollback after --stage2 wifi restores originals
+PASS apply --stage2 gp1c
+PASS rollback after --stage2 gp1c restores originals
+PASS apply --stage2 keep
+PASS rollback after --stage2 keep restores originals
+PASS missing trackpad firmware is added
+PASS hook-overwritten Stage 2 recognised
+PASS hook-overwritten Stage 2 is repaired
+PASS foreign kernel refused
+PASS foreign kernel: nothing written
+PASS unknown Stage 2 refused
+PASS unknown Stage 2: nothing written
+PASS unknown Stage 2 with keep: kernel-only apply
+PASS unknown live Stage 2 is never replaced by a switch
+PASS missing vendor firmware refused
+PASS tampered bundle refused
+PASS tampered bundle: nothing written
+PASS declined confirmation writes nothing
+PASS declined: ESP unchanged
+PASS partial backup directory is not reported as a backup
+PASS apply after a partial backup
+PASS backup.json exists afterwards
+PASS rollback after a partial-backup apply restores originals
+PASS half-applied state: apply refuses
+PASS half-applied state: rollback all restores originals
+PASS full partition stops cleanly
+PASS no half-written file left
+PASS target untouched after failed write
+PASS device tree lint (pin ranges fit, only pin 80 exposed)
+PASS Stage 2 r1 holds its payload tree
+PASS Stage 2 r1-wifi holds its payload tree
+PASS Stage 2 r1-gp1c holds its payload tree
+PASS Stage 2 trial1 holds its payload tree
+macOS tool tests: 67 passed, 0 failed

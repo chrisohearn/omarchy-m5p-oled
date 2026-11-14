@@ -1,0 +1,6 @@
+# Untouched modules: this build (r1) vs the copies in the installed image initramfs (j714s-3 payload)
+hid-apple .text: built=6a70f2c2928f5f1d installed=6a70f2c2928f5f1d bytes=5400 IDENTICAL
+hid-apple .rodata: built=208239a36363ab4c installed=208239a36363ab4c bytes=7899 IDENTICAL
+hid-apple .init.text: built=014b9a0e7e53d410 installed=014b9a0e7e53d410 bytes=52 IDENTICAL
+kernel image size: built r1=54086144 r1a=54086144 installed=54086144
+device trees built by the kernel build: t6050-k114s.dtb d5c1f1541b21ddbb (image: d5c1f1541b21ddbb), t6050-j714s.dtb a36851a8f4832334 (image: a36851a8f4832334)

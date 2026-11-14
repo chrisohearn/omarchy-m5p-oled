@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/* K114s repair r1 with the K116s/J714s trackpad AFE reset line (alternative). */
+#define K114S_R1_N1
+#define K114S_R1_USB
+#define K114S_R1_AFE_GP1C
+#include "t6050-k114s-common.dtsi"

@@ -1,0 +1,15 @@
+PASS pinned r1 tree gives the r1 Stage 2
+PASS idempotent
+PASS boot.bin untouched
+PASS no temp files left
+PASS use-packaged-dtb gives the packaged K114s tree
+PASS missing pinned tree: fails
+PASS missing pinned tree: old file kept
+PASS J714s tree as pinned: refused
+PASS J714s tree: old file kept
+PASS boot.bin not starting with m1n1.bin: refused
+PASS prefix mismatch: old file kept
+PASS truncated boot.bin: refused
+PASS truncated: old file kept
+PASS ESP not mounted: refused
+hook tests: 14 passed, 0 failed

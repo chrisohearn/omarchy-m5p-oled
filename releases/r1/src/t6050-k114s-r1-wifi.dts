@@ -1,0 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/* K114s repair r1, Wi-Fi only: trial 1 plus PCIe port 0 and the N1. */
+#define K114S_R1_N1
+#include "t6050-k114s-common.dtsi"

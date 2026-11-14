@@ -1,0 +1,4 @@
+#!/bin/bash
+# K114s repair r1 (macOS side). Usage: sudo ./k114s-repair status|check|apply|rollback [...]
+here=$(cd -- "$(dirname -- "$0")" && pwd)
+exec /usr/bin/python3 -I "$here/tools/k114s_repair.py" "$@"

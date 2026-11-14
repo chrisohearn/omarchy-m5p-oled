@@ -1,0 +1,33 @@
+#!/bin/bash
+# K114s repair r1: put the K114s package holds (back) into /etc/pacman.conf. Idempotent.
+# Omarchy's channel refresh copies a template over pacman.conf; its supported customization point
+# is the user hook pre-refresh-pacman, which calls this (omacom/omarchy bin/omarchy-refresh-pacman).
+set -euo pipefail
+conf=${K114S_ROOT:-}/etc/pacman.conf
+[[ -f $conf ]] || { echo "k114s apply-holds: $conf is missing" >&2; exit 1; }
+if [[ ${1:-} == --remove ]]; then
+  grep -q '^# K114s repair r1' "$conf" || exit 0
+  awk '
+    /^# K114s repair r1: hold the coordinated K114s boot stack/ { skip = 2; next }
+    skip > 0 && (/^IgnorePkg = linux-aurora m1n1-aurora uboot-aurora$/ || /^NoUpgrade = usr\/local\/lib\/omarchy-j714s\/update-boot-ctxr$/) { skip--; next }
+    { skip = 0; print }' "$conf" > "$conf.k114s-new"
+  chmod 644 "$conf.k114s-new"; mv "$conf.k114s-new" "$conf"
+  echo "k114s apply-holds: holds removed from $conf"
+  exit 0
+fi
+grep -q '^# K114s repair r1' "$conf" && exit 0
+grep -q '^\[options\]' "$conf" || { echo "k114s apply-holds: no [options] section in $conf" >&2; exit 1; }
+tmp=$conf.k114s-new
+awk '
+  { print }
+  /^\[options\]/ && !done {
+    print "# K114s repair r1: hold the coordinated K114s boot stack (remove these three lines to release)"
+    print "IgnorePkg = linux-aurora m1n1-aurora uboot-aurora"
+    print "NoUpgrade = usr/local/lib/omarchy-j714s/update-boot-ctxr"
+    done = 1
+  }' "$conf" > "$tmp"
+grep -q '^IgnorePkg = linux-aurora' "$tmp" || { rm -f "$tmp"; echo "k114s apply-holds: could not add the holds" >&2; exit 1; }
+chmod 644 "$tmp"
+mv "$tmp" "$conf"
+echo "k114s apply-holds: holds added to $conf"
+exit 0
