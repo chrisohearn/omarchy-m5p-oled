@@ -1,7 +1,10 @@
 # r3: upstream reports, drafted 2026-11-14
 
+> Update, 2026-11-14: items 1, 1b, 2a to 2e and 3 have since been posted. URLs and read-back are
+> in [r3-upstream-post.md](r3-upstream-post.md). The rest of this page is the drafting record.
+
 Drafts of the reports [UPSTREAM.md](../UPSTREAM.md) calls for after the r2c boots. **Nothing here
-has been posted.** Each destination's contributing rules, templates and AI policy were read, and
+had been posted when this was written.** Each destination's contributing rules, templates and AI policy were read, and
 each was searched for an earlier report of the same thing. The exact texts are in
 [`r3-upstream-drafts/`](r3-upstream-drafts/). Evidence labels as in UPSTREAM.md: owner-observed,
 agent-run (a command run by the AI agent on the Mac), source read (a file read in the named

@@ -29,6 +29,182 @@
       "follow_up": "add the r2 boot results (pass or fail) to the same thread once the owner has booted it",
       "acknowledged": null,
       "maintainer_feedback": []
+    },
+    {
+      "id": "k114s-r1-followup-2026-11-14",
+      "destination": "aurora-silicon/linux discussion 142 (MacBook Pro, M5 family: hardware reports), reply under our first report",
+      "url": "https://github.com/aurora-silicon/linux/discussions/142#discussioncomment-19621345",
+      "posted": "2026-11-14T23:11:36Z",
+      "account": "chrisohearn",
+      "kind": "hardware confirmation, follow-up",
+      "result": "three boots on K114S-R1: trackpad pointer and clicks with #1568 (owner-observed, two boots; probe lines agent-run, 3 of 3); N1 enumerates and Wi-Fi associates on 5 GHz with platform ID 0x00146050 (agent-run, 3 of 3); Bluetooth controller hci0 only; SMC hwmon and battery read, with the manufacture_year -95 errors; 18 CPUs; USB-C not tested with a device",
+      "tested_revisions": {
+        "kernel": "aurora-silicon/linux a34d26c255c2 + betizzel/omarchy-m5 linux-j714s-27.2.patch (v272-4) + aurora-silicon/linux #1568 at 1e065585d3da (K114S-R1)",
+        "loader": "aurora-silicon/aura 22b71758dfd0 + betizzel aura-j714s-27.2.patch",
+        "device_tree_sha256": "2ea22d26b2a1c81526e77e7f29eaff46def5310a9512be769ff3ed50465f4dd2",
+        "stage2_sha256": "45a5dbef19c14898e73e79a42af360def638c319d14e2bae97a79f7962e4bfb4"
+      },
+      "not_claimed": "USB devices, USB4, #1830 with 0x0361, 2.4 and 6 GHz, Bluetooth pairing or audio, display coprocessor, GPU, sound, microphones, camera, touchscreen, suspend, keyboard backlight",
+      "state": "submitted",
+      "read_back": "body read back after posting, 8179 characters, identical to what was sent",
+      "text": "docs/r3-upstream-drafts/01-aurora-discussion-142-followup.body.md",
+      "follow_up": "send the N1 and SMC device tree parts as a pull request if the maintainers ask for one; USB-C after a device has enumerated",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "k114s-pr1568-second-board-2026-11-14",
+      "destination": "aurora-silicon/linux pull request 1568 (open draft, head 1e065585d3da), comment",
+      "url": "https://github.com/aurora-silicon/linux/pull/1568#issuecomment-6885700857",
+      "posted": "2026-11-14T23:11:49Z",
+      "account": "chrisohearn",
+      "kind": "hardware confirmation of a pull request on a second board",
+      "result": "the four commits at 1e065585d3da bring up the K114s trackpad (HID product 0x0361): fails without the PR (one boot), probes on 3 of 3 boots with it (agent-run), pointer and clicks owner-observed on two",
+      "tested_revisions": {
+        "kernel": "aurora-silicon/linux a34d26c255c2 + betizzel/omarchy-m5 linux-j714s-27.2.patch (v272-4) + aurora-silicon/linux #1568 at 1e065585d3da (K114S-R1)",
+        "loader": "aurora-silicon/aura 22b71758dfd0 + betizzel aura-j714s-27.2.patch",
+        "device_tree_sha256": "2ea22d26b2a1c81526e77e7f29eaff46def5310a9512be769ff3ed50465f4dd2",
+        "stage2_sha256": "45a5dbef19c14898e73e79a42af360def638c319d14e2bae97a79f7962e4bfb4"
+      },
+      "not_claimed": "scrolling, gestures, suspend, the 0x5a frame layout field by field, #1605",
+      "state": "submitted",
+      "read_back": "body read back after posting, 1824 characters, identical to what was sent (the draft's link placeholder filled with the discussion reply's URL)",
+      "text": "docs/r3-upstream-drafts/01b-aurora-pr1568-crosslink.body.md",
+      "follow_up": "none; the full report is the discussion reply it links",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "hyprland-m5-cmonitor-abi-2026-11-14",
+      "destination": "betizzel/omarchy-m5 issues",
+      "url": "https://github.com/betizzel/omarchy-m5/issues/8",
+      "posted": "2026-11-14T23:12:30Z",
+      "account": "chrisohearn",
+      "kind": "failure report with cause and three possible fixes",
+      "result": "hyprland-m5 0.57.2-2 moves CMonitor members by 32 bytes but reports stock Hyprland's commit, so Omarchy's stock titlebars plugin loads and Hyprland aborts on a click (five aborts, offsets and disassembly agent-run); a rebuild of the plugin against hyprland-m5's headers passed the plugin's verifier in a nested compositor",
+      "tested_revisions": {
+        "kernel": "aurora-silicon/linux a34d26c255c2 + betizzel/omarchy-m5 linux-j714s-27.2.patch (v272-4) + aurora-silicon/linux #1568 at 1e065585d3da (K114S-R1)",
+        "loader": "aurora-silicon/aura 22b71758dfd0 + betizzel aura-j714s-27.2.patch",
+        "device_tree_sha256": "2ea22d26b2a1c81526e77e7f29eaff46def5310a9512be769ff3ed50465f4dd2",
+        "stage2_sha256": "45a5dbef19c14898e73e79a42af360def638c319d14e2bae97a79f7962e4bfb4"
+      },
+      "not_claimed": "the rebuild in the Mac's own session, fixes 1 and 3, a J714s, release 4",
+      "state": "submitted",
+      "read_back": "body read back after posting, 5443 characters, identical to what was sent",
+      "text": "docs/r3-upstream-drafts/02a-betizzel-hyprland-m5-plugin-abi.body.md",
+      "follow_up": "add the result once the rebuilt plugin has been used in the Mac's own session",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-aurora-config-gaps-2026-11-14",
+      "destination": "betizzel/omarchy-m5 issues",
+      "url": "https://github.com/betizzel/omarchy-m5/issues/9",
+      "posted": "2026-11-14T23:12:52Z",
+      "account": "chrisohearn",
+      "kind": "failure report with a proposed config change",
+      "result": "the linux-aurora recipe config leaves NETFILTER_XT_MATCH_HL, IP6_NF_MATCH_HL and IP6_NF_MATCH_RT off (ufw's IPv6 rules fail to load), BT_RFCOMM off (hands-free profiles cannot start) and PKCS8_PRIVATE_KEY_PARSER off (journal lines agent-run on four boots; recipe configs source read at 42edf84)",
+      "tested_revisions": {
+        "kernel": "aurora-silicon/linux a34d26c255c2 + betizzel/omarchy-m5 linux-j714s-27.2.patch (v272-4) + aurora-silicon/linux #1568 at 1e065585d3da (K114S-R1)",
+        "loader": "aurora-silicon/aura 22b71758dfd0 + betizzel aura-j714s-27.2.patch",
+        "device_tree_sha256": "2ea22d26b2a1c81526e77e7f29eaff46def5310a9512be769ff3ed50465f4dd2",
+        "stage2_sha256": "45a5dbef19c14898e73e79a42af360def638c319d14e2bae97a79f7962e4bfb4"
+      },
+      "not_claimed": "a kernel built with the options, a paired headset, an enterprise network, a J714s, release 4",
+      "state": "submitted",
+      "read_back": "body read back after posting, 5515 characters, identical to what was sent",
+      "text": "docs/r3-upstream-drafts/02b-betizzel-kernel-config-gaps.body.md",
+      "follow_up": "add the result once a K114s kernel with these options has booted",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "speakerguardd-gate-wait-2026-11-14",
+      "destination": "aurora-silicon/speakerguardd issues",
+      "url": "https://github.com/aurora-silicon/speakerguardd/issues/183",
+      "posted": "2026-11-14T23:12:07Z",
+      "account": "chrisohearn",
+      "kind": "failure report with cause and a suggested fix",
+      "result": "with no sound node in the device tree every speakerguardd-gate call waits its full 15 s, holding logins about 30 s on each boot (agent-run, three boots; gate logic source read at v2 04169c44); a local ConditionPathExists drop-in brought userspace start from 46.3 s to 1.2 s",
+      "tested_revisions": {
+        "kernel": "aurora-silicon/linux a34d26c255c2 + betizzel/omarchy-m5 linux-j714s-27.2.patch (v272-4) + aurora-silicon/linux #1568 at 1e065585d3da (K114S-R1)",
+        "loader": "aurora-silicon/aura 22b71758dfd0 + betizzel aura-j714s-27.2.patch",
+        "device_tree_sha256": "2ea22d26b2a1c81526e77e7f29eaff46def5310a9512be769ff3ed50465f4dd2",
+        "stage2_sha256": "45a5dbef19c14898e73e79a42af360def638c319d14e2bae97a79f7962e4bfb4"
+      },
+      "not_claimed": "any patch to the gate; anything on a Mac with a sound node (speakers here stay off)",
+      "state": "submitted",
+      "read_back": "body read back after posting, 4699 characters, identical to what was sent",
+      "text": "docs/r3-upstream-drafts/02c-speakerguardd-gate-wait-no-sound-node.body.md",
+      "follow_up": "none planned; test a fix on the no-sound-node case if the maintainers write one",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "k114s-on-release-3-and-admission-2026-11-14",
+      "destination": "betizzel/omarchy-m5 issues",
+      "url": "https://github.com/betizzel/omarchy-m5/issues/10",
+      "posted": "2026-11-14T23:13:38Z",
+      "account": "chrisohearn",
+      "kind": "hardware report for a sibling board, with the installer admission patches on offer",
+      "result": "release 3 installs and boots a K114s to the desktop through an installer build with apple,k114s admitted (owner-observed, once); keyboard works, trackpad fails without #1568, Wi-Fi and Bluetooth need a K114s N1 node; the three admission patches still apply at 42edf84 (git apply --check, no build)",
+      "tested_revisions": {
+        "kernel": "aurora-silicon/linux a34d26c255c2 + betizzel/omarchy-m5 linux-j714s-27.2.patch (v272-4) + aurora-silicon/linux #1568 at 1e065585d3da (K114S-R1)",
+        "loader": "aurora-silicon/aura 22b71758dfd0 + betizzel aura-j714s-27.2.patch",
+        "device_tree_sha256": "2ea22d26b2a1c81526e77e7f29eaff46def5310a9512be769ff3ed50465f4dd2",
+        "stage2_sha256": "45a5dbef19c14898e73e79a42af360def638c319d14e2bae97a79f7962e4bfb4"
+      },
+      "not_claimed": "the patches built or tested on the current tree, release 4, USB-C, the image-builder side of admission",
+      "state": "submitted",
+      "read_back": "body read back after posting, 5956 characters, identical to what was sent",
+      "text": "docs/r3-upstream-drafts/02d-betizzel-k114s-report-and-admission.body.md",
+      "follow_up": "open a pull request with the patches if the maintainer prefers that",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "image-pin-lost-on-refresh-2026-11-14",
+      "destination": "betizzel/omarchy-m5 issues",
+      "url": "https://github.com/betizzel/omarchy-m5/issues/11",
+      "posted": "2026-11-14T23:14:01Z",
+      "account": "chrisohearn",
+      "kind": "failure report with four ways to close it",
+      "result": "a channel switch from the Omarchy menu removed the image's IgnorePkg pin and downgraded eight packages including the kernel, m1n1 and U-Boot; the Stage 2 it wrote carried no T6050 device tree (pacman.log and package file list agent-run; scripts source read). Caught before a reboot",
+      "tested_revisions": {
+        "kernel": "aurora-silicon/linux a34d26c255c2 + betizzel/omarchy-m5 linux-j714s-27.2.patch (v272-4) + aurora-silicon/linux #1568 at 1e065585d3da (K114S-R1)",
+        "loader": "aurora-silicon/aura 22b71758dfd0 + betizzel aura-j714s-27.2.patch",
+        "device_tree_sha256": "2ea22d26b2a1c81526e77e7f29eaff46def5310a9512be769ff3ed50465f4dd2",
+        "stage2_sha256": "45a5dbef19c14898e73e79a42af360def638c319d14e2bae97a79f7962e4bfb4"
+      },
+      "not_claimed": "a boot in the downgraded state, omarchy refresh pacman and omarchy reinstall (source read only), a J714s, release 4; the hold guard has run in a fake root only",
+      "state": "submitted",
+      "read_back": "body read back after posting, 6670 characters, identical to what was sent",
+      "text": "docs/r3-upstream-drafts/02e-betizzel-channel-refresh-drops-pin.body.md",
+      "follow_up": "report when pacman has run the hold guard on a real transaction",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "omarchy-refresh-drops-ignorepkg-2026-11-14",
+      "destination": "omacom/omarchy issues (Bug form headings)",
+      "url": "https://github.com/omacom/omarchy/issues/18954",
+      "posted": "2026-11-14T23:13:15Z",
+      "account": "chrisohearn",
+      "kind": "failure report with four possible fixes",
+      "result": "omarchy channel set, refresh pacman and reinstall replace pacman.conf with the channel template, dropping IgnorePkg holds, then run pacman -Syyuu --noconfirm; on this unsupported third-party image that downgraded the kernel, m1n1 and U-Boot, and the update's boot verification passed (pacman.log and journal agent-run; scripts and image builder source read at quattro 2bab9efd)",
+      "tested_revisions": {
+        "kernel": "aurora-silicon/linux a34d26c255c2 + betizzel/omarchy-m5 linux-j714s-27.2.patch (v272-4) + aurora-silicon/linux #1568 at 1e065585d3da (K114S-R1)",
+        "loader": "aurora-silicon/aura 22b71758dfd0 + betizzel aura-j714s-27.2.patch",
+        "device_tree_sha256": "2ea22d26b2a1c81526e77e7f29eaff46def5310a9512be769ff3ed50465f4dd2",
+        "stage2_sha256": "45a5dbef19c14898e73e79a42af360def638c319d14e2bae97a79f7962e4bfb4"
+      },
+      "not_claimed": "an image from the unpatched image builder, a boot in the downgraded state, any of the four fixes",
+      "state": "submitted",
+      "read_back": "body read back after posting, 6745 characters, identical to what was sent; the form's 'bug' label was not applied (the account cannot label there)",
+      "text": "docs/r3-upstream-drafts/03-omacom-omarchy-refresh-drops-ignorepkg.body.md",
+      "follow_up": "a pull request with a test/shell.d case if the maintainers pick one of the shapes",
+      "acknowledged": null,
+      "maintainer_feedback": []
     }
   ]
 }
