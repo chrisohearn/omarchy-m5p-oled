@@ -1,0 +1,42 @@
+From 218e3f8550ba11288155885b78bb9c67f0541769 Mon Sep 17 00:00:00 2001
+From: Roberto Dantas <address-in-upstream-commit@localhost>
+Date: Thu, 12 Nov 2026 07:16:50 -0300
+Subject: [PATCH] usb: typec: tipd: sn201202x: probe asynchronously
+
+Renegotiating an inherited connection waits about 5.6 s per port, and
+the controllers of one machine probed one after another, so with three
+ports in use the last one came up after 17 s. Prefer asynchronous
+probing; the driver keeps no shared state besides the debugfs root,
+which is already locked.
+
+On a J575c with three inherited connections all three are renegotiated
+within 2 ms of each other, 13.8 s after boot instead of 25.1 s.
+
+Assisted-by: LLM (Claude Code)
+Signed-off-by: Roberto Dantas <address-in-upstream-commit@localhost>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+Upstream: aurora-silicon/linux commit 218e3f8550ba11288155885b78bb9c67f0541769, pull request 1671
+(merged 2026-11-13, after the installed base a34d26c255c2). License GPL-2.0. Unchanged except that
+the author's e-mail address is replaced here; the upstream commit has it. Applies to the installed
+source with an offset of 10 lines. OPTIONAL for the K114s: see docs/r3-usb.md, it is not a fix.
+
+ drivers/usb/typec/tipd/spmi.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/drivers/usb/typec/tipd/spmi.c b/drivers/usb/typec/tipd/spmi.c
+index 30d472c3d83a..44d1f12a10e8 100644
+--- a/drivers/usb/typec/tipd/spmi.c
++++ b/drivers/usb/typec/tipd/spmi.c
+@@ -985,6 +985,11 @@ static struct spmi_driver sn201202x_driver = {
+ 		.name = "sn201202x",
+ 		.pm = &sn201202x_pm_ops,
+ 		.of_match_table = sn201202x_of_match,
++		/*
++		 * Renegotiating an inherited connection waits several seconds per
++		 * port; let the ports of one machine probe at the same time.
++		 */
++		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
+ 	},
+ 	.probe = sn201202x_probe,
+ 	.remove = sn201202x_remove,

@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s (MacBook Pro 14-inch PROLED XDR, M5 Pro, Mac17,13): USB-C additions for candidate r3.
+ * Include it after t6050-k114s-common.dtsi, built with K114S_R1_USB.
+ *
+ * The USB host description itself is NOT here and needs no change. The K114S_R1_USB section of
+ * t6050-k114s-common.dtsi is, node for node and property for property, the USB section of
+ * t6050-k116s.dts in aurora-silicon/linux at 0b03fe434e50 (pull request 1648, 377b2a2decf1,
+ * Jens Axboe, booted on a K116s): compared as compiled trees, see docs/r3-usb.md. With no
+ * section below defined this file adds nothing and the tree is the r1 tree.
+ *
+ * Sections (each is off unless its name is defined before the include):
+ *
+ *   K114S_R3_USB_SPMI_FAULTS
+ *       The fault queue of the two port-controller buses. A diagnostic: with it the SPMI driver
+ *       empties the queue when it starts, as macOS does, and logs the controller's fault record
+ *       after a command that failed ("apple-spmi ...: fault 0x... (n so far)"). Use it only if
+ *       a plug test fails with SPMI errors in the log. NOT booted on a K114s.
+ *
+ * Copyright The Asahi Linux Contributors
+ */
+
+#ifndef K114S_R1_USB
+#error "t6050-k114s-usb.dtsi extends the K114S_R1_USB section of t6050-k114s-common.dtsi"
+#endif
+
+#ifdef K114S_R3_USB_SPMI_FAULTS
+/*
+ * Generation 4 SPMI controllers queue fault records in their second register window.
+ *
+ * nub-spmi-a0 (left-front port's controller): the window 0x4000 below the controller, as this
+ * base's t6050-j714s.dts and t6050-k114c.dts give it ("reg[1]: the generation 4 fault queue,
+ * which macOS empties when the controller starts", aurora-silicon/linux pull request 1714,
+ * Joshua Warren). The J714s is the same SoC. The value has NOT been read from this machine's
+ * ADT: tests/k114s-usb-root-probe.py adt prints /arm-io/nub-spmi-a0's reg for the comparison.
+ *
+ * nub-spmi-a1 (right port's controller): reg[1] of the node t6050-peripherals.dtsi already
+ * carries for T6050_K114S (from the ADT, by upstream), which the r1 tree cut down to reg[0].
+ * The third window and the interrupt stay out: the driver refuses an interrupt on this
+ * generation and the port controllers are polled.
+ */
+&nub_spmi_a0 {
+	reg = <0x2 0x8a188000 0x0 0x4000>,
+	      <0x2 0x8a184000 0x0 0x4000>;
+};
+
+&nub_spmi_a1 {
+	reg = <0x2 0x8a1a8000 0x0 0x4000>,
+	      <0x2 0x8a1a4000 0x0 0x4000>;
+};
+#endif
