@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s (MacBook Pro 14-inch PROLED XDR, M5 Pro, Mac17,13): what the panel node carries for
+ * brightness on the display coprocessor. Candidate r3. NOT yet booted on a K114s.
+ *
+ * Include it after t6050-k114s-display-gpu.dtsi with K114S_R3_DISPLAY defined (branch
+ * r3/display-gpu); that file creates the node:
+ *
+ *	&dcp { panel { compatible = "apple,panel-k114", "apple,panel"; width-mm; height-mm; }; };
+ *
+ * What makes /sys/class/backlight/apple-panel-bl appear, and where each value comes from:
+ *
+ *   compatible "apple,panel"    that file. NOT "apple,panel-mini-led": that name makes the driver
+ *                               answer the firmware's PMU temperature request, and is the only
+ *                               thing it decides (with patch 0001 of patches/linux/brightness
+ *                               every panel gets the answer and the name decides nothing).
+ *   width-mm, height-mm         that file. The driver treats a panel without a width as no
+ *                               panel, and registers no backlight for it.
+ *   apple,max-brightness        NOT in any tree of ours. The boot loader writes it at every
+ *                               boot from this machine's Apple device tree (ADT), node
+ *                               /backlight-override, property user-accessible-max-nits (16.16
+ *                               fixed point; the loader keeps the whole nits). It becomes the
+ *                               backlight device's max_brightness, so "100 %" is this value.
+ *                               K116s: 1000. K114s: not read yet (the ADT is readable by root
+ *                               from Linux, MTD device "adt": tests/k114s-adt-display-facts.py
+ *                               on branch r3/display-gpu prints it; or from macOS).
+ *                               Do not add it here: the loader keeps a value the tree already
+ *                               has and would then ignore the machine's own. Without the ADT
+ *                               value the loader refuses the whole display hand-off and the
+ *                               panel stays on the boot framebuffer.
+ *   apple,min-brightness        below; ours.
+ *
+ * Nothing else is read from the tree for brightness. The panel's peak and EDR headroom (ADT
+ * /backlight LmaxProduct and EDRPotentialHeadroom) are read by the kernel from the ADT itself
+ * (drivers/gpu/drm/apple/dcp-panel-adt.c) and matter for HDR content only.
+ */
+
+&dcp {
+	panel {
+		/*
+		 * Lowest level a brightness write can reach, in nits. Needs kernel patches
+		 * 0005 and 0006 of patches/linux/brightness; a kernel without them ignores
+		 * the property and accepts 0, which it presents as 0 nits (the level it uses
+		 * for display off).
+		 *
+		 * 10 is a first value, not a measured one: nobody has reported what this
+		 * panel shows at low levels. It is 1 % of the K116s scale, the lowest step
+		 * Omarchy's keys and slider take. Lower it only after the owner has seen
+		 * the panel lit at 10 (docs/r3-brightness.md).
+		 */
+		apple,min-brightness = <10>;
+	};
+};

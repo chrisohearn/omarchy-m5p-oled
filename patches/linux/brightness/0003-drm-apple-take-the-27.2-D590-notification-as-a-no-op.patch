@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Wed, 11 Nov 2026 13:29:58 -0700
+Subject: [PATCH] drm/apple: take the 27.2 D590 notification as a no-op
+
+The 27.2 firmware sends a 20-byte D590 notification with no reply after
+swaps (the macOS handler next to swap_info is the buffer-release
+notification). Nothing here consumes it, so take it as a no-op instead of
+warning about an unknown callback.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+(cherry picked from commit 907bb7ec5990a7662ce65087c70432252aeceadf)
+[k114s: aurora-silicon/linux pull request 1646 (open, head 907bb7ec5990), commit 3 of 3. Tested upstream on a K116s; not booted on a K114s]
+---
+ drivers/gpu/drm/apple/iomfb_v27.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/gpu/drm/apple/iomfb_v27.c b/drivers/gpu/drm/apple/iomfb_v27.c
+index e1cc9ed281..5b45a3472d 100644
+--- a/drivers/gpu/drm/apple/iomfb_v27.c
++++ b/drivers/gpu/drm/apple/iomfb_v27.c
+@@ -663,6 +663,12 @@ static const iomfb_cb_handler cb_handlers[IOMFB_MAX_CB] = {
+ 	[587] = trampoline_nop,
+ 	[588] = trampoline_nop,
+ 	[589] = trampoline_swap_info_h17p,
++	/*
++	 * 27.2 sends this 20-byte notification with no reply after swaps (the
++	 * macOS handler next to swap_info is the buffer-release notification);
++	 * nothing here consumes it.
++	 */
++	[590] = trampoline_nop,
+ 
+ 	[592] = trampoline_nop,
+ 	[594] = trampoline_swap_complete,
+@@ -749,6 +755,7 @@ static const struct {
+ 	[587] = { 0x0, 0x0 },
+ 	[588] = { 0x18, 0x0 },
+ 	[589] = { 0xe4, 0xe0 },
++	[590] = { 0x14, 0x0 },
+ 	[592] = { 0x0, 0x0 },
+ 	[594] = { 0x730, 0x0 },
+ 	[596] = { 0x14, 0x0 },

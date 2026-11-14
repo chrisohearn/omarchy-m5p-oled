@@ -1,0 +1,160 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled, issue #2): the first hardware check of panel brightness, for the owner
+# to run in a terminal once the panel is on the display coprocessor. No sudo.
+#
+#     k114s-backlight-check [--timeout SECONDS] [--lowest NITS] [--read-only]
+#
+# What it does: prints what the kernel registered, then writes a short series of levels to
+# /sys/class/backlight/apple-panel-bl (through brightnessctl, as Omarchy does) and after each one
+# asks what you see. It writes the answers to a small text file you can paste into the issue.
+#
+# It is built so that it does not leave you with a dark screen:
+#   - it never writes a level below --lowest (default: the larger of 10 nits, 1 % of the
+#     maximum and the kernel's own floor), and never 0;
+#   - every question has a time limit (default 20 s). NO ANSWER PUTS BACK THE LAST LEVEL YOU
+#     CONFIRMED YOU COULD READ, and the descent stops there. So if the screen goes dark or
+#     unreadable: do nothing and wait;
+#   - Ctrl-C, or closing the terminal, puts that level back too.
+# Independent of this script, Shift + brightness-up asks Omarchy for 100 %.
+#
+# --read-only prints the first part and writes nothing.
+# K114S_BL_SYSFS=DIR uses DIR/apple-panel-bl instead of the real device and writes the file
+# directly; that is for tests/brightness/test-backlight-check.sh (a replica, not hardware).
+set -euo pipefail
+
+dev=apple-panel-bl
+sysfs=${K114S_BL_SYSFS:-/sys/class/backlight}
+timeout=20
+lowest=""
+read_only=0
+while (( $# )); do
+  case $1 in
+  --timeout) timeout=${2:?}; shift 2 ;;
+  --lowest) lowest=${2:?}; shift 2 ;;
+  --read-only) read_only=1; shift ;;
+  *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  esac
+done
+[[ $timeout =~ ^[0-9]+$ ]] && (( timeout >= 1 )) || { echo "bad --timeout" >&2; exit 2; }
+[[ -z $lowest || $lowest =~ ^[1-9][0-9]*$ ]] || { echo "--lowest takes whole nits, 1 or more" >&2; exit 2; }
+
+p=$sysfs/$dev
+dt_u32() { # a 32-bit device-tree cell, or nothing
+  local f
+  for f in /proc/device-tree/soc*/dcp@*/panel/"$1"; do
+    [[ -r $f ]] && od -An -tu4 --endian=big "$f" | tr -d ' \n' && return 0
+  done
+  return 0
+}
+
+drm_drivers() { # the driver behind each DRM card: simple-framebuffer is the boot framebuffer
+  local c
+  for c in /sys/class/drm/card[0-9]*; do
+    [[ -e $c/device/driver ]] && printf '%s ' "$(basename "$(readlink -f "$c/device/driver")")"
+  done
+  return 0
+}
+
+if [[ ! -r $p/max_brightness ]]; then
+  echo "No $p: the kernel has not registered the panel's backlight."
+  echo "  backlight devices: $(ls "$sysfs" 2>/dev/null | tr '\n' ' ')"
+  echo "  display connectors: $(ls /sys/class/drm 2>/dev/null | grep -- - | tr '\n' ' ')"
+  echo "  display drivers: $(drm_drivers)"
+  echo "  apple,max-brightness in the device tree: $(dt_u32 apple,max-brightness || true)"
+  echo "A display driver of simple-framebuffer means the panel is still the boot framebuffer,"
+  echo "where no control exists. With the coprocessor's driver and no device, wait a few"
+  echo "seconds after the desktop appears and run this again; if it stays missing, send the"
+  echo "kernel log lines named in docs/r3-brightness.md."
+  exit 1
+fi
+
+max=$(<"$p/max_brightness")
+start=$(<"$p/brightness")
+dt_max=$(dt_u32 apple,max-brightness)
+dt_min=$(dt_u32 apple,min-brightness)
+echo "device              $dev"
+echo "type / scale        $(cat "$p/type" 2>/dev/null) / $(cat "$p/scale" 2>/dev/null)   (expected: platform / linear)"
+echo "max_brightness      $max nits   (device tree, written by the loader: ${dt_max:-not readable})"
+echo "kernel floor        ${dt_min:-none} (apple,min-brightness)"
+echo "brightness          $start"
+echo "actual_brightness   $(cat "$p/actual_brightness" 2>/dev/null)"
+echo "connectors          $(ls /sys/class/drm 2>/dev/null | grep -- - | tr '\n' ' ')"
+echo "display drivers     $(drm_drivers)"
+(( max >= 20 )) || { echo "max_brightness $max is not a usable nits scale; stopping." >&2; exit 1; }
+(( read_only )) && exit 0
+
+if [[ -z $lowest ]]; then
+  lowest=$(( (max + 99) / 100 ))
+  (( lowest < 10 )) && lowest=10
+  [[ -n $dt_min ]] && (( dt_min > lowest )) && lowest=$dt_min
+fi
+(( lowest < max )) || { echo "--lowest $lowest is not below the maximum $max" >&2; exit 2; }
+
+out_dir=${XDG_STATE_HOME:-$HOME/.local/state}/k114s-backlight-check
+mkdir -p "$out_dir"
+out=$out_dir/result-$(date +%Y%m%d-%H%M%S).txt
+note() { echo "$*" | tee -a "$out"; }
+
+set_level() {
+  if [[ -n ${K114S_BL_SYSFS:-} ]]; then
+    echo "$1" >"$p/brightness"; echo "$1" >"$p/actual_brightness"; echo "$1" >>"$p/writes.log"
+  else
+    brightnessctl -q -d "$dev" set "$1"
+  fi
+}
+
+good=""   # the last level the owner confirmed readable
+restore() {
+  local to=${good:-$max}
+  set_level "$to" || true
+  note "restored $to nits (${good:+last level confirmed readable}${good:-no level was confirmed, so the maximum})"
+}
+trap 'trap - EXIT INT TERM HUP; restore; exit 130' INT TERM HUP
+
+# Write a level, wait for the fade, ask. Returns 1 when the owner cannot read the screen.
+step() {
+  local n=$1 what=$2 ans=""
+  set_level "$n"
+  sleep "${K114S_BL_SETTLE:-1}"
+  printf '\n%s: wrote %s nits (%s %%), actual_brightness reads %s.\n' "$what" "$n" "$(( 100 * n / max ))" \
+    "$(cat "$p/actual_brightness" 2>/dev/null)"
+  printf 'Compared with a moment ago the picture is: [b]righter  [d]arker  [s]ame  [n] hard to read\n'
+  printf 'Type one letter and Enter within %s s (no answer = level put back): ' "$timeout"
+  read -r -t "$timeout" ans || ans=""
+  case ${ans,,} in
+  b*) ans=brighter ;; d*) ans=darker ;; s*) ans=same ;; n*) ans=unreadable ;; *) ans="no answer" ;;
+  esac
+  note "level $n nits ($what): actual_brightness $(cat "$p/actual_brightness" 2>/dev/null), owner: $ans"
+  [[ $ans == unreadable || $ans == "no answer" ]] && return 1
+  good=$n
+  return 0
+}
+
+note "k114s-backlight-check $(date -Is), kernel $(uname -r)"
+note "max_brightness $max, device-tree max ${dt_max:-?}, kernel floor ${dt_min:-none}, start reading $start, lowest level this run writes $lowest"
+echo
+echo "If the screen goes dark or unreadable at any point: do nothing. After $timeout s the last level"
+echo "you confirmed comes back. Shift + brightness-up asks for 100 % independently of this script."
+
+# 1. Take over at the level the device reports. Until the first write the kernel may not know
+#    the panel's real level (it then reports half the maximum), so the picture may jump here.
+first=$start
+(( first < lowest )) && first=$(( max / 2 ))
+if ! step "$first" "first write, the level the device reported"; then restore; note "stopped at the first write"; exit 1; fi
+# 2. The maximum: this is what 100 % means.
+step "$max" "maximum" || { restore; note "stopped at the maximum"; exit 1; }
+# 3. Down in steps, each confirmed readable before the next. Stops at the first one that is not.
+done_levels=" $first $max "
+for pct in 50 25 10 5 2 1; do
+  n=$(( max * pct / 100 ))
+  (( n < lowest )) && n=$lowest
+  [[ $done_levels == *" $n "* ]] && continue
+  done_levels+="$n "
+  if ! step "$n" "$pct % of the maximum"; then restore; note "descent stopped below $good nits"; break; fi
+done
+# 4. Back to where it started.
+set_level "$first"
+note "finished; left at $first nits. lowest level confirmed readable: ${good:-none}"
+trap - INT TERM HUP
+echo
+echo "Result file (no serials or addresses in it): $out"

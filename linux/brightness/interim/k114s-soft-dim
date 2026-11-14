@@ -13,26 +13,36 @@
 #
 # The percentage is approximate luminance: pixel values are multiplied by (level/100)^(1/2.2).
 # Limits: 8-bit output, so low levels band; screenshots may or may not include the dimming;
-# a Hyprland config reload drops it (run the tool again). Floor: 10 %.
+# a Hyprland config reload, a new session or a restart drops it (run the tool again).
+# Floor: 10 %, so the picture cannot be dimmed to black. Nothing is saved: the level is read
+# back from Hyprland's own option each time.
 #
 # Status: written from Hyprland 0.57.2 source (applyScreenShader); the shader compiles with
-# glslangValidator. Not yet run against the compositor on the K114s (K114S_DIM_DRY_RUN=1 prints
-# the command instead of running it).
+# glslangValidator. NOT yet run against the compositor on the K114s, and its cost on the
+# software renderer this Mac uses today is not measured (K114S_DIM_DRY_RUN=1 prints the command
+# instead of running it; K114S_DIM_CURRENT=N stands in for the level read from Hyprland).
+# The on-screen note is a text line ("Software dim 60%"), not Omarchy's brightness bar;
+# K114S_DIM_NO_OSD=1 turns it off.
+#
+# Not installed by anything. See linux/brightness/README.md for where the files go.
 set -euo pipefail
 
-state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/k114s-soft-dim
 run_dir=${XDG_RUNTIME_DIR:-/tmp}/k114s-soft-dim
 floor=10
 
+# The level in force is the one in the shader Hyprland has loaded (dim-N.frag); none means 100.
 current() {
-  local v=100
-  [[ -r $state_dir/level ]] && read -r v <"$state_dir/level"
-  [[ $v =~ ^[0-9]+$ ]] && (( v >= floor && v <= 100 )) || v=100
-  echo "$v"
+  local v=${K114S_DIM_CURRENT:-}
+  if [[ -z $v ]]; then
+    v=$(hyprctl getoption decoration:screen_shader 2>/dev/null |
+      sed -n 's|^str: .*/k114s-soft-dim/dim-\([0-9]\{1,3\}\)\.frag$|\1|p') || v=""
+  fi
+  [[ $v =~ ^[0-9]+$ ]] && (( 10#$v >= floor && 10#$v <= 100 )) || v=100
+  echo "$(( 10#$v ))"
 }
 
 apply() {
-  local level=$1 shader arg
+  local level=$1 shader arg lua
   if (( level >= 100 )); then
     arg='[[EMPTY]]'
   else
@@ -53,15 +63,27 @@ apply() {
     }' >"$shader"
     arg=$shader
   fi
-  if [[ -n ${K114S_DIM_DRY_RUN:-} ]]; then
-    echo "hyprctl keyword decoration:screen_shader $arg"
+  # This Hyprland is configured in Lua, where Omarchy's own scripts set options with
+  # `hyprctl eval 'hl.config(...)'` and fall back to `hyprctl keyword`. Same order here.
+  if (( level >= 100 )); then lua='hl.config({ decoration = { screen_shader = "" } })'
   else
-    hyprctl keyword decoration:screen_shader "$arg" >/dev/null
+    [[ $shader != *[\"\\]* ]] || { echo "k114s-soft-dim: unusable path: $shader" >&2; exit 1; }
+    lua="hl.config({ decoration = { screen_shader = \"$shader\" } })"
   fi
-  mkdir -p "$state_dir"
-  echo "$level" >"$state_dir/level"
-  if [[ -z ${K114S_DIM_DRY_RUN:-} ]] && command -v omarchy-osd >/dev/null; then
-    omarchy-osd -i brightness -p "$level" || true
+  if [[ -n ${K114S_DIM_DRY_RUN:-} ]]; then
+    echo "hyprctl eval '$lua' || hyprctl keyword decoration:screen_shader $arg"
+  else
+    hyprctl eval "$lua" >/dev/null 2>&1 ||
+      hyprctl keyword decoration:screen_shader "$arg" >/dev/null ||
+      { echo "k114s-soft-dim: Hyprland refused the screen shader" >&2; exit 1; }
+  fi
+  # A text line, not the brightness bar: this is not the panel's brightness.
+  if [[ -z ${K114S_DIM_DRY_RUN:-} && -z ${K114S_DIM_NO_OSD:-} ]] && command -v omarchy-osd >/dev/null; then
+    if (( level >= 100 )); then
+      omarchy-osd -i brightness -m "Software dim off" || true
+    else
+      omarchy-osd -i brightness -m "Software dim $level%" || true
+    fi
   fi
 }
 

@@ -1,0 +1,107 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Wed, 11 Nov 2026 11:18:49 -0700
+Subject: [PATCH] drm/apple: answer the PMU temperature for every panel, quiet
+ the TAOC fallback
+
+The firmware asks the AP for the PMU temperature property at boot (callback
+D401 "PMUS"/"Temperature") for its panel compensation's initial guess; the
+driver answered it only for mini-LED panels, so the OLED K116s logged
+"set_PMU_service: failed to read PMU temperature property!" twice. Answer
+with the battery temperature as the H17P and v14.7 paths do.
+
+The DCP also reads eleven SMC temperature keys itself for its 2D virtual
+temperature model and logs once a second that TAOC is -127.0, the SMC's
+no-sample value, and that it uses the 2DVT fallback. TAOC and its siblings
+are AOP-sourced sensors the SMC has no sample for until the AOP's sensor
+servers run, so route that record to the debug level; another sensor,
+value or verdict stays at info.
+
+This is a behaviour change for every panel that is not mini-LED, on
+every firmware this template drives: the firmware's PMUS "Temperature"
+request used to get "false" there and now gets the battery temperature,
+which its panel compensation then takes as the panel's initial
+temperature. Mini-LED panels got the temperature before and still do.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+[thomas: describe the PMUS reply as a behaviour change]
+Signed-off-by: Thomas Glanzmann <thomas@glanzmann.de>
+(cherry picked from commit 50db17f86f92b0a68a58f1f28a84a216cdf73552)
+[k114s: aurora-silicon/linux pull request 1646 (open, head 907bb7ec5990), commit 1 of 3. Tested upstream on a K116s; not booted on a K114s]
+---
+ drivers/gpu/drm/apple/dcp-syslog-test.c |  9 +++++++++
+ drivers/gpu/drm/apple/dcp-syslog.h      | 11 +++++++++++
+ drivers/gpu/drm/apple/iomfb_template.c  | 11 +++++++++--
+ 3 files changed, 29 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/apple/dcp-syslog-test.c b/drivers/gpu/drm/apple/dcp-syslog-test.c
+index a4442810e8..256343fa38 100644
+--- a/drivers/gpu/drm/apple/dcp-syslog-test.c
++++ b/drivers/gpu/drm/apple/dcp-syslog-test.c
+@@ -18,6 +18,8 @@ static void dcp_syslog_transition_test(struct kunit *test)
+ 		  "ready_for_run_mode_change: initiating deferred run mode change: 4 -> 1" },
+ 		{ "UPPipeDCP_H17P.cpp:2014",
+ 		  "ready_for_run_mode_change: initiating deferred run mode change: 2 -> 4" },
++		{ "itorContext_v4.cpp:1324",
++		  "SMC sensor TAOC is an invalid temp -127.0, using 2DVT fallback values" },
+ 	};
+ 	char message[128];
+ 	int i;
+@@ -46,6 +48,13 @@ static void dcp_syslog_unknown_test(struct kunit *test)
+ 		{ "UPPipeDCP_H17P.cpp:2014", "ready_for_run_mode_change: timeout" },
+ 		{ "UPPipeDCP_H17P.cpp:2096", "set_run_mode_safe: error -110" },
+ 		{ "UPPipeDCP_H17P.cpp:2097", "set_run_mode_safe: deferring: 4 -> 1" },
++		/* A different sensor, value or verdict is news. */
++		{ "itorContext_v4.cpp:1324",
++		  "SMC sensor TAOJ is an invalid temp -127.0, using 2DVT fallback values" },
++		{ "itorContext_v4.cpp:1324",
++		  "SMC sensor TAOC is an invalid temp -40.0, using 2DVT fallback values" },
++		{ "itorContext_v4.cpp:1324",
++		  "2DVT thermal sensors valid, using computed virtual temperatures" },
+ 	};
+ 	int i;
+ 
+diff --git a/drivers/gpu/drm/apple/dcp-syslog.h b/drivers/gpu/drm/apple/dcp-syslog.h
+index c1bf4f3616..d54897f453 100644
+--- a/drivers/gpu/drm/apple/dcp-syslog.h
++++ b/drivers/gpu/drm/apple/dcp-syslog.h
+@@ -24,6 +24,17 @@ static inline bool dcp_h17p_syslog_is_debug(const char *context, const char *mes
+ 		       !strcmp(message, "set_run_mode_safe: deferring: 2 -> 4");
+ 	if (!strcmp(context, "UPPipeDCP_H17P.cpp:2014"))
+ 		return !strcmp(message, deferred_4_1) || !strcmp(message, deferred_2_4);
++	/*
++	 * The 27.x panel temperature monitor (IOMFBTemperatureMonitorContext_v4)
++	 * reads its sensor keys from the SMC once a second and falls back to the
++	 * default 2D virtual temperature grid while TAOC holds the SMC's -127.0
++	 * "no sample" sentinel (the AOP feeds TAOC/TAOJ/TAOP in macOS; nothing
++	 * does under Linux).  Match the exact record so another sensor or value
++	 * stays visible.
++	 */
++	if (!strcmp(context, "itorContext_v4.cpp:1324"))
++		return !strcmp(message, "SMC sensor TAOC is an invalid temp -127.0, "
++					"using 2DVT fallback values");
+ 	return false;
+ }
+ 
+diff --git a/drivers/gpu/drm/apple/iomfb_template.c b/drivers/gpu/drm/apple/iomfb_template.c
+index c118939c93..3d20d6ca1f 100644
+--- a/drivers/gpu/drm/apple/iomfb_template.c
++++ b/drivers/gpu/drm/apple/iomfb_template.c
+@@ -1064,8 +1064,15 @@ dcpep_cb_get_uint_prop(struct apple_dcp *dcp, struct dcp_get_uint_prop_req *req)
+ 	    .value = 0
+ 	};
+ 
+-	if (dcp->panel.has_mini_led &&
+-	    memcmp(req->obj, "SUMP", sizeof(req->obj)) == 0) { /* "PMUS */
++	/*
++	 * "PMUS"/"Temperature": the battery temperature in 0.1 K.  Every
++	 * firmware with a panel asks for it from TableCompensator::
++	 * set_PMU_service(), mini-LED or not: the OLED firmware (27.x on the
++	 * K116s) uses it as the panel's initial temperature guess and logs
++	 * "failed to read PMU temperature property!" when the reply is
++	 * false.  The H17P table already answers it unconditionally.
++	 */
++	if (memcmp(req->obj, "SUMP", sizeof(req->obj)) == 0) { /* "PMUS */
+ 	    if (strncmp(req->key, "Temperature", sizeof(req->key)) == 0) {
+ 		resp.value = dcp_pmu_temperature(dcp->dev);
+ 		resp.ret = true;

@@ -15,8 +15,10 @@ Nothing here is owner-observed yet.
   starting Omarchy carries the level over. **This is not yet tested on a K114s or on any OLED
   model.** The test below costs one restart and writes nothing from Linux.
 - Linux cannot read `backlight-nits` on this Mac today (no NVRAM device in the K114s device tree).
-- A compositor-side control can only dim below the boot level. `tools/brightness/k114s-soft-dim`
-  is such a control, clearly not a brightness control, and not yet run on the compositor.
+- A compositor-side control can only dim below the boot level.
+  `linux/brightness/interim/k114s-soft-dim` is such a control, clearly not a brightness control,
+  and not yet run on the compositor.
+- What changes once the panel is on the display coprocessor is in `docs/r3-brightness.md`.
 
 ## What decides the level
 
@@ -98,8 +100,9 @@ raise the brightness.
 
 ## Interim dimming (software only)
 
-`tools/brightness/k114s-soft-dim` asks Hyprland to scale every pixel in its final render pass
-(`decoration:screen_shader`). On an OLED panel that does lower the light each pixel emits, but:
+`linux/brightness/interim/k114s-soft-dim` asks Hyprland to scale every pixel in its final render
+pass (`decoration:screen_shader`). On an OLED panel that does lower the light each pixel emits,
+but:
 
 - 100 % is the boot level. It can never go above it.
 - Output is 8-bit, so low levels show banding.
@@ -110,8 +113,10 @@ raise the brightness.
   exists in the running Hyprland (`hyprctl getoption decoration:screen_shader`). It has **not**
   been run against the compositor on this Mac.
 
-It is not bound to the brightness keys. Binding them would make the keys look as if they work
-while the upper limit stays wherever the boot stage left it; that choice is the owner's.
+Nothing installs it and nothing binds it to the brightness keys. Binding them would make the keys
+look as if they work while the upper limit stays wherever the boot stage left it; that choice is
+the owner's. `linux/brightness/README.md` lists the files, where they would go, and the four
+binding lines for an owner who wants it.
 
 ## Could not determine
 
