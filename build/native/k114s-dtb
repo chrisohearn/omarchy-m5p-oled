@@ -1,0 +1,25 @@
+#!/bin/bash
+# k114s-dtb: build device tree sources that live outside a kernel tree (the integration
+# repository's dts/ directory) against a kernel tree, without modifying that tree.
+# usage: k114s-dtb DTSDIR NAME [OUTDIR] [KTREE]
+#   DTSDIR  directory with NAME.dts and the .dtsi files it adds (copied over the kernel's apple/ dir)
+#   NAME    e.g. t6050-k114s-r1
+#   OUTDIR  default: a new temp directory (printed)
+#   KTREE   default: ~/k114s-build/src/base
+# Same preprocessing and dtc flags as the kernel build (and the repository's build/build-dtb.sh).
+# Check flags a dtc does not know are dropped: they only silence warnings and do not change the blob.
+set -euo pipefail
+source "${K114S_BUILD_ROOT:-$HOME/k114s-build}/env.sh"
+dts=$(realpath "${1:?DTSDIR}"); n=${2:?NAME}; out=${3:-$(mktemp -d "${TMPDIR:-/tmp}/k114s-dtb.XXXXXX")}; k=$(realpath "${4:-$B/src/base}")
+DTC=${DTC:-dtc}; mkdir -p "$out"; out=$(realpath "$out")
+work=$(mktemp -d "${TMPDIR:-/tmp}/k114s-dtb-tree.XXXXXX"); trap 'rm -rf "$work"' EXIT
+cp -a --reflink=auto "$k/arch/arm64/boot/dts/apple" "$work/apple"
+cp "$dts"/*.dts "$dts"/*.dtsi "$work/apple/" 2>/dev/null || cp "$dts"/*.dts "$work/apple/"
+flags=()
+for w in unit_address_vs_reg avoid_unnecessary_addr_size alias_paths graph_child_address simple_bus_reg unique_unit_address interrupt_provider; do
+  if echo '/dts-v1/; / { };' | "$DTC" -Wno-"$w" -O dtb -o /dev/null - 2>/dev/null; then flags+=(-Wno-"$w"); fi
+done
+clang -E -nostdinc -I "$k/scripts/dtc/include-prefixes" -I "$k/include" -I "$work/apple" -undef -D__DTS__ \
+  -x assembler-with-cpp -o "$out/$n.dts.tmp" "$work/apple/$n.dts"
+"$DTC" -O dtb -o "$out/$n.dtb" -b 0 -i "$work/apple" "${flags[@]}" "$out/$n.dts.tmp"
+sha256sum "$out/$n.dtb"

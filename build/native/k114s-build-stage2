@@ -1,0 +1,22 @@
+#!/bin/bash
+# k114s-build-stage2: build Aura (the m1n1-derived Stage 2 loader) the way betizzel/omarchy-m5's
+# installer/recipes/m1n1-aurora-j714s/PKGBUILD does, natively, with the user-local toolchain.
+# usage: k114s-build-stage2 [VARIANT]     source tree ~/k114s-build/aura/VARIANT (default: base)
+# Output: aura/VARIANT/build/aura.bin = the Stage 2 that the package installs as
+#         /usr/lib/asahi-boot/m1n1.bin (ESP_STAGE2=1 build). Stage 1 objects are NOT built here:
+#         Stage 1 is enrolled from macOS and is out of scope (never replaced by this project).
+# Nothing is installed. Putting a Stage 2 on the ESP is a root step for the lead.
+set -euo pipefail
+source "${K114S_BUILD_ROOT:-$HOME/k114s-build}/env.sh"
+v=${1:-base}; src=$B/aura/$v; rec=$B/recipe/release3/installer/recipes/m1n1-aurora-j714s
+[[ -f $src/Makefile ]] || { echo "no $src" >&2; exit 1; }
+export RUSTUP_TOOLCHAIN=1.89.0
+rustup toolchain install 1.89.0 --profile minimal --target aarch64-unknown-none-softfloat >/dev/null
+logo=$B/aura/logo; mkdir -p "$logo"
+for s in 48 128 256; do cp "$rec/bootlogo_$s.bin" "$logo/omarchy_$s.bin"; done
+cd "$src"
+# env.sh exports ARCH=arm64 for Kbuild; Aura's Makefile reads ARCH as a cross prefix, so drop it.
+flags=(RELEASE=1 CHAINLOADING=1 USE_CLANG=1 LOGO_DIR="$logo" BUILTIN_LOGO=omarchy ESP_STAGE2=1)
+env -u ARCH -u KBUILD_BUILD_TIMESTAMP make clean >/dev/null
+env -u ARCH make -j"${K114S_JOBS:-4}" "${flags[@]}"
+ls -l build/aura.bin; sha256sum build/aura.bin

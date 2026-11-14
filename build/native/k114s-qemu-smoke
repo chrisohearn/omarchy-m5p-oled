@@ -1,0 +1,75 @@
+#!/bin/bash
+# k114s-qemu-smoke: boot a built kernel Image in user-local QEMU (machine "virt", TCG) with a tiny
+# initramfs. This is an emulator test: it shows the Image boots, runs userspace and (mode
+# "modules") that every built module loads. It says nothing about the K114s hardware.
+#
+# usage: k114s-qemu-smoke shell   OBJDIR          auto: boot, print the banner, power off (exit 0 on success)
+#        k114s-qemu-smoke console OBJDIR          interactive busybox shell on the serial console (Ctrl-A X quits)
+#        k114s-qemu-smoke modules OBJDIR [INIT]   install all modules into the initramfs and run INIT
+#                                                 (default: build/qemu-test-init of the integration repo,
+#                                                 path in K114S_QEMU_TEST_INIT) which modprobes each one
+# OBJDIR is the kernel output directory (the O= of the build), e.g. ~/k114s-build/build/r1.
+# Environment: K114S_QEMU_ACCEL (default tcg; kvm is deliberately not the default on this machine),
+#              K114S_QEMU_MEM (default 2G shell/console, 6G modules), K114S_QEMU_TIMEOUT seconds.
+set -euo pipefail
+source "${K114S_BUILD_ROOT:-$HOME/k114s-build}/env.sh"
+mode=${1:?mode: shell|console|modules}; O=$(realpath "${2:?kernel output directory}"); init_arg=${3:-}
+img=$O/arch/arm64/boot/Image; [[ -s $img ]] || { echo "no $img" >&2; exit 1; }
+rel=$(cat "$O/include/config/kernel.release")
+work=$(mktemp -d "${TMPDIR:-/tmp}/k114s-qemu.XXXXXX"); trap 'rm -rf "$work"' EXIT
+root=$work/root; mkdir -p "$root"/{usr/bin,usr/lib,dev,proc,sys,tmp,run}
+ln -s usr/bin "$root/bin"; ln -s usr/bin "$root/sbin"; ln -s usr/lib "$root/lib"; ln -s usr/lib "$root/lib64"; ln -s bin "$root/usr/sbin"
+addbin() { # copy host binaries and the shared libraries they need
+  local b f
+  for b in "$@"; do
+    f=$(PATH=/usr/bin:/usr/lib/initcpio command -v "$b"); f=$(realpath "$f")
+    install -m755 "$f" "$root/usr/bin/$b"
+    while read -r lib; do
+      [[ -e $root/usr/lib/$(basename "$lib") ]] || install -m755 "$(realpath "$lib")" "$root/usr/lib/$(basename "$lib")"
+    done < <(ldd "$f" | grep -o '/[^ ]*\.so[^ ]*' | sort -u)
+  done
+}
+case $mode in
+shell|console)
+  addbin busybox mount setsid    # mkinitcpio's busybox has no mount or setsid applet: take util-linux's
+  for a in $("$root/usr/bin/busybox" --list); do [[ -e $root/usr/bin/$a ]] || ln -s busybox "$root/usr/bin/$a"; done
+  cat > "$root/init" <<'INIT'
+#!/usr/bin/sh
+export PATH=/usr/bin
+mount -t devtmpfs dev /dev; mount -t proc proc /proc; mount -t sysfs sys /sys
+echo "K114S-QEMU-SHELL release=$(uname -r) version=$(uname -v) machine=$(uname -m)"
+echo "K114S-QEMU-SHELL cmdline=$(cat /proc/cmdline)"
+if grep -q k114s.console /proc/cmdline; then
+  echo "interactive shell; 'poweroff -f' or Ctrl-A X to leave"
+  setsid cttyhack sh
+else
+  echo "K114S-QEMU-SHELL sh -c ran: $(sh -c 'echo ok')"
+  echo "K114S-QEMU-SHELL end"
+fi
+poweroff -f
+INIT
+  mem=${K114S_QEMU_MEM:-2G}; tmo=${K114S_QEMU_TIMEOUT:-300} ;;
+modules)
+  init=${init_arg:-${K114S_QEMU_TEST_INIT:?set K114S_QEMU_TEST_INIT to build/qemu-test-init of the integration repo, or pass INIT}}
+  addbin bash modprobe sha256sum stat wc basename cat sleep uname cut grep mount
+  ( cd "$(readlink -f "$O/source")" && kmake -s O="$O" INSTALL_MOD_PATH="$root/usr" INSTALL_MOD_STRIP=1 DEPMOD=/usr/bin/depmod modules_install ) >"$work/modinst.log" 2>&1 \
+    || { tail -20 "$work/modinst.log" >&2; exit 1; }
+  rm -f "$root/usr/lib/modules/$rel"/{build,source}
+  install -m755 "$init" "$root/init"
+  mem=${K114S_QEMU_MEM:-6G}; tmo=${K114S_QEMU_TIMEOUT:-1800} ;;
+*) echo "unknown mode $mode" >&2; exit 2 ;;
+esac
+chmod 755 "$root/init"
+( cd "$root" && find . -print0 | cpio --null -o -H newc --quiet | zstd -q -3 -T0 > "$work/initramfs.cpio.zst" )
+echo "k114s-qemu-smoke: release=$rel initramfs=$(du -h "$work/initramfs.cpio.zst" | cut -f1) mode=$mode accel=${K114S_QEMU_ACCEL:-tcg}" >&2
+append="console=ttyAMA0 panic=-1 rdinit=/init loglevel=${K114S_QEMU_LOGLEVEL:-7}"
+[[ $mode == console ]] && append+=" k114s.console"
+qemu=(qemu-system-aarch64 -machine virt,gic-version=3 -accel "${K114S_QEMU_ACCEL:-tcg,thread=multi}" -cpu max
+      -smp "${K114S_QEMU_SMP:-4}" -m "$mem" -nographic -no-reboot -nodefaults -serial mon:stdio
+      -kernel "$img" -initrd "$work/initramfs.cpio.zst" -append "$append")
+if [[ $mode == console ]]; then exec "${qemu[@]}"; fi
+log=${K114S_QEMU_LOG:-$work/serial.log}
+set +e; timeout "$tmo" "${qemu[@]}" < /dev/null 2>&1 | tee "$log" | grep -a -E 'K114S-|Linux version|Kernel panic|Unable to|BUG:|Oops' ; set -e
+if [[ $mode == shell ]]; then grep -a -q 'K114S-QEMU-SHELL end' "$log" && grep -a -q "release=$rel " "$log" && { echo "k114s-qemu-smoke: PASS (shell, $rel)"; exit 0; }
+else grep -a -q 'K114S-TEST end' "$log" && { echo "k114s-qemu-smoke: PASS (modules run completed; read the K114S-TEST lines above)"; exit 0; }; fi
+echo "k114s-qemu-smoke: FAIL (serial log: $log)" >&2; [[ -n ${K114S_QEMU_LOG:-} ]] || cp "$log" "$B/logs/qemu-smoke-failed.log"; exit 1

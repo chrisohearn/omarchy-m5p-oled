@@ -1,0 +1,5 @@
+#!/bin/bash
+# User-local QEMU 11.1.3 (Arch Linux ARM packages extracted under tools/qemu; nothing system-wide).
+B="${K114S_BUILD_ROOT:-$HOME/k114s-build}"
+export LD_LIBRARY_PATH="$B/tools/qemu/usr/lib:$B/tools/alarm/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+exec "$B/tools/qemu/usr/bin/qemu-system-aarch64" -L "$B/tools/qemu/usr/share/qemu" "$@"
