@@ -111,12 +111,12 @@ ok "hook names the boot chain" "$(grep -c -E '^Target = (linux-aurora|m1n1-auror
 ok "hook covers install, upgrade and remove" "$(grep -c -E '^Operation = (Install|Upgrade|Remove)$' "$hook")" 4
 ok "hook also stops the removal a channel switch makes" "$(sed -n '/^# A channel switch/,/^\[Action\]/p' "$hook" | grep -c -E '^(Operation = Remove|Target = omarchy|Target = omarchy-settings)$')" 3
 ok "hook has two triggers and one action" "$(grep -c '^\[Trigger\]$' "$hook")$(grep -c '^\[Action\]$' "$hook")" 21
-out=$(printf 'linux-aurora\nm1n1-aurora\n' | K114S_ROOT=$r sh "$g" 2>&1); ok "guard stops a transaction on the boot chain" "$?" 1
+out=$(printf 'linux-aurora\nm1n1-aurora\n' | K114S_NO_MOUNTCHECK=1 K114S_ROOT=$r sh "$g" 2>&1); ok "guard stops a transaction on the boot chain" "$?" 1
 ok "guard names the packages" "$(echo "$out" | grep -c 'linux-aurora m1n1-aurora')" 1
 ok "guard says how to put the holds back" "$(echo "$out" | grep -c 'apply-holds')" 1
 mkdir -p "$r/etc/omarchy-k114s"; : > "$r/etc/omarchy-k114s/allow-coupled-update"
-printf 'linux-aurora\n' | K114S_ROOT=$r sh "$g" >/dev/null 2>&1; ok "guard lets a deliberate update through" "$?" 0
-rm "$r/etc/omarchy-k114s/allow-coupled-update"; printf '' | K114S_ROOT=$r sh "$g" >/dev/null 2>&1; ok "guard passes with no targets" "$?" 0
+printf 'linux-aurora\n' | K114S_NO_MOUNTCHECK=1 K114S_ROOT=$r sh "$g" >/dev/null 2>&1; ok "guard lets a deliberate update through" "$?" 0
+rm "$r/etc/omarchy-k114s/allow-coupled-update"; printf '' | K114S_NO_MOUNTCHECK=1 K114S_ROOT=$r sh "$g" >/dev/null 2>&1; ok "guard passes with no targets" "$?" 0
 
 # --- boot check declaration, install reasons, record ------------------------------------------
 ok "owner-boot-chain written" "$(grep -c 'omarchy-m5p-oled bundle r2' "$r/etc/omarchy-mac-boot/owner-boot-chain")" 1
@@ -155,9 +155,10 @@ b=$(snap "$r"); out=$(run "$r"); ok "damaged repair kernel image refused" "$(ech
 r=$(mk); rm "$r/boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi"; b=$(snap "$r"); out=$(run "$r"); ok "missing repair kernel image refused" "$(echo "$out" | grep -c 'does not match')" 1; ok "missing image: nothing changed" "$(snap "$r")" "$b"
 r=$(mk); b=$(snap "$r"); out=$(UV="#1 SMP PREEMPT K114S-R1A Sat Nov 14 2026" run "$r"); ok "running r1a against an r1 image refused" "$(echo "$out" | grep -c 'boot the repair entry again')" 1; ok "variant mismatch: nothing changed" "$(snap "$r")" "$b"
 r=$(mk); run "$r" >/dev/null; g=$(lib "$r")/esp-space-guard
-K114S_ROOT=$r sh "$g" >/dev/null 2>&1; ok "space guard passes with room on the ESP" "$?" 0
-out=$(K114S_ROOT=$r K114S_ESP_MIN_FREE=999999999999999 sh "$g" 2>&1); ok "space guard stops package changes when the ESP is too full" "$?" 1; ok "and says why" "$(echo "$out" | grep -c 'K114s space guard: stopped')" 1
-mkdir -p "$r/etc/omarchy-k114s"; : > "$r/etc/omarchy-k114s/allow-low-esp"; K114S_ROOT=$r K114S_ESP_MIN_FREE=999999999999999 sh "$g" >/dev/null 2>&1; ok "space guard can be overridden on purpose" "$?" 0
+K114S_NO_MOUNTCHECK=1 K114S_ROOT=$r sh "$g" >/dev/null 2>&1; ok "space guard passes with room on the ESP" "$?" 0
+out=$(K114S_NO_MOUNTCHECK=1 K114S_ROOT=$r K114S_ESP_MIN_FREE=999999999999999 sh "$g" 2>&1); ok "space guard stops package changes when the ESP is too full" "$?" 1; ok "and says why" "$(echo "$out" | grep -c 'K114s space guard: stopped')" 1
+mkdir -p "$r/etc/omarchy-k114s"; : > "$r/etc/omarchy-k114s/allow-low-esp"; K114S_NO_MOUNTCHECK=1 K114S_ROOT=$r K114S_ESP_MIN_FREE=999999999999999 sh "$g" >/dev/null 2>&1; ok "space guard can be overridden on purpose" "$?" 0
+rm -f "$r/etc/omarchy-k114s/allow-low-esp"; out=$(K114S_ROOT=$r sh "$g" 2>&1); ok "space guard stops when /boot/efi is not a mount point" "$?" 1; ok "and says so" "$(echo "$out" | grep -c 'is not mounted')" 1
 ok "space hook: pre-transaction, aborting, every package" "$(grep -c -E '^(When = PreTransaction|AbortOnFail|Target = \*|Exec = /usr/local/lib/omarchy-k114s/esp-space-guard)$' "$r/etc/pacman.d/hooks/01-k114s-esp-space.hook")" 4
 r=$(mk); printf '# no options section\n[core]\n' > "$r/etc/pacman.conf"; b=$(snap "$r"); out=$(run "$r"); ok "pacman.conf without [options]: stops" "$(echo "$out" | grep -c 'could not find')" 1; ok "no [options]: nothing changed" "$(snap "$r")" "$b"
 r=$(mk); mkdir -p "$(lib "$r")/persist-r1"; out=$(run "$r"); ok "refused while r1's persistence is applied" "$(echo "$out" | grep -c "bundle r1's persistence is applied")" 1

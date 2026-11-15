@@ -10,6 +10,8 @@
 root=${K114S_ROOT:-}
 min=${K114S_ESP_MIN_FREE:-104857600}
 [ -e "$root/etc/omarchy-k114s/allow-low-esp" ] && exit 0
+# a failed ESP mount (fstab nofail) would make df report the root filesystem: stop instead
+mountpoint -q "$root/boot/efi" || [ -n "${K114S_NO_MOUNTCHECK:-}" ] || { echo "K114s space guard: stopped. /boot/efi is not mounted, so its free space cannot be checked. Mount it (sudo mount /boot/efi) and retry. Nothing has been changed." >&2; exit 1; }
 free=$(df -B1 --output=avail "$root/boot/efi" 2>/dev/null | tail -n 1 | tr -d ' ')
 case $free in '' | *[!0-9]*) exit 0 ;; esac
 [ "$free" -ge "$min" ] && exit 0

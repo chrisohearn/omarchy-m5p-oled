@@ -132,7 +132,7 @@ selftest_eval() {
   [ "$sel" = "$aid" ] || { echo "self-test: NOT MEASURED: this boot started '$sel', not '$aid'"; return 0; }
   f=$(store_file) && [ -r "$f" ] || { echo "self-test: NOT MEASURED: no U-Boot variable file"; return 0; }
   e=${K114S_BOOT_EPOCH:-$(( $(date +%s) - $(cut -d. -f1 /proc/uptime) ))}
-  [ "$(stat -c %Y "$f")" -le "$e" ] || { echo "self-test: NOT MEASURED: $f was written during this boot (a save ran); arm and measure again"; return 0; }
+  mt=$(stat -c %Y "$f"); [ "$mt" -le "$e" ] || { echo "self-test: NOT MEASURED: $f was written during this boot (a save ran), or its FAT time is not local time: mtime $mt, boot start $e (epoch seconds; a difference near a whole number of hours is a time-zone offset); arm and measure again"; return 0; }
   if [ -e "$VAR" ] || strings -a -e l "$f" | grep -qxF LoaderEntryOneShot; then
     rm -f "$m"; echo "self-test: FAILED: the request survived Limine's erase on disk: the mechanism is not hang-safe; do not arm a kernel trial (run: clear)"; return 1
   fi
@@ -141,7 +141,8 @@ selftest_eval() {
 # previous boot's id (dashless), from the journal
 prev_boot() { [ -n "${K114S_PREVBOOT:-}" ] && { echo "$K114S_PREVBOOT"; return; }; journalctl -b -1 -n1 -o json 2>/dev/null | sed -n 's/.*"_BOOT_ID":"\([0-9a-f]*\)".*/\1/p' | head -1; }
 
-drop_var() { [ -e "$VAR" ] && { chattr -i "$VAR" 2>/dev/null; rm -f "$VAR"; }; return 0; }
+# also voids the self-test's arming record: with the request gone, a later boot of entry 1 proves nothing
+drop_var() { rm -f "$STATE/boot-once-armed"; [ -e "$VAR" ] && { chattr -i "$VAR" 2>/dev/null; rm -f "$VAR"; }; return 0; }
 
 cmd_clear() {
   drop_var; [ -x "$SAVE" ] && "$SAVE" || echo "k114s-boot-once: no saver ($SAVE); the variable is only gone from this boot's memory" >&2

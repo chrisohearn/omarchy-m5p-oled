@@ -108,5 +108,11 @@ mk s3; rm $W/s3/state/boot-once-selftest-ok; run s3 arm "$REPAIR" >/dev/null; re
 out=$(run s3 status); has "self-test is not measured when this is not the boot after arming" "$out" "NOT MEASURED: this is not the boot right after arming"; ok "not measured: no marker" "$(ls $W/s3/state | grep -c selftest-ok)" 0
 mk s4; rm $W/s4/state/boot-once-selftest-ok; run s4 arm "$REPAIR" >/dev/null; reboot s4 boot2; echo 0 > $W/s4/epoch
 out=$(run s4 status); has "self-test is not measured when a save ran during this boot" "$out" "written during this boot"
+# clear between arm and reboot voids the self-test: no PASSED, no marker, no real target
+mk cl; rm $W/cl/state/boot-once-selftest-ok; has "clear test: the self-test arm succeeds" "$(run cl arm "$REPAIR")" "armed"; run cl clear >/dev/null; ok "clear removes the arming record" "$(ls $W/cl/state | grep -c boot-once-armed)" 0
+reboot cl boot2; out=$(run cl status); ok "a cleared request never gives PASSED" "$(printf '%s' "$out" | grep -c 'self-test: PASSED')" 0; ok "cleared: no marker" "$(ls $W/cl/state | grep -c selftest-ok)" 0
+EXP="has not been measured"; refuse "cleared: a real target still refuses" cl arm Omarchy/linux-k114s
+mk t; rm $W/t/state/boot-once-selftest-ok; run t arm "$REPAIR" >/dev/null; reboot t boot2; echo 0 > $W/t/epoch
+out=$(run t status); has "NOT MEASURED prints the mtime and the boot start" "$out" "mtime [0-9]*, boot start 0"
 echo "k114s-boot-once tests: $pass passed, $fail failed"
 [ "$fail" = 0 ]
