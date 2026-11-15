@@ -1,0 +1,32 @@
+#!/bin/bash
+# k114s-cmp-modules: which modules of a build differ from the installed kernel's modules?
+# usage: k114s-cmp-modules OBJDIR [MODULES_DIR]     MODULES_DIR default: /usr/lib/modules/<release of OBJDIR>
+# Compares the contents of .text .init.text .exit.text .rodata .data per module (so the compiler
+# ident string, debug info, BTF, symbol tables and stripping do not count). Read-only.
+# Prints one line per module that is not SAME, then the totals:
+#   DIFF(<first differing section>) path     code or data changed
+#   NEW path                                 not in the installed tree
+#   and "GONE path" for installed modules the build no longer has.
+# The baseline (build/r1 against the running K114S-R1 install) gives 1725 SAME and 3 DIFF(.rodata):
+# apple-pmp, apple-sep and snd-soc-t8152-aop-audio, Rust modules that embed the path of the Rust
+# standard library sources on the build machine. Anything else in a variant's list is the variant.
+set -euo pipefail
+source "${K114S_BUILD_ROOT:-$HOME/k114s-build}/env.sh"
+if [[ ${1:-} == --one ]]; then
+  O=$2; I=$3; m=$4; t=$(mktemp -d); trap 'rm -rf "$t"' EXIT
+  inst=$I/kernel/$m; [[ -f $I/updates/$(basename "$m") ]] && inst=$I/updates/$(basename "$m")
+  [[ -f $inst ]] || { echo "NEW $m"; exit 0; }
+  for s in .text .init.text .exit.text .rodata .data; do
+    llvm-objcopy -O binary --only-section=$s "$O/$m" "$t/a" 2>/dev/null || : > "$t/a"
+    llvm-objcopy -O binary --only-section=$s "$inst" "$t/b" 2>/dev/null || : > "$t/b"
+    cmp -s "$t/a" "$t/b" || { echo "DIFF($s) $m"; exit 0; }
+  done
+  echo "SAME $m"; exit 0
+fi
+O=$(realpath "${1:?OBJDIR}"); I=${2:-/usr/lib/modules/$(cat "$O/include/config/kernel.release")}
+[[ -d $I/kernel ]] || { echo "no $I/kernel" >&2; exit 1; }
+out=$(mktemp); trap 'rm -f "$out"' EXIT
+( cd "$O" && find . -name '*.ko' -printf '%P\n' | sort ) | xargs -P "${K114S_JOBS:-6}" -n 1 "$0" --one "$O" "$I" > "$out"
+comm -13 <(cd "$O" && find . -name '*.ko' -printf '%P\n' | sort) <(cd "$I/kernel" && find . -name '*.ko' -printf '%P\n' | sort) | sed 's/^/GONE /' >> "$out"
+grep -v '^SAME ' "$out" | sort || true
+echo "totals: $(awk '{sub(/\(.*/,"",$1); c[$1]++} END{for(k in c) printf "%s=%d ", k, c[k]}' "$out")(modules in build: $(grep -c -v '^GONE ' "$out"); installed tree: $I)"
