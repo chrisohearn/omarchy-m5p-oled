@@ -21,6 +21,16 @@ pattern='/Users/[a-z]|/home/[a-z][a-z0-9]*/|BEGIN [A-Z ]*PRIVATE KEY|gh[opsu]_[A
 hits=$(echo "$files" | tr '\n' '\0' | xargs -0 grep -n -I -E "$pattern" 2>/dev/null |
   grep -v -E 'noreply@anthropic\.com|users\.noreply\.github\.com|@localhost|build/check-publishable\.sh|git@github\.com' || true)
 if [ -n "$hits" ]; then echo "$hits" | cut -c1-200; flag "private-looking strings (above)"; fi
+# 2b. the owner's own private terms, kept outside the repository (one extended regex per line;
+#     ${XDG_CONFIG_HOME:-~/.config}/omarchy-m5p-oled/publish-deny), so the list itself is never published
+deny=${K114S_PUBLISH_DENY:-${XDG_CONFIG_HOME:-$HOME/.config}/omarchy-m5p-oled/publish-deny}
+if [ -r "$deny" ]; then
+  while IFS= read -r p; do
+    case "$p" in ''|'#'*) continue ;; esac
+    h=$(echo "$files" | tr '\n' '\0' | xargs -0 grep -l -I -E -e "$p" 2>/dev/null || true)
+    [ -z "$h" ] || { echo "$h"; flag "a term from the local deny list is in the files above"; }
+  done < "$deny"
+fi
 # 3. nothing of Apple's by name
 for f in $files; do
   case "$f" in *ftab*.bin|*tpmtfw*|*adt*.bin|*BuildManifest*) flag "Apple file: $f" ;; esac

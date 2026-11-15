@@ -444,7 +444,7 @@ D0. Backups and facts. Stop if a hash pair differs: the recovery copy is what th
     sudo sh -c 'sha256sum /boot/efi/EFI/Linux/*.efi /var/lib/k114s-recovery/uki/*.efi | cut -c1-16,65-'
     # expect cce616053713ec3b (omarchy_linux-aurora.efi) twice and 51148ff7005d2986 (omarchy_linux-aurora-k114s.efi) twice
 
-D1. Free the slot, and check that the repair entry survived. **Prerequisite: step 1 is complete (the owner confirmed `sudo ./k114s-repair status` with the fixed tool on the Mac) and step B passed (the marker exists).**
+D1. Free the slot, and check that the repair entry survived. **Prerequisite: the ESP is not trimmed (if `linux/esp-trim --apply` was run, `--restore` it first, or D4 will STOP: `docs/esp-space.md`); step 1 is complete (the owner confirmed `sudo ./k114s-repair status` with the fixed tool on the Mac) and step B passed (the marker exists).**
 
     (
     : "${K:?STOP: set K first (top of this section)}"
@@ -547,8 +547,12 @@ After the reboot, run the whole block (it stops at its first line if the ESP is 
       { echo "STOP: the copied Stage 2 is not the built one; nothing is armed (sudo rm /boot/efi/m1n1/boot-ctxr-r3a.bin)"; exit 1; }
     sudo $K arm Omarchy/linux-k114s --with-stage2-trial || { echo "STOP: the arm refused; nothing is armed"; exit 1; }    # only this check is lifted
     # the Stage 2 trial last: if writing it fails, the pending request alone is step E's configuration, already proven
-    sudo sh -c "printf 'armed\nm1n1/boot-ctxr-r3a.bin\n' > /boot/efi/aura-try && sync -f /boot/efi" ||
-      { echo "STOP: aura-try was not written; the next boot is step E's configuration (r3a kernel, proven tree)"; exit 1; }
+    sudo sh -c "printf 'armed\nm1n1/boot-ctxr-r3a.bin\n' > /boot/efi/aura-try && sync -f /boot/efi" || {
+      # the file may already read armed (only the sync failed): spend it, then say what is left
+      sudo sh -c "printf 'spent\nm1n1/boot-ctxr-r3a.bin\n' > /boot/efi/aura-try; sync -f /boot/efi"
+      [ "$(sudo sed -n 1p /boot/efi/aura-try 2>/dev/null)" = spent ] || {
+        echo "STOP: aura-try does not read spent, so it may still read armed and the next boot may try the Stage 2 file. Do not reboot. Run: sudo cat /boot/efi/aura-try; if the first line is not spent, run: sudo sed -i 1s/armed/spent/ /boot/efi/aura-try && sudo sync -f /boot/efi, then read it again"; exit 1; }
+      echo "STOP: aura-try was not written or not synced, so it may have read armed; it was just set to spent (read back). Check: sudo cat /boot/efi/aura-try (the first line must be spent). The request armed above is still pending: the next boot is step E's configuration (r3a kernel, proven tree)"; exit 1; }
     sudo systemctl reboot                                   # inside the block: a STOP above never reaches it
     )
 
@@ -560,9 +564,15 @@ After the reboot, run the whole block (it stops at its first line if the ESP is 
     (
     : "${K:?STOP: set K first (top of this section): it does not survive the reboot}"
     findmnt /boot/efi >/dev/null || { echo "STOP: /boot/efi is not mounted; go to step Z"; exit 1; }
+    [ "$(sudo sha256sum /boot/efi/m1n1/boot-ctxr-r3-gpu.bin | cut -c1-64)" = 9825a10317866865b49d26bc1df2d0d04a818d385ca62c1a3ce81d96f3d6b8fc ] ||
+      { echo "STOP: m1n1/boot-ctxr-r3-gpu.bin is not the file the GPU trial proved (docs/r3-gpu-result.md); nothing is armed"; exit 1; }
     sudo $K arm Omarchy/linux-k114s --with-stage2-trial || { echo "STOP: the arm refused; nothing is armed"; exit 1; }
-    sudo sh -c "printf 'armed\nm1n1/boot-ctxr-r3-gpu.bin\n' > /boot/efi/aura-try && sync -f /boot/efi" ||
-      { echo "STOP: aura-try was not written; the next boot is step E's configuration (r3a kernel, proven tree)"; exit 1; }
+    sudo sh -c "printf 'armed\nm1n1/boot-ctxr-r3-gpu.bin\n' > /boot/efi/aura-try && sync -f /boot/efi" || {
+      # the file may already read armed (only the sync failed): spend it, then say what is left
+      sudo sh -c "printf 'spent\nm1n1/boot-ctxr-r3-gpu.bin\n' > /boot/efi/aura-try; sync -f /boot/efi"
+      [ "$(sudo sed -n 1p /boot/efi/aura-try 2>/dev/null)" = spent ] || {
+        echo "STOP: aura-try does not read spent, so it may still read armed and the next boot may try the Stage 2 file. Do not reboot. Run: sudo cat /boot/efi/aura-try; if the first line is not spent, run: sudo sed -i 1s/armed/spent/ /boot/efi/aura-try && sudo sync -f /boot/efi, then read it again"; exit 1; }
+      echo "STOP: aura-try was not written or not synced, so it may have read armed; it was just set to spent (read back). Check: sudo cat /boot/efi/aura-try (the first line must be spent). The request armed above is still pending: the next boot is step E's configuration (r3a kernel, proven tree)"; exit 1; }
     touch ~/.config/k114s-gpu-desktop-r3a                  # the guard's second opt-in (the first, ~/.config/k114s-gpu-desktop, is already there)
     sudo mv /etc/omarchy-k114s/stage2-trial.parked-r3a /etc/omarchy-k114s/stage2-trial   # last: a STOP above leaves the trial parked
     sudo systemctl reboot
@@ -580,7 +590,10 @@ re-arms the GPU trial for the next boot, which returns the Mac to the standing s
     findmnt /boot/efi >/dev/null || { echo "STOP: /boot/efi is not mounted and could not be mounted; fix that first, nothing was changed"; exit 1; }
     sudo $K clear || { echo "STOP: clear failed; nothing else was changed"; exit 1; }
     # a Stage 2 trial written by step F or G must not outlive the undo
-    [ "$(sudo sed -n 1p /boot/efi/aura-try 2>/dev/null)" != armed ] || sudo sh -c "sed -i 1s/armed/spent/ /boot/efi/aura-try && sync -f /boot/efi"
+    if [ "$(sudo sed -n 1p /boot/efi/aura-try 2>/dev/null)" = armed ]; then
+      { sudo sh -c "sed -i 1s/armed/spent/ /boot/efi/aura-try && sync -f /boot/efi" && [ "$(sudo sed -n 1p /boot/efi/aura-try 2>/dev/null)" = spent ]; } ||
+        { echo "STOP: aura-try still reads armed or was not synced (sudo cat /boot/efi/aura-try); the request is cleared, nothing else was changed. Run Z again"; exit 1; }
+    fi
     sudo cp -p /etc/default/update-m1n1 /var/lib/k114s-recovery/update-m1n1.before-undo
     echo 'export M1N1_UPDATE_DISABLED=1' | sudo tee -a /etc/default/update-m1n1 >/dev/null
     sudo touch /etc/omarchy-k114s/allow-low-esp                     # the guard also runs on removal
