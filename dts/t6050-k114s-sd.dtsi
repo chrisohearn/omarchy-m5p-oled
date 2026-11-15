@@ -1,0 +1,143 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s: the SD card reader on PCIe port 1 (a Genesys GL9755 behind pci-bridge1, driven by
+ * sdhci-pci; CONFIG_MMC_SDHCI_PCI=m is in the running kernel). DRAFT. NOT booted on a K114s.
+ * NOT included by any tree of this repository (docs/r3-parity-drafts.md, issue #62).
+ *
+ * K114s copy of the K114c node (aurora-silicon/linux #1719, draft, Joshua Warren, 08c6d177e64c),
+ * itself a copy of the J714s one; the K116s tree (#1648, 54348df1, merged, no card tested) has
+ * the same values. The ADT of this Mac equals them (tests/k114s-adt-parity-facts.py, agent-run
+ * 2026-11-15):
+ *   port 1 registers   apcie0 reg[22] 0x211028000 (port1), reg[24] 0x217014000 (phy1),
+ *                      reg[25] 0x211024000 (intr2axi1), reg[3] 0x217020000 (phy-shared)
+ *   port 1 interrupt   apcie0 interrupts[1] = 1531
+ *   PERST#             pci-bridge1 function-perst: gpio0 pin 81
+ *   power              pcie-sdreader function-sd_pwr_en: SMC pcIO key (0x0, 0x190000)
+ *   polarity           card-detect-polarity 1, write-protect-polarity 1 (both active high)
+ *   DART               dart-apcie1 0x211000000, interrupt 1532, manual-availability
+ *   link tunables      pci-bridge1 apcie-config-, pcie-rc- and pcie-rc-gen{3,4,5}-shadow-tunables
+ * The boot loader leaves port 1 down; the kernel trains it (pcie-apple), as on the J714s.
+ *
+ * Differences from the K114c file: this base's smc_pcio list (t6050-k114-k116.dtsi, in
+ * t6050-k114s-common.dtsi's tree) has three outputs, so sd_pwr_en is index 3, as on K114c. The
+ * DART is dart_apcie1 (the sibling of dart_apcie0, which the N1 already uses); the shared base
+ * also has an apcie1_dart at the same address in another bus node, left disabled.
+ *
+ * Needs K114S_R1_N1 (the host bridge and port 0 of t6050-k114s-common.dtsi): the host is
+ * extended, not replaced. Define K114S_R3_SD to turn it on. If this tree also includes
+ * t6050-k114s-sound.dtsi, define K114S_SD_WITH_SOUND as well: that file replaces
+ * gpio-reserved-ranges, so this one must carry its pins too (80, 81, 134, 139 exposed).
+ * Pin 112 stays reserved either way: its register takes an SError when read.
+ *
+ * OPEN, needs the Mac or an upstream answer:
+ *   - the reader's DART stream (iommu-map 0x200 -> dart_apcie1 stream 1) is the K114c/J714s
+ *     value; the ADT lists sid 0x10-0x12 and a mapper, and no stream for the reader
+ *   - s2idle with a kernel-trained SD port: aurora-silicon/linux #1647 (open) qualifies the
+ *     K116s; the K114s has no "apple,k114s" line in pcie-apple (docs/r3-sleep-lid.md)
+ *   - aurora-silicon/linux #1998 (open, J604): macOS keeps an empty reader unpowered; Linux here
+ *     keeps it powered with the link up
+ *   - risk: if the link does not train, pcie-apple may stall boot (forced power-off)
+ */
+#ifdef K114S_R3_SD
+#ifndef K114S_R1_N1
+#error "t6050-k114s-sd.dtsi extends the N1 host: define K114S_R1_N1"
+#endif
+
+&pinctrl_ap {
+	/* 80 (port 0 PERST#) and 81 (port 1 PERST#) exposed, everything else reserved as before */
+#ifdef K114S_SD_WITH_SOUND
+	gpio-reserved-ranges = <0 80>, <82 52>, <135 4>, <140 81>;
+#else
+	gpio-reserved-ranges = <0 80>, <82 139>;
+#endif
+};
+
+/*
+ * SMC pcIO output 3: sd_pwr_en pKW8('pcIO', 0x0, 0x190000), as 64-bit (high word, low word) like
+ * the three of the base. The list repeats those, which t6050-k114s-common.dtsi sets.
+ */
+&smc_pcio {
+	apple,output-commands = /bits/ 64 <0x001a000000000000 0x000f000000800000
+					   0x011c000000010000 0x0019000000000000>;
+};
+
+/* It answers only once port 1's root complex is up: pcie-apple then enables it */
+&dart_apcie1 {
+	apple,manual-availability;
+	status = "okay";
+};
+
+&pcie0 {
+	reg = <0x1c 0xb0000000 0x0 0x10000000>,
+	      <0x4 0x14000000 0x0 0x4000>,
+	      <0x4 0x10028000 0x0 0x8000>,
+	      <0x4 0x17010000 0x0 0x4000>,
+	      <0x4 0x10024000 0x0 0x4000>,
+	      <0x4 0x11028000 0x0 0x8000>,
+	      <0x4 0x17014000 0x0 0x4000>,
+	      <0x4 0x11024000 0x0 0x4000>,
+	      <0x4 0x17020000 0x0 0x4000>;
+	reg-names = "config", "rc", "port0", "phy0", "intr2axi0", "port1", "phy1", "intr2axi1",
+		    "phy-shared";
+	interrupts = <AIC_IRQ 0 1523 IRQ_TYPE_LEVEL_HIGH>,
+		     <AIC_IRQ 0 1531 IRQ_TYPE_LEVEL_HIGH>;
+	interrupt-names = "port0", "port1";
+
+	/* The N1's three functions are on DART streams 1-3 of port 0, the reader on stream 1 of port 1 */
+	iommu-map = <0x100 &dart_apcie0 1 3>,
+		    <0x200 &dart_apcie1 1 1>;
+	/* dart_apcie1 probes only once port 1 is up: the host must not wait for it */
+	post-init-providers = <&dart_apcie1>;
+
+	/*
+	 * PCIe port 1: ADT apcie0/pci-bridge1 (port-number 1) with the reader pcie-sdreader below it.
+	 * Power is the SMC pcIO output of function-sd_pwr_en (index 3 above), PERST# GPIO 81. The
+	 * link tunables are pci-bridge1's, as (offset, size, mask, value).
+	 */
+	port01: pci@1,0 {
+		device_type = "pci";
+		reg = <0x800 0 0 0 0>;
+		bus-range = <2 2>;
+		apple,link-trained-by-bootloader;
+		pwren-gpios = <&smc_pcio 3 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&pinctrl_ap 81 GPIO_ACTIVE_LOW>;
+		apple,apcie-config-tunables = <0x140 4 0x1 0x1>,
+			<0x144 4 0xffffff 0x253770>,
+			<0x8a8 4 0x1 0x1>,
+			<0x8ac 4 0x1 0x1>;
+		apple,pcie-rc-tunables = <0x78 4 0x7000 0x0>,
+			<0x194 4 0x2 0x2>,
+			<0xb80 4 0x7f3f3f 0x7f1e1e>,
+			<0xb88 4 0x7f3f3f 0x7f1e1e>;
+		apple,pcie-rc-gen3-shadow-tunables = <0x154 4 0xf0f0f0f 0x5050505>,
+			<0x890 4 0x3000000 0x0>,
+			<0x8a8 4 0xffff0f 0x1>;
+		apple,pcie-rc-gen4-shadow-tunables = <0x178 4 0xffff 0x5555>,
+			<0x890 4 0x3000000 0x1000000>,
+			<0x8a8 4 0xffff0f 0x1>;
+		apple,pcie-rc-gen5-shadow-tunables = <0x1ac 4 0xffff 0x5555>,
+			<0x890 4 0x3000000 0x2000000>,
+			<0x8a8 4 0xffff0f 0x1>;
+
+		#address-cells = <3>;
+		#size-cells = <2>;
+		ranges;
+
+		interrupt-controller;
+		#interrupt-cells = <1>;
+		interrupt-map-mask = <0 0 0 7>;
+		interrupt-map = <0 0 0 1 &port01 0 0 0 0>,
+				<0 0 0 2 &port01 0 0 0 1>,
+				<0 0 0 3 &port01 0 0 0 2>,
+				<0 0 0 4 &port01 0 0 0 3>;
+
+		/* The GL9755; card detect and write protect are active high (ADT *-polarity = 1) */
+		sdhci0: mmc@0,0 {
+			compatible = "pci17a0,9755";
+			reg = <0x20000 0x0 0x0 0x0 0x0>;
+			cd-inverted;
+			wp-inverted;
+		};
+	};
+};
+#endif

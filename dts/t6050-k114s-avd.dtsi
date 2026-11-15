@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s (MacBook Pro 14-inch PROLED XDR, M5 Pro, Mac17,13): the video decoder (Apple Video
+ * Decoder, AVD) and the two power states it needs. DRAFT. NOT booted on a K114s. NOT included by
+ * any tree of this repository (docs/r3-parity-drafts.md, issue #30).
+ *
+ * Copy of aurora-silicon/linux #1856 (Jens Axboe, merged 2026-11-14, "t6050-k116s: Enable the
+ * video decoder", cc5691e63c7e; the same five nodes the J714s enables, #1577). The nodes
+ * themselves are in the base's t6050-peripherals.dtsi, disabled, with the registers and
+ * interrupts of the K116sAP device tree; this file only turns them on:
+ *   avd0       ADT /arm-io/avd0 reg[0] 0x2108000000 + 0x1404000, interrupts 2417, 2418
+ *   dart-avd0  ADT /arm-io/dart-avd0 reg[0] 0x2109020000 + 0x20000, interrupt 2424
+ *   pmgr4      ADT /arm-io/pmgr reg[46] 0x2180600000, with FAB1_SOC (offset 0x1b0) and
+ *              AVD_SYS (offset 0x1d8, child of FAB1_SOC)
+ * tests/k114s-adt-parity-facts.py reads the K114s values from this Mac's ADT and compares:
+ * all of them equal the K116s ones (agent-run, 2026-11-15).
+ *
+ * Nothing here is enabled unless the including tree defines K114S_R3_AVD. Include it after
+ * t6050-k114s-common.dtsi. It needs the kernel's apple-avd driver (VIDEO_APPLE_AVD=m is in the
+ * running kernel), the firmware avd-fw (v5-t2), and libva-v4l2_request-avd in userland.
+ */
+#ifdef K114S_R3_AVD
+&pmgr4 {
+	status = "okay";
+};
+
+/* macOS turns FAB1_SOC on once at boot and never gates it. */
+&ps_fab1_soc {
+	apple,always-on;
+	status = "okay";
+};
+
+&ps_avd_sys {
+	status = "okay";
+};
+
+&avd_dart {
+	status = "okay";
+};
+
+&avd {
+	status = "okay";
+};
+#endif

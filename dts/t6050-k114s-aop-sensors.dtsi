@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s: the Always-On Processor (AOP) with only its sensor services, the ambient light sensor
+ * (ALS) and the lid angle sensor (LAS). DRAFT. NOT booted on a K114s. NOT included by any tree
+ * of this repository (docs/r3-parity-drafts.md, issue #67).
+ *
+ * The AOP, its RTKit mailbox, the setup port and dart-aop are the same four nodes the sound
+ * fragment (t6050-k114s-sound.dtsi) enables for the jack, and the K116s, K114c and J714s trees
+ * enable for the same reason. The als and las children are in t6050-die0.dtsi under the aop
+ * node (aop_als: "apple,t6050-aop-als", aop_las: "apple,t6050-aop-las"). They have no status of
+ * their own, so they come up with their parent. Merged upstream: aurora-silicon/linux #1645, #1751.
+ *
+ * Define K114S_R3_AOP_SENSORS to turn it on. If this tree also includes the sound fragment,
+ * define K114S_AOP_WITH_AUDIO as well: the AOP is then enabled once (the same four lines in both
+ * files do no harm) and the audio service is left to the sound fragment. Without the sound
+ * fragment the audio service is disabled here: it has no chassis name, no DMA channel, no card.
+ *
+ * What the K114s ADT confirms (tests/k114s-adt-parity-facts.py, agent-run 2026-11-15): the AOP
+ * ASC 0x290600000, SRAM window 0x290c00000, interrupts 578-581, dart-aop 0x290fc0000 interrupt
+ * 616, setup port 0x2d067c000, and an "als" service node under /arm-io/aop/iop-aop-nub.
+ *
+ * What it does NOT confirm, and what stays open:
+ *   - LAS: the ADT has no "las" or lid-angle node. The firmware announces its services at run
+ *     time (aurora-silicon/linux #1805 reports "las" on J815 that way). Whether the K114s
+ *     firmware announces it is unknown until the AOP runs; the node is harmless if it does not.
+ *   - ALS calibration: the VD6286 sensor starts only after the AP sends it a calibration, which
+ *     the driver loads as apple/aop-als-cal.bin. The ADT's als node carries no calibration
+ *     (harmony-db-version 3 only). Open aurora-silicon/linux #1983 (193-byte calibration for the
+ *     14-inch M5 Max) and #1929 (VD6286 enable sequence) are the K114c's fixes for readings;
+ *     without them the sensor may stay silent here. Not applied; they are driver changes.
+ *   - #1876 (stop the reports on suspend and unbind) and #1924 (accelerometer and gyroscope only
+ *     while read) are open drafts and also driver changes: nothing in this file needs them.
+ *
+ * RISK. The AOP is the coprocessor the audio port also needs. Its firmware is loaded and left
+ * halted by iBoot; starting it is the unproven step on this board (docs/r3-sound.md). Speakers
+ * stay untouched: this file has no amplifier node and no "spkr" or "sense" channel.
+ */
+#ifdef K114S_R3_AOP_SENSORS
+&aop_mbox {
+	status = "okay";
+};
+
+&aop_setup_mbox {
+	status = "okay";
+};
+
+&aop_dart {
+	status = "okay";
+};
+
+&aop {
+	status = "okay";
+};
+
+#ifndef K114S_AOP_WITH_AUDIO
+&aop_audio {
+	status = "disabled";
+};
+#endif
+#endif
