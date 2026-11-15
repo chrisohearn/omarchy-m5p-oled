@@ -32,7 +32,7 @@ hears it.**
 | dtc warnings | One, in all three trees including r1, from the shared upstream file: `simple_bus_reg` on `/soc/pmp@284e00000` (its first `reg` is the SRAM window). None from the fragment. `dt-validate` is not available here, so the bindings were not checked |
 | `tests/lint-dtb.py`, `tests/lint-sound-dtb.py` | Pass on both sound trees. AP pins exposed: 80, 134, 139 |
 | Graph of the compiled tree | Every provider the enabled sound nodes point at (DART streams 0, 1, 8, 11; both mailboxes; both ADMACs; the `i2c2` power state; the three PMP power states; pins 134 and 139) is enabled. No `ti,sn012776` node, `i2c1` and `i2c3` disabled, no `pmp` alias |
-| `tests/test-sound.sh` | 41 of 41 (the first pass's 40 and the new checker's self-test) |
+| `tests/test-sound.sh` | 57 of 57 |
 | Sound on top of the GPU tree the Mac runs now | `t6050-k114s-r3-gpu.dts` of `r3/gpu-desktop` plus `#include "t6050-k114s-sound.dtsi"` builds (`W=1`) and passes both lints: the two fragments touch no common node. The only new dtc warnings are the GPU fragment's own (six `unit_address_vs_reg` on its reserved-memory nodes). Not booted |
 
 ## This Mac's ADT

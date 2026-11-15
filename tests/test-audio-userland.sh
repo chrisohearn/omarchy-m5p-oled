@@ -249,6 +249,25 @@ mkdir -p "$r/usr/lib/systemd/user"; : > "$r/usr/lib/systemd/user/speakerguardd-v
 mkdir -p "$r/etc/systemd/user/speakerguardd-v2-graph.service.d"; cp "$A/systemd/99-k114s-speaker-guard.conf" "$r/etc/systemd/user/speakerguardd-v2-graph.service.d/"
 [ "$(rc_of bash "$SR" --root "$r")" = 0 ] && ok "readiness: the guarded v2 user unit does not trip" || no "readiness: guarded user unit tripped"
 
+# the readiness report and the user manager (a fake systemctl: --user show works, cat prints a merged unit)
+r=$(tree t11); mkdir -p "$r/etc/systemd/user/wireplumber.service.d" "$r/usr/lib/systemd/user"
+: > "$r/etc/systemd/user/wireplumber.service.d/99-k114s-stage-a-tree.conf"; : > "$r/usr/lib/systemd/user/speakerguardd-v2-graph.service"
+mkdir -p "$r/etc/systemd/user/speakerguardd-v2-graph.service.d"; cp "$A/systemd/99-k114s-speaker-guard.conf" "$r/etc/systemd/user/speakerguardd-v2-graph.service.d/"
+mkdir -p "$W/fakebin"; cat > "$W/fakebin/systemctl" <<'SH'
+#!/bin/sh
+# --user show ...: succeed. --user cat UNIT: print what $FAKE_USER_LOADED (a file) holds when set, else nothing
+[ "$1" = --user ] && [ "$2" = show ] && exit 0
+[ "$1" = --user ] && [ "$2" = cat ] && { [ -n "$FAKE_USER_LOADED" ] && cat "$FAKE_USER_LOADED"; exit 0; }
+exit 1
+SH
+chmod +x "$W/fakebin/systemctl"
+printf 'ExecCondition=/usr/local/lib/omarchy-k114s/audio/tree-check\nConditionPathExists=/etc/omarchy-k114s/speaker-qualification\n' > "$W/loaded"
+if [ "$(id -u)" != 0 ]; then
+  rdy() { K114S_SYSTEMCTL="$W/fakebin/systemctl" FAKE_USER_LOADED="$1" rc_of bash "$SR" --root "$r"; }
+  [ "$(rdy "$W/loaded")" = 0 ] && ok "readiness: the user manager has loaded the tree check and the user guard" || { no "readiness: loaded user units tripped"; cat "$W/o"; }
+  [ "$(rdy "")" = 3 ] && grep -q 'systemctl --user daemon-reload' "$W/o" && ok "readiness: user drop-ins the user manager has not loaded trip (the missing daemon-reload)" || no "readiness: unloaded user units did not trip"
+else sk "readiness: the user-manager check is for the seat user, not root"; fi
+
 # the installer
 mk() { rm -rf "$1"; mkdir -p "$1/usr/share/alsa/ucm2/conf.d/macaudio/cs42l84" "$1/proc/device-tree" "$1/etc"; : > "$1/usr/share/alsa/ucm2/conf.d/macaudio/cs42l84/HiFi-jack.conf"; }
 inst() { K114S_DT_COMPATIBLE="$W/compat" bash "$INS" --root "$I" "$@"; }
@@ -279,6 +298,14 @@ mkdir -p "$I/etc/omarchy-k114s"; : > "$I/etc/omarchy-k114s/speaker-qualification
 [ "$(rc_of inst --remove-guard)" = 0 ] && ok "install: --remove-guard runs once the marker exists" || { no "install: --remove-guard with the marker"; cat "$W/o"; }
 rm -r "$I/etc/omarchy-k114s"; find "$I" | sort > "$W/after"
 diff -q "$W/before" "$W/after" > /dev/null && ok "install: --undo then --remove-guard is exact (files and directories as before)" || { no "install: undo and remove-guard left a difference"; diff "$W/before" "$W/after" | head; }
+# the user manager is not reachable through sudo: every path that touches the user units says to reload it
+hint='systemctl --user daemon-reload'
+I=$W/h1; mk "$I"; inst > "$W/o" 2>&1; grep -q "$hint" "$W/o" && ok "install: the install path prints the user daemon-reload hint" || no "install: no user daemon-reload hint on install"
+inst --undo > "$W/o" 2>&1; grep -q "$hint" "$W/o" && ok "install: --undo prints the user daemon-reload hint" || no "install: no user daemon-reload hint on --undo"
+mkdir -p "$I/etc/omarchy-k114s"; : > "$I/etc/omarchy-k114s/speaker-qualification"
+inst --remove-guard > "$W/o" 2>&1; grep -q "$hint" "$W/o" && ok "install: --remove-guard prints the user daemon-reload hint" || no "install: no user daemon-reload hint on --remove-guard"
+I=$W/h2; mk "$I"; rm "$I/usr/share/alsa/ucm2/conf.d/macaudio/cs42l84/HiFi-jack.conf"
+inst > "$W/o" 2>&1 || true; grep -q "$hint" "$W/o" && ok "install: a refused install prints the user daemon-reload hint (the guard went in)" || no "install: no user daemon-reload hint on a refusal"
 # a directory somebody else put into ours stays; one run, a graph switch, and --check follow the installed graph
 I=$W/i2; mk "$I"; find "$I" | sort > "$W/before"
 inst > /dev/null; inst --with-beamformer > /dev/null
