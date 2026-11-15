@@ -208,7 +208,7 @@ gpu_trial_advance() { # a later boot with a desktop ends the trial; a later boot
   if ((up)); then rm -f "$GPU_TRIAL"; note "the GPU stack from the channel ($names) has been through a boot that reached the desktop; its trial is over"; return 0; fi
   while read -r _ name version dir; do
     archive=$(ls "$dir"/packages/"$name"-*.pkg.tar.zst 2>/dev/null | head -n 1 || true)
-    [[ -f $archive ]] || { note "PROBLEM: the boot after the GPU stack's release recorded no desktop, and the old $name archive is gone ($dir); put it back by hand"; return 0; }
+    [[ -f $archive ]] || { printf '%s %s\n' "$name" "$version" >> "$GPU_GIVEN_UP"; mv -f "$GPU_TRIAL" "$GPU_TRIAL.failed-$(date +%s)"; note "PROBLEM: the boot after the GPU stack's release recorded no desktop, and the old $name archive is gone ($dir); the trial is closed as failed and $name $version is not installed again; put the old build back by hand"; return 0; }
     files+=("$archive"); lines+=("install $name"); given+=("$name $version")
   done < <(awk '$1 == "package"' "$GPU_TRIAL")
   permit_write "${lines[@]}"
@@ -218,7 +218,9 @@ gpu_trial_advance() { # a later boot with a desktop ends the trial; a later boot
     note "the boot after the GPU stack's release recorded no desktop: the old build of $names is back; that channel build is not installed again"
   else
     permit_clear
-    # do not retry this every run and block every later GPU release: close the trial as failed; a newer channel build is checked as usual
+    # do not retry this every run and block every later GPU release: close the trial as failed, and record the
+    # builds as given up so a hand rollback is not undone by the next update; a newer channel build is checked as usual
+    printf '%s\n' "${given[@]}" >> "$GPU_GIVEN_UP"
     mv -f "$GPU_TRIAL" "$GPU_TRIAL.failed-$(date +%s)"
     note "PROBLEM: the boot after the GPU stack's release recorded no desktop, and putting the old build back did not go through (see $STATE/gpu-rollback.log; its archives may need dependencies the system no longer has). The trial is closed as failed; a newer channel build is checked as usual. From a TTY: sudo k114s-release adopt ${files[*]}"
   fi
@@ -772,7 +774,9 @@ do_release() { # do_release MODE PKG...: MODE auto obeys release.conf, MODE name
     is_held "$name" || continue
     fixed+=("$name")
     case $class in
-      userland) if [[ $mode == named ]] || enabled AUTO_RELEASE yes; then release_userland "$name"; else note "$name: the channel's build is fit for the K114s; release with: sudo k114s-release release $name"; fi ;;
+      userland) if [[ $mode == named ]] || { enabled AUTO_RELEASE yes && { ! keep_held "$name" || enabled AUTO_RELEASE_GPU no; }; }; then release_userland "$name"
+                elif keep_held "$name"; then note "$name: the channel's build is fit for the K114s; the GPU stack is not switched unattended (AUTO_RELEASE_GPU=no); release with: sudo k114s-release release $name"
+                else note "$name: the channel's build is fit for the K114s; release with: sudo k114s-release release $name"; fi ;;
       boot-uki | boot-stage2) boot+=("$name") ;;
     esac
   done < "$VAR/check/verdict.tsv"

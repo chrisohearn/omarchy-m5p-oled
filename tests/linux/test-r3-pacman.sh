@@ -290,7 +290,10 @@ mkrepo edge "$c_kernel_old" "$c_m1n1_old" "$c_fw_old" "$c_app2" "$c_lfw2" "$c_me
 update >/dev/null; ok "the fixed Mesa is in the channel but held: an update leaves it" "$(Q mesa-aurora)" "1:26.3.0_devel.20261109.j714s2.043a4c5-1"
 sed -i 's/^AUTO_RELEASE=.*/AUTO_RELEASE=no/' "$S/etc/omarchy-k114s/release.conf"
 out=$(rel auto); ok "AUTO_RELEASE=no: reports, releases nothing" "$(Q mesa-aurora) $(echo "$out" | grep -c 'release with: sudo k114s-release release mesa-aurora')" "1:26.3.0_devel.20261109.j714s2.043a4c5-1 1"
-sed -i 's/^AUTO_RELEASE=.*/AUTO_RELEASE=yes/' "$S/etc/omarchy-k114s/release.conf"; : > "$S/var/log/notify.log"
+sed -i 's/^AUTO_RELEASE=.*/AUTO_RELEASE=yes/' "$S/etc/omarchy-k114s/release.conf"
+out=$(rel auto); ok "AUTO_RELEASE_GPU=no (the default): the GPU stack is reported, not switched unattended" "$(Q mesa-aurora) $(echo "$out" | grep -c 'not switched unattended (AUTO_RELEASE_GPU=no); release with: sudo k114s-release release mesa-aurora')" "1:26.3.0_devel.20261109.j714s2.043a4c5-1 1"
+# the rest of this file exercises the unattended GPU path itself
+echo AUTO_RELEASE_GPU=yes >> "$S/etc/omarchy-k114s/release.conf"; : > "$S/var/log/notify.log"
 # through the user hook, as omarchy update runs it
 out=$(SUDO_STUB=/usr/bin/false sb env HOME=/people/owner bash /people/owner/.config/omarchy/hooks/post-update.d/k114s-release-check)
 ok "post-update hook without sudo: checks as the user, tells, changes nothing" "$? $(Q mesa-aurora) $(echo "$out" | grep -c 'ready for release: mesa-aurora')" "0 1:26.3.0_devel.20261109.j714s2.043a4c5-1 1"
