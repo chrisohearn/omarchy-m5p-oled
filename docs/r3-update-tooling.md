@@ -11,9 +11,9 @@ overwrite our custom stuff when it's fixed".
 
 | Label | What |
 | --- | --- |
-| agent-run, fake root | 491 tests as a normal user against throwaway folders (`tests/linux/test-r3-*.sh`) |
-| agent-run, replica | 150 tests in which a **real pacman** runs real transactions through the real hook files, inside a user namespace built with bubblewrap (`tests/linux/test-r3-pacman.sh`). The packages, the boot hooks and "a boot" are stand-ins; see the head of that file |
-| agent-run, on the K114s, read-only | the release check against the live Edge channel; the criteria evaluated against this Mac's own packages; the space guard's trigger list against the hooks installed here; the formats of the EFI variable and kernel banner the tools read |
+| agent-run, fake root | 537 tests as a normal user against throwaway folders (`tests/linux/test-r3-*.sh`) |
+| agent-run, replica | 156 tests in which a **real pacman** runs real transactions through the real hook files, inside a user namespace built with bubblewrap (`tests/linux/test-r3-pacman.sh`). The packages, the boot hooks and "a boot" are stand-ins; see the head of that file |
+| agent-run, on the K114s, read-only | the release check against the live Edge channel; the criteria evaluated against this Mac's own packages; the space guard's trigger list against the hooks installed here; the formats of the EFI variable and kernel banner the tools read; the standing aura-try trial (`chosen/aurora,trial`, `/etc/omarchy-k114s/stage2-trial`) as `k114s-release status` reports it |
 | owner-observed | nothing yet |
 
 Compiling, parsing and passing in a replica do not show that anything boots. The boot-chain steps
