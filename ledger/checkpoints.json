@@ -143,6 +143,17 @@
       "applied": "2026-11-15 (linux/omarchy-patches-install on Omarchy Edge 4.0.0.r7859.g9ac0883; shell restart needed to load the panel, checked on screen)",
       "awaiting_reboot": null,
       "hardware_verified": null
+    },
+    {
+      "id": "omarchy-patches-second-machine",
+      "what": "0001 and 0002 only, on the owner's second Omarchy machine (x86_64, Omarchy stable 4.5.0), installed with the source narrowed to those two (docs/omarchy-patches.md, On another Omarchy machine)",
+      "evaluated": "2026-11-15",
+      "integrated": "2026-11-15",
+      "built_tested": "2026-11-15 (tests/linux/test-omarchy-patches.sh with 0001 and 0002 only, 74 checks against v4.5.0)",
+      "staged": "2026-11-15",
+      "applied": "2026-11-15 (both applied, qmllint clean, panel checked on screen after omarchy-restart-shell)",
+      "awaiting_reboot": null,
+      "hardware_verified": null
     }
   ],
   "owner_decisions": {

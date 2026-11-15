@@ -97,3 +97,22 @@ each real patch applies to it without fuzz and comes out again byte for byte. Fo
 `9ac0883` (the Edge build `4.0.0.r7859.g9ac0883`), the pull request's own tests
 (`agent-account-test`, `agent-account-copy-test`, `agent-usage-accounts-test`) also pass, with 58
 assertions (agent-run).
+
+## On another Omarchy machine
+
+0001 and 0002 are not specific to the K114s. A second machine of the owner's (x86_64, Omarchy
+stable 4.5.0, package `omarchy`) runs those two only, installed on 2026-11-15 from a copy of
+this repository with the source narrowed to them:
+
+```bash
+W=$(mktemp -d); mkdir "$W/src"
+cp patches/omarchy/0001-*.patch patches/omarchy/0002-*.patch "$W/src/"
+sudo env K114S_OMARCHY_PATCHES_SRC="$W/src" bash linux/omarchy-patches-install
+omarchy-restart-shell
+```
+
+Both apply to `v4.5.0` without fuzz, and `tests/linux/test-omarchy-patches.sh` passes with only
+those two in the source against an export of that tag (74 checks). The K114s patches (0003 and
+later) must never go there. The hook keeps the installed copies through Omarchy updates. A change
+to 0001 or 0002 here reaches that machine only when the install is run there again, with the same
+narrowed source: a plain install from the checkout would add the K114s patches.
