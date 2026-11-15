@@ -420,3 +420,5 @@ Mac's PMP values passes everything else and fails only that check. It needs `dtc
 6. Whether `omarchy-audio-asahi-mic-map` (the image's stereo mapper, which matches `effect_output.jNNN-mic`
    only) should learn the K114 name; without it the mono source still reaches stereo clients
    as MONO on both channels.
+   Answered offline: yes, with patch 0004 (the DSP regex, `audio.json` and the name rule take `[jk]`); see
+   [docs/platform-data.md](platform-data.md). Needs the owner at the Mac once the card exists.
