@@ -189,7 +189,6 @@ it); `m1n1/boot-ctxr.bin` (r1, `45a5dbef...`) is the fallback. The tooling lives
 - `k114s-release stage2` waits until the standing trial is over (made the configured file, its
   `stage2-trial` file removed), and then `mark-known-good` is run once from a start that works.
 - Boot records, recovery sets and `status` name the Stage 2 file each start came through.
-- Observed 2026-11-15 02:14 (an agent-run check, not something the tooling does or depends on): the passphrase-free key-file unlock booted with no prompt on the current kernel under this GPU Stage 2 trial; the key device's mount was released afterwards and `boot-efi.mount` was active. A start like that is a normal recorded boot for `k114s-boot-success`.
 
 **Locally built packages** take the same roads and stay held: `sudo k114s-release adopt FILE...`.
 A userland package (the plugin rebuilt against `hyprland-m5`, branch `r3/titlebars`) switches
