@@ -12,23 +12,24 @@ boot, input, radios, display, graphics, media, sound, power, updates.
 
 Omarchy runs natively on this Mac from its encrypted NVMe, with the desktop composited on the
 Apple GPU. Evidence labels: *owner-observed* (seen by the owner on the Mac), *agent-run* (checked
-on the Mac by the AI agent), *staged* (built and reviewed, not yet booted).
+on the Mac by the AI agent). States not yet on the Mac (*integrated*, *built*, *staged*) are as defined in [docs/matrix.md](docs/matrix.md).
 
 | Area | State |
 | --- | --- |
 | Boot from encrypted NVMe, Limine, keyboard | working (owner-observed) |
 | Trackpad | working with aurora-silicon/linux #1568 (owner-observed) |
 | Wi-Fi | working (agent-run) |
-| Bluetooth controller | up (agent-run); hands-free profiles need the r3a kernel (staged) |
-| GPU (G17S): OpenGL, Vulkan, Hyprland on the GPU | working (owner-observed, agent-run): [docs/r3-gpu-result.md](docs/r3-gpu-result.md) |
-| Battery, fans, voltages | reading (agent-run) |
-| Disk unlock without a passphrase | working (agent-run): the owner's choice, a key file on the EFI partition |
-| Updates on Omarchy's Edge channel | guarded after one bad refresh: [incident](docs/incident-2026-11-14-edge-refresh.md) |
-| Headphone jack, microphones | staged (on main, not installed) |
-| Native panel mode, 120 Hz, brightness | designed (display coprocessor step, branch `r3/display-gpu`) |
-| Suspend and lid | blocked on purpose until the next kernel |
+| Bluetooth controller | up (agent-run); hands-free profiles need the r3a kernel (built, not booted) |
+| GPU (G17S): OpenGL, Hyprland on the GPU | working (owner-observed, agent-run); Vulkan device enumerates, Vulkan clients not tested: [docs/r3-gpu-result.md](docs/r3-gpu-result.md) |
+| Battery, voltages | reading (agent-run); the fans read 0 RPM at idle and have not been read spinning yet |
+| Disk unlock without a passphrase | working (agent-run): the owner's choice, a key file on the unencrypted EFI partition, so the disk encryption no longer protects against someone holding the Mac; the passphrase slot is kept |
+| Updates on Omarchy's Edge channel | guarded after one bad refresh, and paused for now: the space guard refuses every package change while the EFI partition has less than 88 MB free (87 MB today) (agent-run): [incident](docs/incident-2026-11-14-edge-refresh.md) |
+| Headphone jack, microphones | integrated (on main, not installed; goes in with the r3a kernel) |
+| Native panel mode, 120 Hz, brightness | designed, not run (display coprocessor step: [docs/r3-display-gpu.md](docs/r3-display-gpu.md)) |
+| Suspend and lid | blocked on purpose: suspend targets are masked while the GPU runs on polled mailboxes; this needs the r3a kernel and then #1844's second commit (`sleep-lid/0010`, planned after r3a) |
 | Speakers | blocked upstream: no protection data for this model ([why](docs/r3-audio-protection.md)) |
-| Camera, touchscreen, Touch ID, video decode, SD reader, Thunderbolt, external displays | not started |
+| USB-C data ports | in the booted device tree; both controllers bind to `dwc3-apple`, but no USB bus has appeared and no device has been plugged in yet (agent-run) |
+| Camera, touchscreen, Touch ID, video decode, SD reader, Thunderbolt, external displays | not started (sources reviewed only) |
 
 Per-subsystem detail, sources and next steps are in [docs/matrix.md](docs/matrix.md).
 
@@ -108,8 +109,10 @@ Exact revisions are in `pins/sources.json`; who wrote what is in [NOTICE.md](NOT
   that runs from macOS. The device tree is shared by all boot entries, so the original kernel
   entry alone is not a fallback; `rollback stage2` is.
 - A delivered bundle is never rebuilt. A change makes a new revision.
-- Every new boot file is tried for one boot only: the loader marks the trial used before it boots
-  it, so after a failed try (a forced power-off if it hangs) the next boot uses the proven one.
+- A new Stage 2 is tried through the loader's one-boot trial (`aura-try`): the loader marks the trial
+  spent before it reads the image, so after a failed try (a forced power-off if it hangs: the trial
+  watchdog does not arm on this Mac) the next boot uses the proven one. The GPU tree is re-armed
+  only after a clean shutdown of a boot that came up through it.
   Hardware acceptance is the owner's.
 - No sibling's firmware, calibration or identity is reused. Speakers are never driven without
   protection data for this model.
