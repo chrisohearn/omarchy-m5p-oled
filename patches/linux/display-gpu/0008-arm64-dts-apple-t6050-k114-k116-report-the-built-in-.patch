@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 07:06:20 -0600
+Subject: [PATCH] arm64: dts: apple: t6050-k114-k116: report the built-in panel
+ as eDP
+
+The K114c and K116c panel is a simpledrm framebuffer until DCP drives it,
+and its connector shows up as Unknown-1. Omarchy treats a connector that
+is not eDP, LVDS or DSI as an external monitor and holds a block inhibitor
+on handle-lid-switch, so closing the lid never suspends.
+
+The previous commit makes simpledrm report eDP for a framebuffer node that
+carries apple,internal-panel. Put the property on the shared K114/K116
+framebuffer node, as the J714c node already has it.
+
+Compile check only: the K114c dtb builds and dtc shows the property on
+framebuffer@0; simpledrm.o builds. Not booted on a K114c yet.
+
+Signed-off-by: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+(cherry picked from commit 76c5ea390d74c77fab63fb7a1ad98a7013ee386f)
+---
+ arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+index 9758c90ed..bc21e6221 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+@@ -47,6 +47,7 @@ framebuffer0: framebuffer@0 {
+ 			reg = <0 0 0 0>; /* To be filled by the loader */
+ 			/* Format properties will be added by the loader */
+ 			status = "disabled";
++			apple,internal-panel; /* simpledrm reports it as eDP */
+ 		};
+ 	};
+ 

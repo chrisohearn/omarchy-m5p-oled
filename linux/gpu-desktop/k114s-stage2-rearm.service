@@ -1,0 +1,10 @@
+[Unit]
+Description=K114s: re-arm the Stage 2 trial at shutdown after a good trial boot
+RequiresMountsFor=/boot/efi
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/true
+ExecStop=/usr/local/lib/omarchy-k114s/stage2-rearm
+[Install]
+WantedBy=multi-user.target

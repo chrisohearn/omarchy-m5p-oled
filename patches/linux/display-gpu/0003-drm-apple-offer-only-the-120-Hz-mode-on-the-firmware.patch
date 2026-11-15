@@ -1,0 +1,92 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 23:28:01 +0000
+Subject: [PATCH] drm/apple: offer only the 120 Hz mode on the firmware 27
+ internal panel
+
+The M5 internal DCP crashed (RTKit co-processor crash) on set_digital_out_mode for 3024x1986@60, a mode the driver listed to userspace. Refuse every internal-panel mode except the 120 Hz timing until the others are understood. KUnit: parser_internal_v27_only_120hz. Not run.
+
+(cherry picked from commit a4a0fb67bfe8e1eb4023533745aa81dd412fb885)
+---
+ drivers/gpu/drm/apple/iomfb.c       |  9 ++++++
+ drivers/gpu/drm/apple/parser-test.c | 46 +++++++++++++++++++++++++++++
+ 2 files changed, 55 insertions(+)
+
+diff --git a/drivers/gpu/drm/apple/iomfb.c b/drivers/gpu/drm/apple/iomfb.c
+index 546520c36..0fdc3abe9 100644
+--- a/drivers/gpu/drm/apple/iomfb.c
++++ b/drivers/gpu/drm/apple/iomfb.c
+@@ -3044,6 +3044,15 @@ static bool dcp_mode_settable(struct apple_dcp *dcp,
+ 	    DCP_IOMFB_METHODS_H17P_EXTERNAL)
+ 		return dcp_mode.mode.type & DRM_MODE_TYPE_PREFERRED;
+ 
++	/*
++	 * The firmware 27 internal DCP (M5) crashes on 3024x1986@60 and the
++	 * other 60 Hz timings it lists.  Only the 120 Hz timing is known to
++	 * survive a modeset, so refuse the rest until they are understood.
++	 */
++	if (dcp->fw_compat == DCP_FIRMWARE_V_27_0 && !dcp->external &&
++	    drm_mode_vrefresh(mode) != 120)
++		return false;
++
+ 	return true;
+ }
+ 
+diff --git a/drivers/gpu/drm/apple/parser-test.c b/drivers/gpu/drm/apple/parser-test.c
+index f547d131b..3d3a369b5 100644
+--- a/drivers/gpu/drm/apple/parser-test.c
++++ b/drivers/gpu/drm/apple/parser-test.c
+@@ -2021,7 +2021,53 @@ static void parser_desktop_metadata_timing(struct kunit *test)
+ 	drm_edid_free(edid);
+ }
+ 
++/*
++ * The M5 internal DCP (firmware 27) crashes on any set_digital_out_mode that
++ * is not the 120 Hz boot timing (3024x1986@60 killed the co-processor).  The
++ * connector must refuse every other mode of the internal panel.
++ */
++static void parser_internal_v27_only_120hz(struct kunit *test)
++{
++	struct dcp_display_mode catalog[2] = {};
++	struct apple_dcp *dcp = kunit_kzalloc(test, sizeof(*dcp), GFP_KERNEL);
++	struct platform_device *pipeline = kunit_kzalloc(test, sizeof(*pipeline), GFP_KERNEL);
++	struct apple_connector *connector = kunit_kzalloc(test, sizeof(*connector), GFP_KERNEL);
++	unsigned int i;
++
++	KUNIT_ASSERT_NOT_NULL(test, dcp);
++	KUNIT_ASSERT_NOT_NULL(test, pipeline);
++	KUNIT_ASSERT_NOT_NULL(test, connector);
++	for (i = 0; i < 2; i++) {
++		struct drm_display_mode *m = &catalog[i].mode;
++
++		m->clock = i ? 523576 : 1047153;
++		m->hdisplay = 3024; m->hsync_start = 3048;
++		m->hsync_end = 3056; m->htotal = 3064;
++		m->vdisplay = 1986; m->vsync_start = 2754;
++		m->vsync_end = 2812; m->vtotal = 2848;
++		m->type = DRM_MODE_TYPE_DRIVER | (i ? 0 : DRM_MODE_TYPE_PREFERRED);
++		catalog[i].timing_mode_id = 2 + i;
++	}
++	parser_modes_init(dcp);
++	mutex_init(&dcp->dcpavserv.lock);
++	mutex_init(&dcp->hpd_mutex);
++	dcp->fw_compat = DCP_FIRMWARE_V_27_0;
++	dcp->connector = connector;
++	dcp->modes = catalog;
++	dcp->nr_modes = 2;
++	dcp->modes_admitted = true;
++	connector->dcp = pipeline;
++	platform_set_drvdata(pipeline, dcp);
++
++	KUNIT_EXPECT_EQ(test, dcp_mode_valid(&connector->base, &catalog[0].mode), MODE_OK);
++	KUNIT_EXPECT_EQ(test, dcp_mode_valid(&connector->base, &catalog[1].mode), MODE_BAD);
++	dcp->modes = NULL;
++	dcp->nr_modes = 0;
++	dcp_modes_release(dcp);
++}
++
+ static struct kunit_case parser_cases[] = {
++	KUNIT_CASE(parser_internal_v27_only_120hz),
+ 	KUNIT_CASE(parser_panel_of_dimensions),
+ 	KUNIT_CASE(parser_panel_j616s_publication),
+ 	KUNIT_CASE(parser_panel_h17p_publication),

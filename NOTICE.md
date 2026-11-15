@@ -13,6 +13,14 @@ and keep their authors and licenses.
 | `patches/linux/brightness/0005`, `0006` | this repository, against aurora-silicon/linux `drivers/gpu/drm/apple` (backlight code by Ryan Murray and the Asahi Linux and Aurora Silicon contributors) and the `apple,dcp` binding | this repository | as the files they change (GPL-2.0-only OR MIT; the binding file's own SPDX line) |
 | `tests/brightness/kunit-host/` | this repository; stand-ins for the kernel header names a KUnit suite includes, written here, no kernel code copied | this repository | MIT |
 | `dts/*.dts`, `dts/*.dtsi` | built on aurora-silicon/linux `t6050-k114s.dts` and `t6050-k114-k116.dtsi` (pull request 1025) with sections ported from `t6050-k116s.dts` (pull request 1648, Jens Axboe) and the J714s tree | The Asahi Linux Contributors, Aurora Silicon contributors; K114s port here | GPL-2.0+ OR MIT (SPDX line in each file) |
+| `patches/linux/display-gpu/0001`, `0002` | aurora-silicon/linux pull request 1844, commits `41c359da8175`, `788441e0890e` | Erik Bourget; DjDeveloperr (Diljit Singh) | GPL-2.0 (Linux kernel) |
+| `patches/linux/display-gpu/0003`–`0006` | aurora-silicon/linux pull request 1868, commits `a4a0fb67bfe8`, `10f14b7ff802`, `3176918ba21e`, `84b3b93c04e6` | Joshua Warren (joshuaswarren) | GPL-2.0 (Linux kernel) |
+| `patches/linux/display-gpu/0007`, `0008` | aurora-silicon/linux pull request 1688, commits `1006491abe42` (from `9dee12b1266c`), `76c5ea390d74` | ed (Eduard Moldovan); Joshua Warren | GPL-2.0 (Linux kernel) |
+| `patches/linux/display-gpu/0009`, `0010` | aurora-silicon/linux pull request 1648, commits `3adc985b5a61`, `8f418a490a97` | Thomas Glanzmann | GPL-2.0 (Linux kernel; the binding files' own SPDX lines) |
+| `patches/aura/0001` | aurora-silicon/aura pull request 226, commit `023eb3a01a61`, hand-merged here with betizzel/omarchy-m5's aura patch 0005 (TripleU) as its message says | Jens Axboe; merge here | as the file it changes (`src/kboot_display_handoff.c`, SPDX MIT); aura's LICENSE puts Aurora Silicon contributions under GPL-2.0-only |
+| `patches/aura/0002` | aurora-silicon/aura pull request 230, commit `5d2ec8f00e99` | Jens Axboe | as the file it changes (`src/kboot_gpu.c`, SPDX MIT AND GPL-2.0-only) |
+| `patches/aura/0003` | this repository (one line in aura's host-test stub `tests/t8122_display_host/firmware.h`, SPDX MIT) | this repository | MIT |
+| `dts/t6050-k114s-display-gpu.dtsi`, `dts/t6050-k114s-r3*.dts` | K114s copies of `t6050-k116s.dts` and `t6050-k116s-gpu.dtsi` (aurora-silicon/linux pull requests 1648 and 1859, commits `377b2a2decf1`, `59ea61054b1e`, `e3373ad8f86a`) and of the eDP property of pull request 1688 | Jens Axboe, Joshua Warren, The Asahi Linux Contributors; K114s port here | GPL-2.0+ OR MIT |
 | `macos/tools/asahi_firmware/` | AsahiLinux/asahi-installer `asahi_firmware` (as used by the Omarchy installer engine) | Asahi Linux contributors | MIT |
 | `installer/omarchy-m5/` | patches against betizzel/omarchy-m5 | this repository; base by betizzel and omarchy-m5 contributors | MIT |
 | `installer/omarchy-mac-installer/` | patch against omacom/omarchy-mac-installer `c07e54c` with betizzel/omarchy-m5's installer patch sets applied | this repository; base by Omarchy and betizzel | as the files it changes |
@@ -23,6 +31,12 @@ and keep their authors and licenses.
 | `build/make_k114s_ftab.py` | calls betizzel/omarchy-m5's `omarchy_centauri.py` unchanged | this repository | MIT |
 | `packaging/omarchy-hyprland-titlebars-m5/PKGBUILD` | the recipe of omacom/omarchy-pkgs `pkgbuilds/omarchy-hyprland-titlebars` (`062536c`), changed to build against hyprland-m5; it downloads omacom/omarchy-hyprland-titlebars `v0.4.0`, which is not copied here | recipe: Ryan Hughes and Omarchy contributors; plugin: Hypr Development (hyprbars) and Omarchy; M5 changes here | recipe MIT; plugin BSD-3-Clause and MIT |
 | `packaging/omarchy-hyprland-titlebars-m5/nested-test.sh` | runs omacom/omarchy-hyprland-titlebars `tools/verify.py` (from a checkout or the release tarball, not copied here) with two additions made at run time | this repository; verifier by Omarchy | MIT |
+
+In `patches/linux/display-gpu/`, three authors' e-mail addresses in the `From:` and `Signed-off-by:`
+lines are replaced by `address-in-upstream-commit@localhost`, the addresses the publish check
+(`build/check-publishable.sh`) matches. Some upstream kernel authors' addresses that it does not
+match stay as they appear in their public upstream commits. The names are unchanged and each patch
+names the upstream commit that carries the address.
 
 Nothing of Apple's is in this repository. Firmware is read from Apple's own restore image on the
 owner's machine and never redistributed.

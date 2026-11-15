@@ -1,0 +1,243 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s (MacBook Pro 14-inch PROLED XDR, M5 Pro, Mac17,13): the internal panel on the display
+ * coprocessor and the GPU (AGX G17S), for the boot loader's two hand-offs. Candidate r3.
+ * NOT yet booted on a K114s.
+ *
+ * K114s copies of the K116s description in aurora-silicon/linux (pull request 1648, Jens Axboe,
+ * booted on a K116s):
+ *   display  377b2a2decf1 in the form 59ea61054b1e (pull request 1859) leaves it: no "clocks",
+ *            no "apple,bw-scratch", no clock nodes; the loader adds them from the ADT and refuses
+ *            a tree that already has them
+ *   GPU      e3373ad8f86a (t6050-k116s-gpu.dtsi), compatible per binding 8f418a490a97
+ *   panel    compatible per binding 3adc985b5a61 ("apple,panel-k<n>")
+ *   eDP      76c5ea390d74 (pull request 1688, Joshua Warren), the same property on this tree
+ * Include it after t6050-k114s-common.dtsi. Nothing here is enabled by the tree itself:
+ * every node stays "disabled" (or is a reservation with reg = <0 0 0 0>). The loader (aura)
+ * checks the Apple device tree (ADT) and the live hardware, fills in what it read there and only
+ * then enables the nodes. A loader that refuses leaves the boot framebuffer (simpledrm) and the
+ * GPU off, which is the state of the r1 tree.
+ *
+ * Sections:
+ *   K114S_R3_EDP      the boot framebuffer is reported as a built-in (eDP) panel
+ *   K114S_R3_DISPLAY  the panel, the display coprocessor (DCP) and its DARTs
+ *   K114S_R3_GPU      the GPU, its two mailboxes and the six reservations
+ *   K114S_R3_GPU_PMP  the GPU on the PMP's report entry, as the K116s has it. Only together with
+ *                     a tree that runs the PMP (not this file, not r3)
+ *
+ * Where each value comes from. The base tree (t6050-peripherals.dtsi) already carries every
+ * register, interrupt and stream below for T6050_K114S, taken from the ADT by upstream. The repository
+ * records the 27.2 (26B8125) ADTs of the K114s and the K116s as identical node for node; the
+ * values named "ADT" here are the K116s tree's and have NOT been read again from this machine.
+ * tests/k114s-adt-display-facts.py reads them from the running machine's ADT (root, read-only)
+ * and compares. What the tree cannot know and the loader reads from the ADT at every boot:
+ * the DCP firmware image, /vram, the bandwidth scratch, the clock ids and rates, the brightness
+ * scale, the GPU firmware and UAT ranges, the leakage calibration words.
+ */
+
+#ifdef K114S_R3_EDP
+/*
+ * simpledrm reports a framebuffer node with this property as eDP-1 instead of Unknown-1
+ * (kernel patch 0007/0008 of patches/linux/display-gpu). Without the kernel patch the property
+ * is ignored.
+ */
+&framebuffer0 {
+	apple,internal-panel;
+};
+#endif
+
+#ifdef K114S_R3_DISPLAY
+/ {
+	aliases {
+		/*
+		 * The loader takes the hand-off only when both aliases exist. It also writes
+		 * apple,notch-height into the "dcp" alias.
+		 */
+		dcp = &dcp;
+		disp0 = &display;
+	};
+
+	/* As on K116s and J714s, with the internal display's DART (disp0, stream 0) */
+	display: display-subsystem {
+		compatible = "apple,display-subsystem";
+		iommus = <&disp0_dart 0>;
+		status = "disabled";
+	};
+};
+
+/* ADT dart-dcp and dart-disp0: vm-base 1 TiB, vm-size 3 TiB (the loader compares both) */
+&dcp_dart {
+	apple,dma-range = <0x100 0x0 0x300 0x0>;
+};
+
+&disp0_dart {
+	apple,dma-range = <0x100 0x0 0x300 0x0>;
+};
+
+&dcp {
+	/*
+	 * No "clocks", "apple,bw-scratch" or "apple,clock-ids" here: the loader writes all three
+	 * from the ADT (disp0 clock-ids; on the K116s 361 and 458) and refuses a tree that already
+	 * has the first two.
+	 *
+	 * The 14.2-inch 3024x1986 tandem OLED panel. 3024x1986 is this machine's boot framebuffer
+	 * (agent-run, 2026-11-14). The K116s ADT carries no dimensions and the K114s ADT is
+	 * expected not to either; when it does, the kernel takes the ADT's. The sizes are the
+	 * active area at the 254 pixels per inch of this panel family (302.4 x 198.6 mm), as
+	 * derived for the K114c, and are used for the reported DPI only. No "adj-height-mm": the
+	 * loader shows the notch rows (/chosen asahi,show-notch = "1").
+	 *
+	 * The loader adds apple,max-brightness (ADT /backlight-override user-accessible-max-nits).
+	 */
+	panel {
+		compatible = "apple,panel-k114", "apple,panel";
+		width-mm = <302>;
+		height-mm = <198>;
+	};
+};
+
+/*
+ * The external display engines (dcpext0..3) are not prepared here. On the 27.2 (26B8125) image
+ * the loader hands over the internal panel only (aura pull request 226: with the K116s tree
+ * dcpext0 waits for a dependency that never comes and delays the display by 16 s).
+ */
+#endif
+
+#ifdef K114S_R3_GPU
+/*
+ * The GPU (AGX G17S, ADT /arm-io/sgx "gpu,t6050"), as t6050-k116s-gpu.dtsi. The loader finds it
+ * through the "gpu" alias, checks that the loaded firmware is a build it knows (26B8125 for this
+ * image) by digest, fills the six reservations from the ADT and enables, in this order, the GPU
+ * power manager, GPX, AFR, GFX, both mailboxes and the GPU. On any mismatch all stay disabled.
+ *
+ * K116s 27.2 values of the reservations, for reference only (iBoot places them; never
+ * hard-coded): fw-text 0x100_00ff8000 + 0xa4000, fw-data 0x100_0251c000 + 0x184000, uat-ttbs
+ * 0x10f_fffa8000 + 0x4000, uat-pagetables 0x10f_fff28000 + 0x80000, uat-l2-pagetables
+ * 0x10f_fff24000 + 0x4000, uat-handoff 0x10f_fff20000 + 0x4000.
+ */
+/ {
+	aliases {
+		gpu = &sgx;
+	};
+
+	reserved-memory {
+		gpu_fw_text: gpu-fw-text {
+			reg = <0 0 0 0>;
+			no-map;
+			status = "disabled";
+		};
+
+		gpu_fw_data: gpu-fw-data {
+			reg = <0 0 0 0>;
+			no-map;
+			status = "disabled";
+		};
+
+		uat_ttbs: uat-ttbs {
+			reg = <0 0 0 0>;
+			no-map;
+			status = "disabled";
+		};
+
+		uat_pagetables: uat-pagetables {
+			reg = <0 0 0 0>;
+			no-map;
+			status = "disabled";
+		};
+
+		uat_l2_pagetables: uat-l2-pagetables {
+			reg = <0 0 0 0>;
+			no-map;
+			status = "disabled";
+		};
+
+		uat_handoff: uat-handoff {
+			reg = <0 0 0 0>;
+			no-map;
+			status = "disabled";
+		};
+	};
+};
+
+/* The inventory ASC nodes; the mailboxes below describe the same windows. */
+/delete-node/ &gfx_asc;
+/delete-node/ &gfx1_asc;
+
+&{/soc} {
+	/*
+	 * ADT gfx-asc: reg 0x21_02600000 + 0x88000 (wrapper), 0x21_02050000 + 8 (iop-vbar), behind
+	 * the arm-io ranges (+0x2_0000_0000); interrupts [2798, 2797, 2800, 2799], of which the
+	 * second and third are send-empty and recv-not-empty; role "GFX". As K116s and J714s.
+	 */
+	gfx_mbox: mailbox@2302600000 {
+		compatible = "apple,t6050-j775d-ascwrap-v6";
+		reg = <0x23 0x2600000 0x0 0x88000>,
+		      <0x23 0x2050000 0x0 0x8>;
+		reg-names = "wrapper", "iop-vbar";
+		interrupts = <AIC_IRQ 0 2797 IRQ_TYPE_LEVEL_HIGH>,
+			     <AIC_IRQ 0 2800 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "send-empty", "recv-not-empty";
+		apple,firmware-role = "GFX";
+		power-domains = <&ps_gfx>;
+		#mbox-cells = <0>;
+		status = "disabled";
+	};
+
+	/*
+	 * ADT gfx1-asc: reg 0x21_02e00000 + 0x88000, 0x21_02850000 (the driver uses the first 8
+	 * bytes); interrupts [2802, 2801, 2804, 2803]; role "GFX1".
+	 */
+	gfx1_mbox: mailbox@2302e00000 {
+		compatible = "apple,t6050-j775d-ascwrap-v6";
+		reg = <0x23 0x2e00000 0x0 0x88000>,
+		      <0x23 0x2850000 0x0 0x8>;
+		reg-names = "wrapper", "iop-vbar";
+		interrupts = <AIC_IRQ 0 2801 IRQ_TYPE_LEVEL_HIGH>,
+			     <AIC_IRQ 0 2804 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "send-empty", "recv-not-empty";
+		apple,firmware-role = "GFX1";
+		power-domains = <&ps_gfx>;
+		#mbox-cells = <0>;
+		status = "disabled";
+	};
+};
+
+/*
+ * ADT pmgr devices GPX and AFR, GFX's parents, in the GPU power manager: the K116s ADT marks
+ * them critical. The marks sit on disabled nodes until the loader enables them.
+ */
+&ps_gpx {
+	apple,always-on;
+};
+
+&ps_afr {
+	apple,always-on;
+};
+
+&sgx {
+	/*
+	 * "apple,agx-g17s" is what the loader checks and the driver binds. The driver uses the
+	 * J714 voltage tables for it (on the K116s 5 mV below the unit's ADT voltages at eight of
+	 * the fourteen states); the loader passes this part's leakage calibration words.
+	 */
+	compatible = "apple,agx-g17s";
+	/* ADT sgx reg[0] 0x21_00000000 + 0x3fdc000; the driver maps the first 16 MiB as "sgx" */
+	reg = <0x23 0x0 0x0 0x3fdc000>;
+	reg-names = "sgx";
+	/delete-property/ interrupts;
+	mboxes = <&gfx_mbox>, <&gfx1_mbox>;
+	memory-region = <&uat_ttbs>, <&uat_pagetables>, <&uat_handoff>,
+			<&gpu_fw_data>, <&uat_l2_pagetables>, <&gpu_fw_text>;
+	memory-region-names = "ttbs", "pagetables", "handoff", "fw-data",
+			      "l2-pagetables", "fw-text";
+#ifdef K114S_R3_GPU_PMP
+	/*
+	 * As t6050-k116s-gpu.dtsi: the GPU on the PMP's GFX report entry (report@f, on ps_gfx).
+	 * Needs the PMP and its report running in the same tree, with this board's PMP tunables,
+	 * which r3 does not have. Without this the GPU sits on ps_gfx directly, the form the
+	 * K114c tree in the same base uses (t6050-k114c-gpu.dtsi).
+	 */
+	power-domains = <&pmp0_gfx>;
+#endif
+};
+#endif
