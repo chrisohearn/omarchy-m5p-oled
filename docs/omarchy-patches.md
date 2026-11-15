@@ -5,7 +5,7 @@ user-space scripts that this machine needs before Omarchy ships them. Each one i
 change that is still open, kept here as a patch with its authorship (see `NOTICE.md`).
 
 The Omarchy package (`omarchy`, or `omarchy-dev` on the Edge channel) owns most of
-`/usr/bin/omarchy-*`, and every update replaces those files. So a fix made by hand there is silently lost on the next
+`/usr/bin/omarchy-*`, and `omarchy-mac` (the Apple Silicon platform data and audio rules) owns a few files that patches 0003 and 0004 change, and every update replaces those files. So a fix made by hand there is silently lost on the next
 `omarchy update`. A pacman hook puts the patches back after every transaction that installs or
 upgrades the package, and stops reapplying them once they no longer fit.
 
@@ -38,7 +38,7 @@ Omarchy does not depend on. Without it, the installer refuses and the hook write
 Script patches take effect on the next run. A patch to the shell's QML (such as 0002) is not
 picked up by the running bar: run `omarchy-restart-shell` once after installing or after an update.
 
-A patch may only change files the `omarchy` or `omarchy-dev` package installed (the two the hook
+A patch may only change files the `omarchy`, `omarchy-dev` or `omarchy-mac` package installed (the three the hook
 watches), as recorded in the package database. The installer refuses one that creates or deletes a
 file (a file it created could later collide with one Omarchy ships and stop an update) or that changes
 a file neither package installed, such as one of `omarchy-settings-dev`'s.
@@ -90,7 +90,8 @@ the wanted set goes back on from the bottom up.
 | `0004-omarchy-mac-k-board-audio-names.patch` | The M5 MacBook Pros are K boards (`AppleK114`, `effect_output.k114-mic`), so omarchy-mac's jNNN patterns miss them: the stereo microphone mapper, `audio.json`, the microphone name and the no-suspend rule. | same draft | written 2026-11-15, not installed |
 | `0005-factory-reset-off-on-k114s-until-qualified.patch` | Local safety switch, not an upstream fix. `omarchy-system-factory-reset` is reachable from Setup > Reset Computer on any btrfs root; on the K114s it would replace the Limine menu (dropping the K114s repair entry), rebuild the boot files from the image and erase the system, and has never been run here. The patch stops it, before sudo and before any change, when the device tree says `apple,k114s` and `/etc/omarchy-k114s/factory-reset-qualified` does not exist. The menu row is in `omarchy-settings-dev`, which this mechanism may not patch; [docs/platform-audit.md](platform-audit.md) gives the user extension that hides it. | none (this machine's choice) | in the repository 2026-11-15; not yet installed on the Mac |
 
-Tests: `tests/linux/test-factory-reset-gate.sh` runs 0003 against the installed command. `tests/linux/test-omarchy-patches.sh linux [OMARCHY_SRC]` runs the mechanism in a fake
+Tests: `tests/test-platform-data.sh` runs 0003 and 0004 through the installer in a fake root and checks the K114s names against them (docs/platform-data.md).
+`tests/linux/test-factory-reset-gate.sh` runs 0005 against the installed command. `tests/linux/test-omarchy-patches.sh linux [OMARCHY_SRC]` runs the mechanism in a fake
 root. With `OMARCHY_SRC`, an omacom/omarchy checkout at the installed revision, it also checks that
 each real patch applies to it without fuzz and comes out again byte for byte. For 0001 against
 `9ac0883` (the Edge build `4.0.0.r7859.g9ac0883`), the pull request's own tests

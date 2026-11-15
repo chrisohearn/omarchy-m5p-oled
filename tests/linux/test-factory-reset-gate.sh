@@ -6,7 +6,7 @@
 #   usage: test-factory-reset-gate.sh [OMARCHY_SYSTEM_FACTORY_RESET]
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
-patch_file=$(ls "$here"/../../patches/omarchy/0003-*.patch)
+patch_file=$(ls "$here"/../../patches/omarchy/0005-*.patch)
 src=${1:-/usr/bin/omarchy-system-factory-reset}
 pass=0; fail=0
 ok() { if [ "$2" = "$3" ]; then pass=$((pass+1)); echo "PASS $1"; else fail=$((fail+1)); echo "FAIL $1: got '$2' want '$3'"; fi; }
