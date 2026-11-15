@@ -10,7 +10,7 @@
 #
 # Exit status: 0 = no way to the speakers exists (the expected state; blockers are listed),
 #              3 = TRIPWIRE: something that could open a speaker path is present while a proof is still
-#                  missing. Stop, run `install-audio.sh --undo`, and tell the lead.
+#                  missing (a speaker-side profile or marker, a missing guard, a tree with a speaker path). Shut down, do not play anything, and tell the lead (install-audio.sh installs the guard and --undo keeps it).
 #              2 = could not tell.
 # The checks are the ones docs/r3-audio.md "Stage B" lists. Nothing here qualifies the speakers.
 set -uo pipefail
@@ -27,16 +27,44 @@ good() { say "ok        $*"; }
 
 # --- what could open a path ----------------------------------------------------------------------------
 k=$ROOT/usr/share/speakersafetyd/apple
-if ls "$k"/k114*.conf >/dev/null 2>&1; then trip "a speakersafetyd profile for this model exists in $k: it is the admission switch of speakersafetyd"
+if ls "$k"/k114*.conf >/dev/null 2>&1; then trip "a speakersafetyd profile named k114*.conf exists in $k (a sibling model's, such as the K114c, shares the name): it is the admission switch of speakersafetyd. The guard below keeps it from arming; do not create the marker for it"
 else good "no speakersafetyd profile for this model (the switch that would admit the older daemon is off)"; fi
 
-dt=$ROOT/proc/device-tree
-if [[ -e $dt/sound/dai-link@1 ]]; then trip "the card has a second link ($dt/sound/dai-link@1): a Speaker link exists in the running tree"
-else good "the sound card has no Speaker link (dai-link@1 absent)"; fi
+# the owner's marker, and the guard that makes it the only way in (install-audio.sh installs the guard)
+marker=$ROOT/etc/omarchy-k114s/speaker-qualification
+if [[ -e $marker ]]; then trip "the owner's speaker qualification marker exists ($marker) while proofs are missing"
+else good "no speaker qualification marker (the speaker daemons stay skipped)"; fi
+g='ConditionPathExists=/etc/omarchy-k114s/speaker-qualification'
+# check DIR (the drop-in directory, no ROOT), UNIT-FILE: the guard drop-in exists when the unit does
+chk() {
+  [[ -e $ROOT$2 ]] || return 0
+  grep -qs "$g" "$ROOT$1/99-k114s-speaker-guard.conf" ||
+    trip "${2##*/} exists and has no K114s speaker guard (run install-audio.sh): a sibling model's profile could arm it"
+}
+for u in speakersafetyd speakerguardd speakerguardd-v2 speakerguardd-v2-provision speakerguardd-v2-selfcheck speakerguardd-v2-seat speakerguardd-v2-switchtest speakerguardd-v2-sleep aurora-speaker-upgrade; do
+  chk /etc/systemd/system/$u.service.d /usr/lib/systemd/system/$u.service
+done
+chk /etc/systemd/system/speakerguardd-v2-seat.path.d /usr/lib/systemd/system/speakerguardd-v2-seat.path
+for u in speakerguardd-v2-graph speakerguardd-v2-session; do
+  chk /etc/systemd/user/$u.service.d /usr/lib/systemd/user/$u.service
+done
+# On the real system the merged unit as systemd would load it (read-only; starts nothing): the condition
+# is in `systemctl cat`, and, with the marker absent, systemd evaluates it false.
+if [[ -z $ROOT ]] && command -v systemctl >/dev/null; then
+  for u in speakersafetyd speakerguardd-v2 aurora-speaker-upgrade; do
+    [[ -e /usr/lib/systemd/system/$u.service ]] || continue
+    if systemctl cat "$u.service" 2>/dev/null | grep -q "^$g\$"; then good "systemctl cat $u: the merged unit carries the guard"
+    else trip "systemctl cat $u: the merged unit does not carry the guard (a daemon-reload may be missing)"; fi
+  done
+  if command -v systemd-analyze >/dev/null && [[ ! -e $marker ]]; then
+    if systemd-analyze condition "$g" >/dev/null 2>&1; then trip "systemd evaluates the guard condition true while the marker is absent"
+    else good "systemd evaluates the guard condition false (units are skipped)"; fi
+  fi
+fi
 
-amps=$(ls "$ROOT"/sys/bus/i2c/devices 2>/dev/null | grep -E '^[0-9]+-003[8-9a-d]$' | tr '\n' ' ')
-if [[ -n $amps ]]; then trip "I2C devices at the amplifier addresses are bound: $amps"
-else good "no I2C device at an amplifier address (0x38 to 0x3d)"; fi
+# the tree that booted: the Stage A card, or no sound node (the same check WirePlumber runs before it starts)
+tc=$(dirname -- "${BASH_SOURCE[0]}")/tree-check
+if out=$("$tc" --root "$ROOT" 2>&1); then good "device tree: $out"; else trip "device tree: ${out//$'\n'/; }"; fi
 
 if [[ -r $ROOT/proc/asound/cards ]]; then
   cards=$(sed -n 's/^ *[0-9]* \[\([A-Za-z0-9_]*\) *\].*/\1/p' "$ROOT/proc/asound/cards" | tr '\n' ' ')

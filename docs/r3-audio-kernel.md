@@ -198,11 +198,13 @@ tool (agent-run):
   daemons decide for themselves"). What keeps it from starting is the lead's condition on
   `/usr/share/speakersafetyd/apple/k114.conf`. Without that condition it would start, find no
   profile, exit and be restarted in a loop; it would still have no control to take. A file of that
-  name must not appear before the speaker step: it is the switch.
+  name must not appear before the speaker step: it is the switch. (Later finding: the K114c shares
+  the name, so a package could supply the file; `install-audio.sh` now also requires the owner's
+  `/etc/omarchy-k114s/speaker-qualification`, see `docs/r3-audio.md`.)
 - `aurora-speaker-upgrade`: "not now: no speaker card yet", as today.
 - So nothing unsafe: no unit starts, and the card has no speaker PCM, speaker volume or
   protection control for one to act on. The cost is time: two 15 s waits before the login
-  screen, unless `linux/audio/install-audio.sh` has added its second condition.
+  screen, unless `linux/audio/install-audio.sh` has added its guard drop-in (which skips them).
 
 ## Suggestions for the lead
 

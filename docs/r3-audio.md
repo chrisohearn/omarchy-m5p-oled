@@ -50,12 +50,13 @@ User space (`linux/audio/`; this branch's additions are marked **new**):
 | `wireplumber/82-k114-audio.conf` | `/etc/wireplumber/wireplumber.conf.d/` | names the raw array `RawMics` and puts the mono filter on it; **new:** no pro-audio profile on the jack card (it would open PCM 1 and 2); PCM 1 and 2 never become nodes, matched by path and by card id; the jack sink does not suspend between streams (same rule omarchy-mac installs for `AppleJ...` cards, which does not match this one) |
 | `share/mic.json` | `/usr/local/share/omarchy-k114s/audio/mic.json` | the default microphone graph: equal mix of the three microphones, gain, 120 Hz high-pass, limiter, mono source `effect_output.k114-mic`. Structure of the image's J714 graph; gains are starting values, not measured |
 | `share/mic-beamformer.json` **new** | same path, only with `--with-beamformer` | the same graph with the triforce delay-and-sum beamformer in front (structure of asahi-audio's `firs/j314/mic.json`, MIT, Copyright The Asahi Linux Contributors). **Its array geometry and look direction are the J314's and are unverified for this Mac**; see "Microphone beamformer" below |
-| `systemd/91-k114s-no-speaker-link.conf` | five `speakerguardd-v2*.service.d/` folders | those units stay skipped while the card has no second (Speaker) link, which removes a 15 s wait, twice, at boot |
-| `install-audio.sh` | run by the lead | `--root DIR` (a tree instead of `/`, no root rights needed), `--with-beamformer`, `--undo`, `--check`; **new:** `--root`, `--with-beamformer`, and a fix so switching graphs does not file our own file away as an "original" |
+| `systemd/99-k114s-speaker-guard.conf` **new** | `/etc/systemd/system/<unit>.service.d/` of `speakersafetyd`, `speakerguardd`, the five `speakerguardd-v2*`, `speakerguardd-v2-sleep` and `aurora-speaker-upgrade`, `speakerguardd-v2-seat.path.d/`, and `/etc/systemd/user/<unit>.service.d/` of `speakerguardd-v2-graph` and `-session` (12 drop-ins) | **the speaker guard**: those units run only while `/etc/omarchy-k114s/speaker-qualification` exists. The owner creates it by hand when Stage B has every proof; nothing here creates it. This is what keeps a sibling model's package (the K114c, M5 Max, shares the card name and could ship `/usr/share/speakersafetyd/apple/k114.conf`) from arming a daemon on this Mac. It also removes the 15 s boot waits. Replaces an earlier drop-in that keyed on `dai-link@1` alone |
+| `tree-check`, `systemd/99-k114s-stage-a-tree.conf` **new** | `/usr/local/lib/omarchy-k114s/audio/tree-check`, `/etc/systemd/user/wireplumber.service.d/` | WirePlumber starts only if the booted tree has no amplifier node (`sn012776`, `tas27*`, `cs35l*`, `ssm3515`, `max9836*`), no `spkr` or `sense` DMA channel on an enabled node, no I2C device at 0x38 to 0x3d (these three checks run with or without a sound node), and either no sound node or the Stage A card (compatible `apple,k114-macaudio`, only `dai-link@0`). A packaged J714s tree has a real speaker path and is refused. `speaker-readiness.sh` and `install-audio.sh` use the same check |
+| `install-audio.sh` | run by the lead | `--root DIR` (a tree instead of `/`, no root rights needed), `--with-beamformer`, `--undo`, `--check`; **new:** always installs the guard and the tree check first, and only then refuses (running tree not the Stage A tree, `use-packaged-dtb` set, jack verb missing), so a refused install still leaves the guard; `--undo` removes exactly the jack and microphone files and the directories only they needed, and **keeps** the guard, the tree check and the owner's marker; `--remove-guard` removes those too and is refused while `/etc/omarchy-k114s/speaker-qualification` does not exist; `--check` follows the installed graph |
 | `speaker-readiness.sh` **new** | run by anyone | silent, read-only report of whether anything could reach the speakers (see Stage B) |
 
-Other `new` work: `tests/test-audio-userland.sh` (19 checks, below) and the installer tests added to
-`tests/test-sound.sh`.
+Other `new` work: `tests/test-audio-userland.sh` (guard, tree-check, readiness and installer tests in
+fake roots, besides the 19 earlier checks) and the installer tests added to `tests/test-sound.sh`.
 
 The jack-card WirePlumber rules (pro-audio off, PCM 1 and 2 never nodes) come from the
 `audio-userland` worker's findings (a copy of its working files; if that branch is pushed later its
@@ -72,7 +73,7 @@ Six barriers, each independent, and a check for each. A speaker sound would need
 | 3 | no Speaker link; `apple,k114-macaudio` has `enable_speakers = false` | the lint; patch 0004 |
 | 4 | no `spkr` or `sense` channel on the AOP audio node | the lint |
 | 5 | PCM 1 ("Secondary") exists but cannot be opened (`DMA channel "spkr" unavailable`); WirePlumber makes no node for it; no UCM device names it | `tests/test-audio-userland.sh`, `tests/test-sound.sh` |
-| 6 | no `k114.conf`, no udev rule, no speaker graph, no protection daemon configuration is shipped, and `speaker-readiness.sh` trips (exit 3) if a `k114.conf` or a second card link or an amplifier address ever appears | `tests/test-sound.sh`, `tests/test-audio-userland.sh` |
+| 6 | no `k114.conf`, no udev rule, no speaker graph, no protection daemon configuration is shipped; the speaker daemons are skipped unless the owner's marker exists (the guard); and `speaker-readiness.sh` trips (exit 3) on a `k114*.conf`, the marker, a missing guard, a booted tree that is not the Stage A tree (any `dai-link@N` with N above 0, a speaker or amplifier link name or node, a `spkr` or `sense` DMA channel, a bound amplifier address) | `tests/test-sound.sh`, `tests/test-audio-userland.sh` |
 
 ### Microphone beamformer
 
@@ -92,14 +93,23 @@ Which raw channel is microphone 1, 2 and 3 is likewise assumed to follow the J31
 
     sudo bash linux/audio/install-audio.sh                     # plain microphone graph
     sudo bash linux/audio/install-audio.sh --with-beamformer   # optional, the comparison graph
-    sudo bash linux/audio/install-audio.sh --undo
+    sudo bash linux/audio/install-audio.sh --undo          # jack and microphone files only; the guard stays
     bash linux/audio/install-audio.sh --check
+
+After the install, check the guard as systemd sees it (read-only, starts nothing):
+
+    systemctl cat speakersafetyd speakerguardd-v2 aurora-speaker-upgrade | grep ConditionPathExists=/etc/omarchy-k114s
+    systemd-analyze condition 'ConditionPathExists=/etc/omarchy-k114s/speaker-qualification'   # must fail while no marker exists
+    systemd-analyze verify /usr/lib/systemd/system/speakersafetyd.service
+
+`speaker-readiness.sh` runs the first two itself on the live system.
 
 Then, with the sound tree booted and `snd-soc-macaudio.ko` from `patches/linux/sound/0004` in the
 root file system, log out and in (or `systemctl --user restart wireplumber pipewire
 pipewire-pulse`). The files are inert without the cards, so they may be installed before the boot.
-The installer refuses any Mac that is not `apple,k114s`, installs no package, touches no boot
-file, starts and stops no service, and does not reboot. Prerequisites that are the lead's (the
+The installer refuses any Mac that is not `apple,k114s`, any running tree with a sound node that is
+not the Stage A card, and a Mac with `/usr/local/lib/omarchy-k114s/use-packaged-dtb` set; it installs
+no package, touches no boot file, starts and stops no service, and does not reboot. Prerequisites that are the lead's (the
 PMP file generated from this Mac's own ADT, the tree, the boot trial through `aura-try`) are in
 `docs/r3-sound.md` and `docs/r3-audio-kernel.md`; the `-nomics` tree is the fallback.
 
@@ -107,6 +117,17 @@ PMP file generated from this Mac's own ADT, the tree, the boot trial through `au
 
 Do them in order. Stop at the first thing that is not as expected and read "Stop conditions".
 Everything is expected to be silent from the loudspeakers, always.
+
+**A0. Gate: is this the Stage A tree? Do nothing else until it passes.** Nothing may be played, and
+no step below may be run, on a tree that has a speaker path. (WirePlumber refuses to start on one,
+but check it yourself first.)
+
+    bash linux/audio/tree-check                  # exit 0 and "the Stage A tree: jack link only, ..."
+    tr '\0' ' ' < /proc/device-tree/sound/compatible; echo   # exactly: apple,k114-macaudio apple,macaudio
+    bash linux/audio/speaker-readiness.sh        # exit 0 (not 3)
+
+If any of these says otherwise (for example a packaged J714s device tree is booted), shut down and
+report. The same applies after every change of tree, kernel or image.
 
 **A1. The cards.**
 
@@ -125,8 +146,16 @@ tree none of this exists (today `/proc/asound` is absent).
 
     bash linux/audio/speaker-readiness.sh      # exit status 0, last line "no path to the loudspeakers exists"
     ls /sys/bus/i2c/devices | grep -E -- '-003[89a-d]$'     # prints nothing
-    amixer -c AppleK114 controls | grep -i -E 'speaker|protection|unlock'   # prints nothing
-    journalctl -k -b | grep -i -E 'tas2764|sn012776|speaker'   # at most: DMA channel "spkr" unavailable
+    amixer -c AppleK114 controls | grep -i -E 'protection|unlock|isense|vsense|speaker (volume|sample)|amplifier'   # prints nothing
+    journalctl -k -b | grep -i -E 'tas2764|sn012776|speaker|spkr|pwrd'   # at most: DMA channel "spkr" unavailable
+
+`Speaker Switch` and `Speaker Playback Mux` ARE expected on the card (they are on every card of this
+driver and have nothing behind them: no path, no amplifier), so the grep above does not look for the
+word "speaker" in the control names. Any control that names protection, an unlock, a sample rate, a
+sense channel or an amplifier is a stop. Repeat the `journalctl` line after A3 to A5: no `spkr`
+power-state transition may appear (the AOP firmware attaches its `spkr` service on every T6050, and
+what it does with the amplifiers is as iBoot left them; that is an assumption this work cannot
+check from the AP).
 
 **A3. The jack plug.** `amixer -c AppleK114 contents` shows `Headphone Jack` and `Headset Mic Jack`
 (read-only controls) and `Headphone Switch`, `Headset Mic Switch`. Unplugged: `Headphone Jack`
@@ -143,8 +172,11 @@ the first second.
     wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.2
     pw-play --volume 0.3 SOME_SHORT_SOUND_FILE
 
-Expected: sound in the headphones only, no loud click when it starts or stops. Unplug while it
-plays: the output stops and nothing comes out of the loudspeakers.
+Expected: sound in the headphones only, no loud click when it starts or stops. **Stop playback
+(Ctrl-C) before you unplug the headphones.** Do not unplug during playback: on a wrongly booted
+tree WirePlumber would move the stream to the next sink, possibly a loudspeaker. Run A4 only after
+A0 and A2 have passed. After unplugging, `wpctl status` must show no sink for the card, or one marked
+unavailable.
 
 **A5. Microphone level test, played back through headphones only.** Plug the headphones in and
 confirm with `wpctl status` that the Headphones sink is the default sink. If they are not plugged
@@ -182,8 +214,10 @@ with the PMP and AOP running is not proven on any model of this family.
 Shut down (do not reboot into the same tree) and report if **any** of these happens:
 
 1. any sound at all from the loudspeakers, at any moment, including a click or a hiss at boot;
-2. `speaker-readiness.sh` exits 3, or A2 shows an I2C device at 0x38 to 0x3d, a speaker control,
-   or any `tas2764`/`sn012776` message other than the `DMA channel "spkr" unavailable` line;
+2. A0 fails, `speaker-readiness.sh` exits 3, or A2 shows an I2C device at 0x38 to 0x3d, a
+   protection, unlock, sample-rate, sense or amplifier control (`Speaker Switch` and `Speaker
+   Playback Mux` are expected), a `spkr` power-state message, or any `tas2764`/`sn012776` message
+   other than the `DMA channel "spkr" unavailable` line;
 3. a sink or source for PCM 1 or PCM 2 appears, or the default sink is anything but the
    Headphones sink while headphones are plugged in;
 4. the machine hangs, resets or loops around the PMP/AOP lines in the kernel log; boot the
@@ -268,20 +302,30 @@ decides the outcome. In order:
    with this model's data and protection active. That is the first point at which the owner can
    listen. Until then, nothing in this repository changes the answer.
 
-A fourth, separate decision, **not taken**: boot a kernel and tree with the amplifier nodes for the
-*silent self-check only* (it proves wiring and the zero-sample switch test on hardware and enables the
-Linux half of the tester). It powers the amplifiers and opens a zero-sample stream, so it changes
-"no amplifier path". If the lead and the owner decide it: speakerguardd v2 interface only, no
-`k114.conf`, no speaker device in the ALSA profile, and `aurora-speaker-upgrade` run by hand rather
-than from the boot unit.
+There is **no self-check step**. An earlier draft proposed booting a tree with the amplifier nodes
+for a "silent" self-check; it would power the amplifiers and open a stream, so it is removed from
+the plan. It could return only as a separate decision of the owner under the conditions in
+`docs/r3-audio-protection.md` ("What can be done without sound", step 5): the speaker units
+skipped (the guard does it), `enable_speakers = false` so the kernel refuses playback, sense-only,
+and the J714 amplifier layout accepted only with owner-reviewed ADT evidence.
+
+**Before any Stage B kernel**: the legacy "Speaker Volume Unlock" interface needs no privilege
+(any process holding the element lock can unlock full gain), whereas "Speaker Protection" needs
+`CAP_SYS_ADMIN`. A K114s Stage B must offer only the second and refuse the first. The only
+daemon-independent protection today is the kernel's locked ceiling (volume step 1, and playback
+refused when the lease runs out). Details: `docs/r3-audio-protection.md`, "Stage B kernel floor".
 
 ### Things on the image that would act on their own once a speaker card exists
 
 From `docs/r3-audio-protection.md`: a file `/usr/share/speakersafetyd/apple/k114.conf` is the
-switch that admits the older daemon (never create one to "try"); `aurora-speaker-upgrade.service`
-runs at every boot with the preview acknowledgement (with a speaker card it would collect, be
-refused, and restart the user's PipeWire); and what keeps the speakers silent today is the six
-barriers above, not the absence of a daemon. Keep `tests/lint-sound-dtb.py` on every tree.
+switch that admits the older daemon (never create one to "try", and a K114c package could supply
+one: the guard drop-ins make `/etc/omarchy-k114s/speaker-qualification` the second, owner-only
+condition); `aurora-speaker-upgrade.service` runs at every boot with the preview acknowledgement
+(with a speaker card it would collect, be refused, and restart the user's PipeWire; it is guarded
+too); and what keeps the speakers silent today is the six barriers above, not the absence of a
+daemon. Keep `tests/lint-sound-dtb.py` on every tree. Known limit of the guard: it is a drop-in
+condition, so a later drop-in that resets `ConditionPathExists=` would remove it; `99-` sorts last
+and `speaker-readiness.sh` checks the files and, on the live system, `systemctl cat` for the merged unit.
 
 ### Owner's steps for Stage B
 
@@ -298,10 +342,12 @@ or image: it must exit 0. If at any time the loudspeakers produce any sound, shu
 | dtc: one warning (`simple_bus_reg` on `pmp@284e00000`), from the shared upstream file, also in the r1 tree | agent-run | kernel review |
 | This Mac's ADT agrees with the fragment: 69 of 69 jack, AOP, DMA, DART, microphone and PMP facts; the six amplifier descriptions are byte-equal to the K116s's | agent-run (read as root by another worker, today) | `tests/k114s-adt-sound-facts.py`, `tests/k114s-adt-speaker-facts.py` |
 | UCM profiles parse (`alsaucm`), the jack profile has Headphones and Headset and no Speaker device | agent-run, no card | `tests/test-sound.sh` |
-| WirePlumber rules and both microphone graphs parse; the rules name only the six expected properties; PCM 1 and 2 are never nodes | agent-run | `tests/test-audio-userland.sh`: 19 of 19 |
+| WirePlumber rules and both microphone graphs parse; the rules name only the six expected properties; PCM 1 and 2 are never nodes | agent-run | `tests/test-audio-userland.sh` (these 19 checks are among its total) |
+| `tree-check` accepts the compiled Stage A tree and refuses a packaged J714 card, a Speaker link at `dai-link@1`, `@2` or any address, a speaker-named link, an amplifier node, a `spkr` or `sense` channel and a bound amplifier address; it also refuses them when there is no sound node and an amplifier or a `spkr` channel on an enabled node exists, and ignores a `spkr` channel on a disabled node; the guard drop-ins land on twelve units; a refused install (wrong tree, `use-packaged-dtb`) still leaves the guard; `--undo` keeps the guard and is otherwise exact; `--remove-guard` is refused without the owner's marker | agent-run (compiled tree) and replica (fake roots) | `tests/test-sound.sh`, `tests/test-audio-userland.sh` |
+| The guard actually keeps a unit from starting under systemd | **not proven** by starting anything; checkable read-only after install | the drop-in text and its install are tested. After install, `systemctl cat` shows the merged condition and `systemd-analyze condition` evaluates it (both in the install steps above and in `speaker-readiness.sh` on the live system); no unit was started |
 | Both microphone graphs load in a private PipeWire (own socket, clean environment, no device, the live session untouched) and create exactly the capture stream and the mono source; a broken graph is refused | replica | same |
 | The installer installs, switches graph, undoes, and refuses a non-K114s, in a fake root, with `--root` | replica | `tests/test-sound.sh` |
-| `speaker-readiness.sh` reports no path and five blockers on this live system, and trips on a `k114.conf`, a second card link, or a bound amplifier address | agent-run (live, read-only) and replica (made-up roots) | run today; `tests/test-sound.sh` |
+| `speaker-readiness.sh` reports no path and blockers on a system with the guard installed, and trips on a `k114*.conf`, the marker, a missing guard, or any speaker path in the tree (see barrier 6) | replica (made-up roots); on the live Mac before the installer has run it trips on the missing guards, by design | `tests/test-sound.sh`, `tests/test-audio-userland.sh` |
 | The speakerguardd v2 gate, run on the compiled tree, finds no speaker card; on this Mac today it says unqualified (no bundle) | agent-run | `tests/test-sound.sh`; protection doc |
 | The cards `AppleK114` and `AppleK114HPAI` appear; the AOP and PMP come up on this board; the jack plays, detects a plug, records a headset; the three microphones record | **not proven** | no sound tree has booted. Upstream marks the K116s microphone commit "not tested on the hardware yet" and the K116s author's later status lists the array as working: neither is a K114s result |
 | The gains in either microphone graph; the beamformer geometry | **not proven** | gains are the J714 image's starting values; geometry is the J314's |
@@ -323,7 +369,7 @@ Mac's PMP values passes everything else and fails only that check. It needs `dtc
    sound on the GPU tree (one more include, built by the kernel review, not in the repository).
 2. Whether to run `stage-b-collect.sh` (root, read-only) and, with the owner, the macOS LSID tester,
    and whether to send anything upstream.
-3. Whether to boot an amplifier-node tree for the silent self-check only. Not taken here.
+3. (Withdrawn.) The silent self-check on an amplifier-node tree is no longer proposed: see Stage B.
 4. Whether the generated PMP file may live in this public repository (default: no, kept as a build
    input outside it).
 5. Optional hardening, untested: `route_only_fes = BIT(1)` in the K114 entry would remove the

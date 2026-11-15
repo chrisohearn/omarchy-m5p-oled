@@ -96,7 +96,7 @@ to.
 | 5 | The bundle compiles without refusals | `aurora-speaker-tuning compile` | Probably: an LSID tuning compiles, but **muted** (`lsid-disabled`, `lsm2-release-gated`) |
 | 6 | Every protection type of the tuning is in the build's `units_at_parity` | `gate.json`: `spp3`, `lsm2`, `atsp`. **Not `lsid`** | **No. Upstream work** |
 | 7 | The voicing (the stages before protection) is attested for this tuning and macOS build | `parity.json` | Partly. `AID49` is attested "pass" for macOS 26.6.2 (25G83), speaker IDs 0, 3 and invalid. This Mac's macOS is 27.x; it counts only if its `AID49` speaker files equal 25G83's. Not checked |
-| 8 | Silent self-check: the wiring derived from the device tree and the tuning, each amplifier's slots read back, and a switch test on an all-zero stream; bound to board, kernel, blob and wiring | `speakerguardd-selfcheck` on a kernel with the speaker card | Yes, but it needs the amplifiers powered and a (zero-sample) stream: a decision for the lead and the owner, see below |
+| 8 | Self-check: the wiring derived from the device tree and the tuning, each amplifier's slots read back, and a switch test on an all-zero stream; bound to board, kernel, blob and wiring | `speakerguardd-selfcheck` on a kernel with the speaker card | **Not planned.** It powers the amplifiers and opens a stream, which is the opposite of the owner's rule. It is not "silent" for the hardware. See "The self-check is not a step" below |
 | 9 | Supervisor checks at run time: the blob's channels against the record, the operating point against the amplifiers' gain readback; a 6-amplifier plugin; a known transport | installed code | Yes (replica: `wiring.py` accepts the K116s-style description for a K114 card: transport `apple,t6050-aop-audio`, plugin `6ch-vi`, V/I on sense channels 2N and 2N+1) |
 | 10 | The owner hears it | | The last step, never the first |
 
@@ -210,7 +210,14 @@ has no speaker card; each matters the moment one appears.
    `speakersafetyd.service` is enabled; the lead's drop-in holds it back only while that file is
    absent; the J714 hold in the image matches `apple,j714*` only; and on this dual-interface kernel
    the gate answers "the older daemons protect the speakers" for an unqualified board. Never
-   install a `k114.conf` to try something.
+   install a `k114.conf` to try something. **The file name is not specific to this Mac**: the K114c
+   (M5 Max) shares the card name `AppleK114`, upstream merged its speakers on 2026-11-11 and a
+   `k114.conf` for it is open as speakerguardd PR 178, so a routine package update could supply the
+   file. `linux/audio/install-audio.sh` therefore adds a second condition to `speakersafetyd`,
+   `speakerguardd`, the `speakerguardd-v2*` units and `aurora-speaker-upgrade`: they run only while
+   `/etc/omarchy-k114s/speaker-qualification` exists. The **owner** creates that file by hand, after
+   Stage B has every proof; nothing in this repository creates it, and `speaker-readiness.sh` trips
+   while it exists with proofs missing.
 2. **`aurora-speaker-upgrade.service` runs at every boot with the preview acknowledgement.** Today
    it ends with "no speaker card yet". With a card that has the protection controls it will, on its
    own: read the macOS System volume (or fetch about 20 MB from Apple's restore image), store the
@@ -220,6 +227,22 @@ has no speaker card; each matters the moment one appears.
    speakerguardd changes. Safe, but it should happen when the lead expects it.
 3. **The first-pass barriers are what keeps the speakers silent, not the absence of a daemon.**
    Keep `tests/lint-sound-dtb.py` of `r3/sound` on every tree.
+
+## Stage B kernel floor: what a K114s Stage B must change first
+
+Read from `macaudio.c` (review finding, not run): with no lease the SN012776 volume ceiling is
+the lowest step (`max = 1`, the safe-volume path is commented out), a lease that runs out returns
+it there, and `macaudio_spk_floor` refuses playback when the floor cannot be set. That floor is the
+one protection that does not depend on a daemon. Against it, the default **"Speaker Volume
+Unlock"** interface is unlocked by any process that holds the element lock and writes
+`SPEAKER_MAGIC_VALUE`, with no `CAP_SYS_ADMIN` check, unlike the "Speaker Protection" interface.
+So any seat-user process with `/dev/snd` access could lift the ceiling with no thermal model. For
+a K114s Stage B the kernel must therefore offer only the "Speaker Protection" (`CAP_SYS_ADMIN`)
+interface and refuse the legacy unlock for this compatible (or gate the legacy unlock on
+`capable(CAP_SYS_ADMIN)`), and `enable_speakers` stays `false` until a K114s profile exists. Not
+written: patch 0004 keeps the speakers off, which is the only thing Stage A needs. The K114
+entry's amplifier type and layout (`AMP_SN012776`, `SPKR_2W1T`, `spk_secondary_only`) are copied
+from the J714 and unused while `enable_speakers` is false; they are an assumption, not a result.
 
 ## What can be done without sound (in order; root steps are the lead's or the owner's)
 
@@ -244,12 +267,19 @@ has no speaker card; each matters the moment one appears.
    needs a kernel with the speaker card, so on this Mac it waits for the lead's decision below; the
    macOS half does not. This is the contribution that actually moves item 6, and upstream asks for
    it from exactly this model. Posting to upstream is the owner's decision.
-5. **Decision for the lead and the owner: a kernel and tree with the amplifier nodes, for the
-   silent self-check only.** It powers the amplifiers and opens a zero-sample stream while the
-   kernel holds the floor and v2 holds the mute gate. It proves items 2, 3, 8 and 9 on hardware
-   and enables the Linux half of step 4. It is a change to "no amplifier path", so it is not taken
-   here. If taken: v2 interface only, no `k114.conf`, no speaker device in the ALSA profile, and
-   the upgrade unit run by hand rather than at boot.
+5. **The self-check is not a step** (finding of the safety review). Earlier drafts proposed a
+   "silent" self-check on a kernel and tree with the amplifier nodes. It is not silent for the
+   hardware: it powers six amplifiers and opens a zero-sample stream, with no protection data for
+   this model behind it, and `aurora-speaker-upgrade` would run it at every boot with the preview
+   flag, collect, be refused and restart PipeWire. It is therefore **removed from the plan**. It
+   may be reconsidered only as its own decision of the owner, with every one of these first:
+   `aurora-speaker-upgrade` and the speakerguardd and speakersafetyd units masked for that boot
+   (the guard of `install-audio.sh` already skips them, so do not create the marker), the kernel
+   keeping `enable_speakers = false` so that it refuses playback, a check that only senses (no
+   speaker transmit stream), and the amplifier layout of the J714 accepted as this Mac's only with
+   ADT evidence (amplifier count, I2C addresses, part ID, channel map) recorded as owner-reviewed,
+   with the speaker driver and the enclosure still marked as assumed. Until then items 2, 3, 8 and
+   9 stay unproven on hardware, and step 4 has only its macOS half.
 6. **Watch upstream** for `lsid` entering `units_at_parity`, for a merged `AID49` profile with its
    qualification document, and for what Jens Axboe's K116s runs. The first of these that carries
    this model's own data, with protection active, is the point at which the owner can listen.
