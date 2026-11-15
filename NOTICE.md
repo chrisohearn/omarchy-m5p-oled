@@ -21,6 +21,8 @@ and keep their authors and licenses.
 | `linux/k114s-edge-check` | method of nickfoy/omarchy-m3-max `lib/update_preflight.py` (`8c16310`), rewritten | nickfoy (method) | MIT |
 | `patches/omarchy/0001-claude-account-by-user-and-organization.patch` | omacom/omarchy pull request 18681, head `0d6d7c27a790` (`bin/` only), carrying pull request 16144 | Michele Di Giovanni (mikjkd); Omarchybot | MIT (Omarchy) |
 | `build/make_k114s_ftab.py` | calls betizzel/omarchy-m5's `omarchy_centauri.py` unchanged | this repository | MIT |
+| `packaging/omarchy-hyprland-titlebars-m5/PKGBUILD` | the recipe of omacom/omarchy-pkgs `pkgbuilds/omarchy-hyprland-titlebars` (`062536c`), changed to build against hyprland-m5; it downloads omacom/omarchy-hyprland-titlebars `v0.4.0`, which is not copied here | recipe: Ryan Hughes and Omarchy contributors; plugin: Hypr Development (hyprbars) and Omarchy; M5 changes here | recipe MIT; plugin BSD-3-Clause and MIT |
+| `packaging/omarchy-hyprland-titlebars-m5/nested-test.sh` | runs omacom/omarchy-hyprland-titlebars `tools/verify.py` (from a checkout or the release tarball, not copied here) with two additions made at run time | this repository; verifier by Omarchy | MIT |
 
 Nothing of Apple's is in this repository. Firmware is read from Apple's own restore image on the
 owner's machine and never redistributed.
