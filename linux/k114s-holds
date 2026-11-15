@@ -1,0 +1,147 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled) r3: the package holds in /etc/pacman.conf. Idempotent.
+#
+# Omarchy's channel refresh copies a template over pacman.conf, so the holds are one managed
+# block that is written back: by k114s-holds.path (root, whenever pacman.conf changes), by the
+# user hook pre-refresh-pacman, and by hand. The pacman hooks of k114s-guard are the backstop
+# for the moments the block is absent. r2c's apply-holds wrote the same block; this replaces it.
+#
+#   k114s-holds apply                 write the block, or replace it when the data changed
+#   k114s-holds check                 exit 0 when the block in pacman.conf is the one apply would write
+#   k114s-holds show                  the held names, one per line
+#   k114s-holds remove                take the block out
+#   k114s-holds release PKG [VER]     PKG leaves the holds for good (released.list), then apply.
+#                                     Never for a boot-chain package: those stay held
+#   k114s-holds hold PKG...           PKG is held (again), then apply
+#   k114s-holds lift-noextract PATH...  apply WITHOUT these NoExtract paths, for the one transaction
+#                                     that installs the fixed file (k114s-release adopt does this)
+#   k114s-holds restore-noextract     end the lift: decide again from noextract.list
+#
+# Data, beside this script:
+#   holds.list      one package per line
+#   released.list   "PKG VERSION DATE": packages k114s-release let go; never held again by apply
+#   noextract.list  "PATH PKG GLOB": pacman does not extract PATH from any package until the
+#                   installed version of PKG matches GLOB or PKG is released (the title-bar plugin
+#                   built against the stock Hyprland must not come back while hyprland-m5 is the compositor)
+set -euo pipefail
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=k114s-lib.sh
+. "${K114S_LIB_SH:-$HERE/k114s-lib.sh}"
+BEGIN_PREFIX='# >>> K114s holds'
+BEGIN="$BEGIN_PREFIX (omarchy-m5p-oled): written by /usr/local/lib/omarchy-k114s/k114s-holds; edit holds.list, not these lines"
+END='# <<< K114s holds'
+
+strip() { # print FILE without our block (r2c's block begins with the same words)
+  awk -v begin="$BEGIN_PREFIX" -v end="$END" '
+    index($0, begin) == 1 { skip = 1; next }
+    skip && $0 == end { skip = 0; next }
+    !skip { print }' "$1"
+}
+noextract_paths() { # the paths that are still to be kept out, minus the ones lifted for a transaction
+  local path package glob version lifted=
+  [[ ! -f $RUN/noextract-lift ]] || lifted=" $(tr '\n' ' ' < "$RUN/noextract-lift") "
+  [[ -f $LIB/noextract.list ]] || return 0
+  while read -r path package glob _; do
+    [[ -n $path && $path != \#* ]] || continue
+    [[ $path =~ ^[A-Za-z0-9@._+/*-]+$ ]] || continue
+    # a released package passed its criteria: the channel's file is the fit one from then on
+    [[ -z ${package:-} ]] || ! list_names "$LIB/released.list" | grep -Fxq -- "$package" || continue
+    if [[ -n ${package:-} ]] && version=$(installed_version "$package"); then
+      # shellcheck disable=SC2053
+      [[ $version == ${glob:-__never__} ]] && continue
+    fi
+    [[ $lifted == *" $path "* ]] && continue
+    echo "$path"
+  done < "$LIB/noextract.list"
+}
+block() { # the block as it should be
+  local held paths
+  held=$(held_names | tr '\n' ' '); held=${held% }
+  echo "$BEGIN"
+  [[ -z $held ]] || echo "IgnorePkg = $held"
+  echo "NoUpgrade = usr/local/lib/omarchy-j714s/update-boot-ctxr"
+  paths=$(noextract_paths | tr '\n' ' '); paths=${paths% }
+  [[ -z $paths ]] || echo "NoExtract = $paths"
+  echo "$END"
+}
+current_block() { awk -v begin="$BEGIN_PREFIX" -v end="$END" 'index($0, begin) == 1 { on = 1 } on { print } on && $0 == end { exit }' "$PACCONF"; }
+foreign_released() { # released names still ignored by an IgnorePkg line outside our block
+  local released
+  released=$(list_names "$LIB/released.list")
+  [[ -n $released ]] || return 0
+  strip "$PACCONF" | sed -n 's/^[[:space:]]*IgnorePkg[[:space:]]*=//p' | tr -s ' \t' '\n\n' | grep -Fx -f <(printf '%s\n' "$released") | sort -u || true
+}
+apply() {
+  local want tmp released
+  [[ -f $PACCONF ]] || die "$PACCONF is missing"
+  grep -q '^\[options\]' "$PACCONF" || die "no [options] section in $PACCONF"
+  want=$(block)
+  if [[ $(current_block) == "$want" && -z $(foreign_released) ]]; then return 0; fi
+  [[ -f $LIB/holds.list ]] || warn "note: $LIB/holds.list is missing, holding the K114s boot stack only"
+  tmp=$(mktemp "$PACCONF.k114s-new.XXXXXX")
+  released=$(list_names "$LIB/released.list" | tr '\n' ' ')
+  # Our block goes right under [options]. A released name is also taken out of any other
+  # IgnorePkg line (the image's own line names the same packages until the first refresh drops it).
+  strip "$PACCONF" | K114S_BLOCK=$want K114S_RELEASED=" $released" awk '
+    /^[[:space:]]*IgnorePkg[[:space:]]*=/ && ENVIRON["K114S_RELEASED"] != " " {
+      n = split($0, part, "="); m = split(part[2], word, /[[:space:]]+/); line = ""
+      for (i = 1; i <= m; i++) if (word[i] != "" && index(ENVIRON["K114S_RELEASED"], " " word[i] " ") == 0) line = line " " word[i]
+      if (line != "") print "IgnorePkg =" line
+      next
+    }
+    { print }
+    /^\[options\]/ && !done { print ENVIRON["K114S_BLOCK"]; done = 1 }' > "$tmp"
+  grep -Fxq "$BEGIN" "$tmp" && grep -Fxq "$END" "$tmp" || { rm -f "$tmp"; die "could not add the holds"; }
+  chmod 644 "$tmp"
+  mv -f "$tmp" "$PACCONF"
+  say "holds in $PACCONF: $(held_names | tr '\n' ' ')"
+}
+
+command=${1:-apply}
+[[ $# -eq 0 ]] || shift
+# One writer at a time (k114s-holds.path, the pre-refresh hook's sudo and the release tool can all run together).
+case $command in
+  apply | "" | remove | release | hold | lift-noextract | restore-noextract)
+    mkdir -p "$ROOT/run/lock"; exec 7> "$ROOT/run/lock/k114s-holds.lock"; flock -w 60 7 || die "another k114s-holds is writing $PACCONF" ;;
+esac
+case $command in
+  apply | "") apply ;;
+  check)
+    [[ -f $PACCONF ]] || exit 1
+    [[ $(current_block) == "$(block)" && -z $(foreign_released) ]] ;;
+  show) held_names ;;
+  remove)
+    grep -q "^$BEGIN_PREFIX" "$PACCONF" || exit 0
+    tmp=$(mktemp "$PACCONF.k114s-new.XXXXXX")
+    strip "$PACCONF" > "$tmp"
+    chmod 644 "$tmp"; mv -f "$tmp" "$PACCONF"
+    say "holds removed from $PACCONF" ;;
+  release)
+    [[ $# -ge 1 ]] && valid_name "$1" || die "usage: k114s-holds release PKG [VERSION]"
+    is_held "$1" || { say "$1 is not held"; exit 0; }
+    # a boot-chain package is released for ONE transaction by k114s-release (a permit), never for good
+    boot_class_names | grep -Fxq -- "$1" && die "$1 is a boot-chain package: it stays held and goes through k114s-release (additional boot entry, one-boot trial, boot-success record)"
+    echo "$1 ${2:-unknown} $(now)" >> "$LIB/released.list"
+    say "$1 released from the holds"
+    apply ;;
+  hold)
+    [[ $# -ge 1 ]] || die "usage: k114s-holds hold PKG..."
+    for package in "$@"; do
+      valid_name "$package" || die "not a package name: $package"
+      if [[ -f $LIB/released.list ]]; then
+        awk -v p="$package" '$1 != p' "$LIB/released.list" > "$LIB/released.list.new"
+        mv -f "$LIB/released.list.new" "$LIB/released.list"
+      fi
+      list_names "$LIB/holds.list" | grep -Fxq "$package" || echo "$package" >> "$LIB/holds.list"
+    done
+    apply ;;
+  lift-noextract)
+    [[ $# -ge 1 ]] || die "usage: k114s-holds lift-noextract PATH..."
+    mkdir -p "$RUN"
+    printf '%s\n' "$@" > "$RUN/noextract-lift"
+    apply ;;
+  restore-noextract)
+    rm -f "$RUN/noextract-lift"
+    apply ;;
+  *) die "unknown command $command" ;;
+esac

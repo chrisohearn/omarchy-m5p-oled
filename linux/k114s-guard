@@ -1,0 +1,264 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled): the pacman pre-transaction guards, r3. One script, three hooks:
+#
+#   k114s-guard install   00-k114s-guard-install.hook  every package being installed or upgraded
+#   k114s-guard remove    00-k114s-guard-remove.hook   every package being removed or replaced
+#   k114s-guard esp       01-k114s-guard-esp.hook      the paths and packages that can make a
+#                                                      transaction write to the EFI partition
+#   k114s-guard audit     (not a hook) are the esp hook's triggers still every trigger of the
+#                         system's boot hooks? Run at install, at boot and by the release check.
+#
+# pacman runs the three before it changes anything (When = PreTransaction, AbortOnFail), so a
+# stop leaves the system exactly as it was. The space guard is hook 01, ahead of every other hook,
+# and takes the boot partition's lock (limine-snapper-sync writes under it) while it measures. What is held is DATA, not a list in a hook file:
+#
+#   holds.list      packages that must not change (minus released.list)   -> install and remove
+#   rivals.list     "RIVAL HELD": installing RIVAL would replace HELD     -> install
+#   protected.list  packages that are never removed, released or not      -> remove
+#   /etc/pacman.conf [omarchy] Server: only the channel in /etc/omarchy-k114s/channel (edge)
+#
+# Ways through, all deliberate:
+#   /run/omarchy-k114s/permit              written by k114s-release for exactly one transaction
+#   /etc/omarchy-k114s/allow-coupled-update    the owner's blanket override (remove it afterwards)
+#   /etc/omarchy-k114s/allow-channel-change    lets a stable/rc channel through
+#   /etc/omarchy-k114s/allow-low-esp           skips the space check
+set -u
+mode=${1:-}
+# The test overrides (K114S_ROOT, K114S_ESP_FREE) count only under K114S_TEST. pacman hooks inherit
+# the environment of whoever ran pacman, so without this "sudo env K114S_ESP_FREE=... pacman" would skip the check.
+if [ -z "${K114S_TEST:-}" ]; then unset K114S_ROOT K114S_ESP_FREE; fi
+root=${K114S_ROOT:-}
+lib=$root/usr/local/lib/omarchy-k114s
+etc=$root/etc/omarchy-k114s
+var=$root/var/lib/omarchy-k114s
+permit=$root/run/omarchy-k114s/permit
+conf=$root/etc/pacman.conf
+esp=$root/boot/efi
+MIB=1048576
+
+names() { # valid first words of FILE
+  [ -f "$1" ] || return 0
+  awk '!/^[[:space:]]*(#|$)/ { print $1 }' "$1" | grep -E '^[A-Za-z0-9@._+-]+$' || true
+}
+held() {
+  local released boot
+  # a boot-chain package is never "released" for good, whatever released.list says
+  boot=$( { printf '%s\n' linux-aurora m1n1-aurora uboot-aurora; awk '$1 == "package" && $3 ~ /^boot-/ { print $2 }' "$lib/release-criteria.conf" 2>/dev/null; } | sort -u)
+  released=$(names "$lib/released.list" | grep -Fxv -e "$boot" || true)
+  { if [ -f "$lib/holds.list" ]; then names "$lib/holds.list"; else printf '%s\n' linux-aurora m1n1-aurora uboot-aurora; fi; } |
+    { if [ -n "$released" ]; then grep -Fxv -e "$released" || true; else cat; fi; }
+}
+permitted() { # the names the permit lets through for operation $1 (install|remove); empty when stale or absent
+  [ -f "$permit" ] || return 0
+  # a permit is for the transaction that follows it; an hour-old one was left behind by a failure
+  [ -n "$(find "$permit" -maxdepth 0 -mmin -60 2>/dev/null)" ] || return 0
+  awk -v op="$1" '$1 == op { print $2 }' "$permit"
+}
+setting() {
+  local value=
+  [ -r "$etc/release.conf" ] && value=$(sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"\{0,1\}\([A-Za-z0-9._-]*\)\"\{0,1\}[[:space:]]*\$/\1/p" "$etc/release.conf" | tail -n 1)
+  echo "${value:-$2}"
+}
+size() { stat -c %s "$1" 2>/dev/null || echo "$2"; }
+
+channel_check() { # the [omarchy] repository must be the channel this install follows
+  local want servers bad
+  [ -e "$etc/allow-channel-change" ] && return 0
+  want=$(names "$etc/channel" | head -n 1); want=${want:-edge}
+  servers=$(awk '/^\[/ { on = ($0 == "[omarchy]") } on && /^[[:space:]]*Server[[:space:]]*=/ { print $NF }' "$conf" 2>/dev/null)
+  bad=$(printf '%s\n' "$servers" | grep -o -E '/(stable|rc|edge)/' | tr -d '/' | grep -Fxv "$want" | sort -u | tr '\n' ' ')
+  [ -z "$bad" ] && return 0
+  cat >&2 <<EOF
+K114s channel guard: stopped. /etc/pacman.conf now points the [omarchy] repository at the
+${bad% } channel; this install follows $want. The stable and rc channels carry older builds of the
+whole system and none of the K114s boot chain, and moving there (Update > Channel, or
+"omarchy reinstall" on a platform that defaults there) has not been run on a K114s.
+Nothing has been changed by this transaction. Put the $want channel back:
+  omarchy-refresh-pacman $want
+(or restore /etc/pacman.conf.bak, the copy Omarchy made before it wrote the new channel).
+EOF
+  return 1
+}
+
+esp_check() { # esp_check CLASSES...: is there room for what this transaction can write?
+  local free need=0 margin detail="" name file existing estimate uki=0 stage2=0 limine=0 boot ctxr
+  [ -e "$etc/allow-low-esp" ] && return 0
+  # limine-snapper-sync (and limine-entry-tool) write to the partition under this lock: measure when they are done.
+  # It limits itself (LIMIT_USAGE_PERCENT) and checks the usage before it writes, so nothing is reserved for it.
+  if command -v flock >/dev/null 2>&1 && mkdir -p "$root/run/lock" 2>/dev/null && exec 8> "$root/run/lock/boot-partition.lock"; then
+    flock -w "$(setting ESP_LOCK_WAIT_SECONDS 120)" 8 || { echo "K114s space guard: stopped. limine-snapper-sync or limine-entry-tool is writing to the EFI partition (its lock is held). Run the transaction again in a moment. Nothing has been changed." >&2; return 1; }
+  fi
+  for name in "$@"; do
+    case $name in uki) uki=1 ;; stage2) stage2=1 ;; limine) limine=1 ;; *) uki=1; stage2=1; limine=1 ;; esac
+  done
+  if [ -n "${K114S_ESP_FREE:-}" ]; then
+    free=$K114S_ESP_FREE
+  else
+    if ! findmnt -n "$esp" >/dev/null 2>&1; then
+      echo "K114s space guard: stopped. Nothing is mounted at /boot/efi, and this transaction rebuilds boot files there. Mount the EFI partition and run it again. Nothing has been changed." >&2
+      return 1
+    fi
+    free=$(df -B1 --output=avail "$esp" 2>/dev/null | tail -n 1 | tr -d ' ')
+  fi
+  case $free in '' | *[!0-9]*) echo "K114s space guard: stopped. The free space on /boot/efi could not be read. Nothing has been changed." >&2; return 1 ;; esac
+  margin=$(( $(setting ESP_MARGIN_MB 8) * MIB ))
+  if [ "$uki" = 1 ]; then
+    # one new boot image per installed kernel, written while the old one is still there
+    local prefix found=0
+    prefix=$(sed -n 's/^[[:space:]]*CUSTOM_UKI_NAME[[:space:]]*=[[:space:]]*"\{0,1\}\([a-z0-9]*\)"\{0,1\}.*/\1/p' "$root/etc/default/limine" 2>/dev/null | tail -n 1)
+    prefix=${prefix:-omarchy}
+    for file in "$root"/usr/lib/modules/*/pkgbase; do
+      [ -f "$file" ] || continue
+      name=$(head -n 1 "$file" | tr -d ' ')
+      case $name in '' | *[!A-Za-z0-9@._+-]*) continue ;; esac
+      found=1
+      existing=$(size "$esp/EFI/Linux/${prefix}_$name.efi" 0)
+      estimate=$(( $(size "${file%/pkgbase}/vmlinuz" 0) + $(size "$root/boot/initramfs-$name.img" 0) + 2 * MIB ))
+      [ "$existing" -gt "$estimate" ] && estimate=$existing
+      [ "$estimate" -lt $((32 * MIB)) ] && estimate=$((120 * MIB))   # nothing to measure: assume a large image
+      need=$((need + estimate))
+      detail="$detail  boot image for $name: $((estimate / 1000000)) MB (the new one is written while the old one is still there)
+"
+    done
+    if [ "$found" = 0 ]; then need=$((need + 120 * MIB)); detail="$detail  boot image: 126 MB (no installed kernel to measure)
+"; fi
+  fi
+  if [ "$stage2" = 1 ]; then
+    boot=$(size "$esp/m1n1/boot.bin" $((8 * MIB))); ctxr=$(size "$esp/m1n1/boot-ctxr.bin" $((8 * MIB)))
+    need=$((need + 2 * boot + ctxr))
+    detail="$detail  loader files (m1n1/boot.bin twice: new and .old; m1n1/boot-ctxr.bin): $(( (2 * boot + ctxr) / 1000000 )) MB
+"
+  fi
+  if [ "$limine" = 1 ]; then
+    need=$((need + 2 * MIB)); detail="$detail  Limine and its menu: 2 MB
+"
+  fi
+  need=$((need + margin))
+  [ "$free" -ge "$need" ] && return 0
+  cat >&2 <<EOF
+K114s space guard: stopped. This transaction can rewrite boot files on the EFI partition, which has
+$((free / 1000000)) MB free; the writes need $(( (need + 999999) / 1000000 )) MB:
+$detail  margin kept free: $((margin / 1000000)) MB
+Nothing has been changed. Updates that do not touch the boot files are not affected: this one
+contains the kernel, firmware, initramfs inputs, the loader or the boot menu tools.
+See what is on the partition:   sudo /usr/local/lib/omarchy-k114s/k114s-release status
+EOF
+  return 1
+}
+
+case $mode in
+install)
+  targets=$(cat)
+  [ -n "$targets" ] || exit 0
+  if [ -e "$etc/allow-coupled-update" ]; then
+    echo "K114s guard: /etc/omarchy-k114s/allow-coupled-update exists; not checking this transaction. Remove it afterwards."
+    exit 0
+  fi
+  channel_check || exit 1
+  held_now=$(held)
+  rivals=$(awk '!/^[[:space:]]*(#|$)/ && NF >= 2 { print $1, $2 }' "$lib/rivals.list" 2>/dev/null |
+    while read -r rival partner; do printf '%s\n' "$held_now" | grep -Fxq "$partner" && echo "$rival"; done)
+  allowed=$(permitted install)
+  blocked=$(printf '%s\n' "$targets" | grep -Fx -e "$held_now" -e "${rivals:-$held_now}" | { if [ -n "$allowed" ]; then grep -Fxv -e "$allowed"; else cat; fi; } | sort -u | tr '\n' ' ')
+  [ -n "$held_now" ] || blocked=
+  if [ -n "$blocked" ]; then
+    cat >&2 <<EOF
+K114s hold guard: stopped. This transaction would install or replace packages this K114s install
+holds at their present build:
+  ${blocked% }
+The channel's builds of these have no K114s support yet, or would replace a build that has.
+Nothing has been changed.
+- If an ordinary update asked for this, the holds are missing from /etc/pacman.conf. Put them back
+  and run the update again:      sudo /usr/local/lib/omarchy-k114s/k114s-holds apply
+- A held package is released by the release check once the channel carries the K114s fix:
+                                 sudo /usr/local/lib/omarchy-k114s/k114s-release status
+EOF
+    exit 1
+  fi
+  if [ -n "$allowed" ]; then echo "K114s hold guard: release permit in force for: $(echo $allowed)"; fi
+  # When the space guard's own triggers cannot be trusted, every install counts as able to write the ESP.
+  if [ -e "$etc/esp-guard-conservative" ] || [ -e "$var/esp-triggers-stale" ]; then
+    esp_check unknown || exit 1
+  fi
+  exit 0
+  ;;
+remove)
+  targets=$(cat)
+  [ -n "$targets" ] || exit 0
+  if [ -e "$etc/allow-coupled-update" ]; then
+    echo "K114s guard: /etc/omarchy-k114s/allow-coupled-update exists; not checking this removal. Remove it afterwards."
+    exit 0
+  fi
+  protected=$( { held; names "$lib/protected.list"; } | sort -u)
+  allowed=$(permitted remove)
+  blocked=$(printf '%s\n' "$targets" | grep -Fx -e "$protected" | { if [ -n "$allowed" ]; then grep -Fxv -e "$allowed"; else cat; fi; } | sort -u | tr '\n' ' ')
+  [ -n "$protected" ] || blocked=
+  if [ -n "$blocked" ]; then
+    cat >&2 <<EOF
+K114s hold guard: stopped. This transaction would remove or replace packages this K114s install
+is built on:
+  ${blocked% }
+A channel switch to stable or rc swaps the Omarchy packages this way, and "omarchy reinstall"
+replaces the K114s builds of the desktop stack with the channel's. Neither has been run on a
+K114s. Nothing has been changed.
+EOF
+    exit 1
+  fi
+  exit 0
+  ;;
+esp)
+  classes=$(cat | awk '
+    /^usr\/lib\/modules\/[^\/]*\/dtbs\// || /^usr\/lib\/asahi-boot/ || /^usr\/lib\/omarchy-mac-boot\/dtb-overlays\// ||
+      /^(m1n1-aurora|uboot-aurora|asahi-scripts)$/ { print "stage2"; next }
+    /^usr\/share\/limine\// || /^limine$/ { print "limine"; next }
+    /^usr\/lib\/modules\/[^\/]*\/vmlinuz$/ || /^(linux-aurora|omarchy-mac-boot)$/ { print "uki"; print "stage2"; next }
+    /^usr\/share\/libalpm\// || /^etc\/pacman\.d\/hooks\// { print "unknown"; next }
+    { print "uki" }' | sort -u | tr '\n' ' ')
+  [ -n "$classes" ] || exit 0
+  # shellcheck disable=SC2086
+  esp_check $classes || exit 1
+  exit 0
+  ;;
+audit)
+  # Every Target of every hook that can write boot files must be a Target of the esp hook; a hook
+  # that appears later with a new trigger makes the classification stale, and "unsure" means block.
+  ours=$root/etc/pacman.d/hooks/01-k114s-guard-esp.hook
+  [ -f "$ours" ] || ours=${K114S_ESP_HOOK:-$lib/01-k114s-guard-esp.hook}
+  [ -f "$ours" ] || { echo "k114s-guard audit: the esp hook is not installed" >&2; exit 2; }
+  covered=$(sed -n 's/^[[:space:]]*Target[[:space:]]*=[[:space:]]*//p' "$ours")
+  ignore=$(names "$lib/esp-audit-ignore.list")
+  uncovered=""
+  for hook in "$root"/usr/share/libalpm/hooks/*.hook "$root"/etc/pacman.d/hooks/*.hook; do
+    [ -f "$hook" ] || continue
+    base=${hook##*/}
+    case $base in [0-9][0-9]-k114s-*) continue ;; esac
+    # a hook in /etc overrides the one of the same name in /usr/share
+    case $hook in "$root"/usr/share/*) [ -e "$root/etc/pacman.d/hooks/$base" ] && continue ;; esac
+    printf '%s\n' "$ignore" | grep -Fxq "$base" && continue
+    grep -E '^[[:space:]]*(Exec|Description)[[:space:]]*=' "$hook" |
+      grep -q -i -E 'mkinitcpio|dracut|limine|m1n1|boot-ctxr|ukify|kernel-install|bootctl|grub|sbctl|/boot|initcpio|initramfs|u-?boot|\befi\b' || continue
+    while IFS= read -r target; do
+      [ -n "$target" ] || continue
+      printf '%s\n' "$covered" | grep -Fxq -e "$target" || uncovered="$uncovered$base: $target
+"
+    done <<EOF
+$(sed -n 's/^[[:space:]]*Target[[:space:]]*=[[:space:]]*//p' "$hook")
+EOF
+  done
+  if [ -n "$uncovered" ]; then
+    echo "k114s-guard audit: boot-file hooks have triggers the space guard does not know:"
+    printf '%s' "$uncovered" | sed 's/^/  /'
+    if mkdir -p "$var" 2>/dev/null && printf '%s' "$uncovered" > "$var/esp-triggers-stale" 2>/dev/null; then
+      echo "k114s-guard audit: until 01-k114s-guard-esp.hook names them, every install is checked for space."
+    fi
+    exit 1
+  fi
+  rm -f "$var/esp-triggers-stale" 2>/dev/null
+  echo "k114s-guard audit: the space guard's triggers cover every boot-file hook on this system"
+  exit 0
+  ;;
+*)
+  echo "usage: k114s-guard install|remove|esp|audit" >&2
+  exit 2
+  ;;
+esac

@@ -1,0 +1,12 @@
+# K114s (omarchy-m5p-oled) r3: a minute after boot, record what this boot came up with; come back
+# every ten minutes until it is recorded as ok (the script returns at once when it is).
+[Unit]
+Description=K114s: record a successful boot of this boot chain (timer)
+
+[Timer]
+OnBootSec=60
+OnUnitInactiveSec=600
+AccuracySec=10
+
+[Install]
+WantedBy=timers.target

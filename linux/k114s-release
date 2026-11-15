@@ -1,0 +1,956 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled) r3: let a held package go once the channel's build is fit for the K114s.
+#
+#     sudo k114s-release status              holds, the proven boot chain, a trial in progress, the ESP
+#     sudo k114s-release auto                what the post-update hook runs: check, release what is
+#                                            fixed, move a trial forward. Obeys release.conf. Never reboots.
+#     sudo k114s-release preflight           before "omarchy update": would a held package's dependency make the upgrade fail?
+#                                            (the pre-refresh hook runs it; a blocking package whose channel build is fixed is
+#                                            released as release.conf allows, otherwise it only reports)
+#     sudo k114s-release release PKG...      the same for named packages, whatever AUTO_* says
+#     sudo k114s-release release --accept-manual PKG...   also where the criteria say "a person decides"
+#     sudo k114s-release adopt FILE...       install locally built replacements of held packages (they stay
+#                                            held). Userland: directly, lifting its NoExtract for that one
+#                                            transaction. Boot chain: through the same trial as a channel build
+#     sudo k114s-release mark-known-good     record the boot image and Stage 2 this boot came from as proven
+#     sudo k114s-release retire              retire the old boot image now (needs a proven trial)
+#     sudo k114s-release stage2 [--dtb packaged|pinned]   try a Stage 2 built from the installed packages,
+#                                            beside the proven one, as the loader's one-boot trial (aura-try)
+#     sudo k114s-release stage2 --rearm      arm that trial again (after a boot that did not come through it)
+#     sudo k114s-release abandon             give a trial up: packages and boot files back from the rollback set
+#     sudo k114s-release forget-image EFI/Linux/NAME.efi   make room: take a boot image that is neither proven,
+#                                            running nor on trial off the ESP, with its menu entry; a copy is kept
+#
+# The rules it keeps:
+#  - Only a package whose channel build passes release-criteria.conf (k114s-release-check, run
+#    fresh as root) is released, and only at the version and SHA-256 that passed: the archive the check verified is what is
+#    installed (pacman -U of that file, after its SHA-256 is compared with the verdict again and its detached
+#    signature is verified with gpg on pacman's keyring at full trust, the check pacman -S would have made).
+#  - A rollback set is written first: the installed package rebuilt into an archive, /boot and
+#    the ESP boot files with hashes (k114s-recovery-set). No set, no release.
+#  - The hold guard lets exactly this transaction through (a permit naming its packages).
+#  - Userland packages switch directly. Packages marked "keep-held" in the criteria (the GPU stack,
+#    mesa-aurora and vulkan-aurora, which carry the further marker "gpu"; asahi-fwextract and omarchy-mac
+#    do not) and every boot-chain package STAY HELD: they are installed under the permit for that one
+#    transaction, so the next channel build is checked again, never installed by an ordinary update.
+#    A GPU-stack ("gpu") build from the channel is on TRIAL (gpu-trial): if the next recorded boot has no desktop,
+#    "auto" puts the rollback archive back by itself and does not install that build again.
+#  - Boot-chain packages never replace the proven boot path in one step:
+#      1. the fixed kernel/firmware is installed while Stage 2 is frozen. Its boot image becomes
+#         an ADDITIONAL menu entry; the proven image stays the default; the proven kernel's
+#         modules are kept. (trial)
+#      2. k114s-boot-success must record a successful boot of exactly that image. (proven)
+#      3. on a LATER run, with enough recorded boots and that image running, the old image and
+#         its menu entry are retired. (retired)
+#      Stage 2 (loader, U-Boot, device tree) is one file for every menu entry. It is tried as its
+#      own step (stage2, by the owner unless AUTO_STAGE2_SWITCH=yes): the candidate is written
+#      BESIDE the configured m1n1/boot-ctxr.bin as m1n1/boot-ctxr-try.bin and the loader's
+#      one-boot trial (aura-try) is armed. The loader boots it once under its watchdog and falls
+#      back to the configured file if it hangs. Each boot recorded ok through it arms it again.
+#      On a LATER run, with enough recorded boots and the candidate running, it becomes the
+#      configured file; the old one is kept on the ESP for the way back from macOS.
+#  - Every boot-chain change, the first or a later one, takes this road. Omarchy's own
+#    11-omarchy-mac-saved-modules.hook may move the proven kernel's modules to /usr/lib/modules/.old in
+#    the transaction (a channel kernel whose release string sorts below the running one): they are put back.
+#  - Another trial of the boot chain (a standing Stage 2 trial in /etc/omarchy-k114s/stage2-trial,
+#    an armed aura-try that is not ours, a boot-menu trial) is never overridden: Stage 2 waits.
+#  - Space on the ESP is computed before anything is written.
+set -euo pipefail
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=k114s-lib.sh
+. "${K114S_LIB_SH:-$HERE/k114s-lib.sh}"
+STATE=$VAR/release
+KNOWN=$STATE/known-good
+TRIAL=$STATE/trial
+FROZEN=$ETC/stage2-frozen
+KEEP_MODULES=$ETC/keep-modules
+GPU_TRIAL=$STATE/gpu-trial          # the GPU stack installed from the channel, until a later boot shows a desktop
+GPU_GIVEN_UP=$STATE/gpu-given-up    # "PACKAGE VERSION" of GPU builds that were rolled back: "auto" never installs them again
+MIB=1048576
+STAGE2_AUTO=0   # set while "auto" starts a Stage 2 trial by itself (AUTO_STAGE2_SWITCH=yes)
+summary=()      # lines for the notification at the end of "auto"
+accept_manual=  # set by "release --accept-manual"
+# What stage_boot installs: from the channel (the builds that passed the check) or from local
+# package files (adopt). Per package: the version expected afterwards, its class, its file.
+PLAN_SOURCE=channel
+declare -A PLAN_VERSION=() PLAN_CLASS=() PLAN_FILE=()
+
+log() { mkdir -p "$STATE"; echo "$(now) $*" >> "$STATE/log"; say "$*"; }
+# The archive is installed with pacman -U, and pacman -U goes by LocalFileSigLevel (Optional here): it checks FILE.sig
+# when one lies beside the archive and accepts an unsigned file. So the signature pacman -S would require is required
+# here: FILE.sig (fetched by the check) must exist and gpg, on pacman's own keyring, must report a valid signature from a
+# key at full or ultimate trust. pacman-key --verify is not used: it does not fail on an untrusted key.
+# K114S_SIGCHECK replaces the verifier only in the test sandboxes (K114S_TEST or a fake K114S_ROOT).
+signed_ok() {
+  local status
+  [[ -s $1.sig ]] || return 1
+  if [[ -n ${K114S_SIGCHECK:-} && -n ${K114S_TEST:-}${K114S_ROOT:-} ]]; then
+    $K114S_SIGCHECK "$1.sig" "$1" >/dev/null 2>&1; return    # word splitting is meant
+  fi
+  status=$(LC_ALL=C gpg --homedir "$ROOT/etc/pacman.d/gnupg" --no-permission-warning --batch --no-tty --no-auto-key-retrieve \
+    --status-fd 1 --verify "$1.sig" "$1" 2>/dev/null) || return 1
+  # GOODSIG: not expired, key not expired or revoked; a revoked signing subkey still gets VALIDSIG and a trust line
+  grep -q '^\[GNUPG:\] GOODSIG ' <<< "$status" && grep -q '^\[GNUPG:\] VALIDSIG ' <<< "$status" &&
+    grep -qE '^\[GNUPG:\] TRUST_(FULLY|ULTIMATE)' <<< "$status" &&
+    ! grep -qE '^\[GNUPG:\] (BADSIG|ERRSIG|EXPSIG|EXPKEYSIG|REVKEYSIG|KEYREVOKED|KEYEXPIRED)' <<< "$status" || return 1
+  # a key pacman-key --populate disabled (archlinux-revoked) still verifies: refuse it (field 12 of its pub line holds D)
+  local primary; primary=$(awk '$1 == "[GNUPG:]" && $2 == "VALIDSIG" { print $NF; exit }' <<< "$status")
+  ! LC_ALL=C gpg --homedir "$ROOT/etc/pacman.d/gnupg" --no-permission-warning --batch --no-tty --with-colons --list-keys "$primary" 2>/dev/null |
+    awk -F: '$1 == "pub" && $12 ~ /D/ { found=1 } END { exit !found }'
+}
+note() { summary+=("$*"); log "$*"; }
+run_pacman() { # a transaction runs its boot hooks (limine-entry-tool takes the boot-partition lock itself), so this process lets go of the lock meanwhile
+  local status=0 transaction=0
+  [[ $1 != -S && $1 != -U ]] || transaction=1
+  ((!transaction)) || boot_unlock
+  env LC_ALL=C OMARCHY_UPDATE_PACMAN=1 "$PACMAN" "${PACMAN_ARGS[@]}" "$@" 8>&- || status=$?
+  return "$status"
+}
+keep_held() { [[ $(awk -v p="$1" '$1 == "package" && $2 == p { print $4; exit }' "$(data_file release-criteria.conf)") == keep-held ]]; }   # stays in IgnorePkg after its release
+gpu_stack() { [[ $(awk -v p="$1" '$1 == "package" && $2 == p { print $5; exit }' "$(data_file release-criteria.conf)") == gpu ]]; }    # the explicit fifth word "gpu": AUTO_RELEASE_GPU and the GPU trial
+permit_write() { mkdir -p "$RUN"; { echo "# k114s-release permit $(now) pid $$"; printf '%s\n' "$@"; } > "$PERMIT"; }
+permit_clear() { rm -f "$PERMIT"; }
+holds() { bash "$(tool k114s-holds)" "$@"; }
+verdict_of() { awk -F'\t' -v p="$1" -v f="$2" '$1 == p { print $f; exit }' "$VAR/check/verdict.tsv" 2>/dev/null || true; }
+run_check() { # fresh verdicts as root, in root's private cache; 0 or 10 means it ran
+  local status=0
+  bash "$(tool k114s-release-check)" --cache "$VAR/check" --quiet ${accept_manual:+--accept-manual} "$@" || status=$?
+  [[ $status == 0 || $status == 10 ]]
+}
+rollback_set() { # rollback_set ID PACKAGES [--no-uki]: prints the folder
+  local dir=$VAR/rollback/$1
+  bash "$(tool k114s-recovery-set)" --out "$dir" --packages "$2" --label release ${3:+"$3"} >/dev/null
+  [[ -f $dir/SHA256SUMS ]] || return 1
+  echo "$dir"
+}
+new_id() { # new_id WHAT: a name for a rollback set that does not exist yet
+  local id n=1
+  id=$(now)-$1
+  while [[ -e $VAR/rollback/$id ]]; do n=$((n + 1)); id=$(now)-$1.$n; done
+  echo "$id"
+}
+real_version() { # what pacman's OWN lists offer (those "omarchy update" refreshed); nothing when they have no such package
+  { run_pacman -Sp -dd --print-format '%n %v' "$1" 2>/dev/null || true; } | awk -v p="$1" '$1 == p { print $2; exit }'
+}
+
+# --- the proven chain -------------------------------------------------------------------------
+why=
+# The record names the Stage 2 the proven boot came THROUGH (stage2, stage2_sha256: the configured
+# file, or the image a standing aura-try trial boots) and the configured file the loader falls back
+# to (configured_stage2_sha256). Records written before r3's aura-try support name only stage2_sha256.
+known_stage2() { local rel; rel=$(kv "$KNOWN" stage2); echo "${rel:-$STAGE2_REL}"; }
+known_configured() { local value; value=$(kv "$KNOWN" configured_stage2_sha256); echo "${value:-$(kv "$KNOWN" stage2_sha256)}"; }
+known_good_ok() { # is the proven chain recorded, intact and the one running? sets $why when not
+  local uki
+  [[ -f $KNOWN ]] || { why="no proven boot chain is recorded yet (sudo k114s-release mark-known-good, from a boot that works)"; return 1; }
+  uki=$(kv "$KNOWN" uki)
+  [[ -n $uki && -f $ESP/$uki ]] || { why="the proven boot image ${uki:-?} is not on the ESP"; return 1; }
+  [[ $(sum "$ESP/$uki") == "$(kv "$KNOWN" uki_sha256)" ]] || { why="the proven boot image $uki is not the file that was recorded"; return 1; }
+  [[ $(sum "$ESP/$STAGE2_REL") == "$(known_configured)" ]] || { why="$STAGE2_REL (the configured Stage 2, what the loader falls back to) is not the file recorded with the proven chain"; return 1; }
+  [[ $(booted_stage2_sum) == "$(kv "$KNOWN" stage2_sha256)" ]] ||
+    { why="this boot did not come through the proven Stage 2 ($(known_stage2)); it came through $(booted_stage2)"; return 1; }
+  [[ $(booted_uki) == "$uki" ]] || { why="this boot did not come from the proven boot image ($uki)"; return 1; }
+}
+cmd_mark_known_good() {
+  local uki banner
+  esp_is_mounted || die "nothing is mounted at $ESP"
+  [[ ! -f $TRIAL ]] || die "a trial is in progress; finish or abandon it first"
+  uki=$(booted_uki)
+  [[ -n $uki && -f $ESP/$uki ]] || die "cannot tell which boot image this boot came from (no StubImageIdentifier), so nothing is recorded"
+  banner=0; image_is_running "$ESP/$uki" || banner=$?
+  ((banner != 1)) || die "the image at $uki is not the kernel that is running; nothing recorded"
+  [[ -f $ESP/$STAGE2_REL ]] || die "$ESP/$STAGE2_REL is missing"
+  [[ $(booted_stage2) != "?" && $(booted_stage2_sum) != unknown ]] || die "this boot came through a Stage 2 trial of \"$(booted_trial)\" that is not on the ESP as a file; nothing recorded"
+  if [[ -x $LIB/k114s-booted-esp && ${K114S_SKIP_ESP_CHECK:-0} != 1 ]]; then
+    OMARCHY_ROOT=$ROOT "$LIB/k114s-booted-esp" >/dev/null || die "$ESP is not the ESP this boot came from"
+  fi
+  mkdir -p "$STATE"
+  {
+    echo "uki $uki"
+    echo "uki_sha256 $(sum "$ESP/$uki")"
+    echo "kernel $(running_version)"
+    echo "kernel_release $(running_release)"
+    echo "stage2 $(booted_stage2)"
+    echo "stage2_sha256 $(booted_stage2_sum)"
+    echo "configured_stage2_sha256 $(sum "$ESP/$STAGE2_REL")"
+    [[ -z $(booted_trial) ]] || echo "trial $(booted_trial)"
+    echo "recorded $(now)"
+    echo "source mark-known-good: the image and Stage 2 the running system booted from"
+  } > "$KNOWN.new"
+  mv -f "$KNOWN.new" "$KNOWN"
+  log "proven boot chain recorded: $uki, Stage 2 $(booted_stage2) $(kv "$KNOWN" stage2_sha256 | cut -c1-16)"
+  if [[ -n $(booted_trial) ]]; then
+    log "note: this boot came through a one-boot Stage 2 trial ($(booted_trial)), and that is what was recorded as proven. The configured $STAGE2_REL ($(sum "$ESP/$STAGE2_REL" | cut -c1-16)), which the loader falls back to, is recorded too and must stay as it is"
+    [[ -s $STANDING_TRIAL ]] || log "no standing trial ($STANDING_TRIAL) re-arms it: the next boot comes through $STAGE2_REL, and boot-chain releases wait until mark-known-good is run again from a boot that works"
+  fi
+}
+
+# --- userland ---------------------------------------------------------------------------------
+release_userland() { # release_userland PKG: verdict fixed, class userland
+  local package=$1 want real id dir file
+  want=$(verdict_of "$package" 5)
+  if gpu_stack "$package"; then
+    if grep -Fxq -- "$package $want" "$GPU_GIVEN_UP" 2>/dev/null; then log "$package $want was rolled back after a boot without a desktop; it is not installed again (a newer build is checked)"; return 0; fi
+    if [[ -f $GPU_TRIAL && $(kv "$GPU_TRIAL" boot_id) != "$(boot_id)" ]]; then note "$package: waits, the GPU stack from the channel ($(gpu_packages)) has not been through a boot yet"; return 0; fi
+  fi
+  real=$(real_version "$package")
+  if [[ $real != "$want" ]]; then
+    note "$package: the check passed $want, but pacman's own lists offer ${real:-nothing}; left held (run omarchy update first)"; return 0
+  fi
+  file=$(verdict_of "$package" 8)
+  if [[ ! -f $file || $(sum "$file") != "$(verdict_of "$package" 7)" ]]; then
+    note "$package: the archive the check verified (${file:-none}) is not there or its SHA-256 is not the one that passed; left held"; return 0
+  fi
+  signed_ok "$file" || { note "$package: the archive the check verified has no signature (${file##*/}.sig) or it does not verify against pacman's keyring; left held"; return 0; }
+  id=$(new_id "$package")
+  dir=$(rollback_set "$id" "$package" --no-uki) || { note "$package: could not write the rollback set; left held"; return 0; }
+  permit_write "install $package"
+  # keep-held packages are installed under the permit alone and stay held: the next channel build is checked again
+  keep_held "$package" || holds release "$package" "$want" >/dev/null
+  if run_pacman -U --noconfirm "$file" > "$dir/pacman.log" 2>&1 && [[ $(installed_version "$package") == "$want" ]]; then
+    permit_clear
+    if gpu_stack "$package"; then
+      gpu_trial_add "$package" "$dir" "$want"
+      note "$package installed (it stays held: the next channel build is checked again): now $want from the channel. Rollback: sudo k114s-release adopt $dir/packages/$package-*.pkg.tar.zst (it is on trial: put back by itself if the next boot shows no desktop)"
+    elif keep_held "$package"; then
+      note "$package installed (it stays held: the next channel build is checked again): now $want from the channel. Rollback: sudo k114s-release adopt $dir/packages/$package-*.pkg.tar.zst (no trial: a person checks that it works)"
+    else
+      note "$package released: now $want from the channel. Rollback: sudo pacman -U $dir/packages/$package-*.pkg.tar.zst"
+    fi
+  else
+    permit_clear
+    holds hold "$package" >/dev/null
+    note "$package: the transaction did not go through (see $dir/pacman.log); held again, nothing lost"
+  fi
+}
+gpu_packages() { awk '$1 == "package" { printf "%s ", $2 }' "$GPU_TRIAL" 2>/dev/null | sed 's/ $//'; }
+gpu_trial_add() { # gpu_trial_add PKG ROLLBACK_DIR VERSION: this channel build of the GPU stack is on trial
+  [[ -f $GPU_TRIAL ]] || printf 'started %s\nboot_id %s\n' "$(now)" "$(boot_id)" > "$GPU_TRIAL"
+  printf 'package %s %s %s\n' "$1" "$3" "$2" >> "$GPU_TRIAL"
+}
+gpu_trial_advance() { # a later boot with a desktop ends the trial; a later boot without one puts the old build back
+  [[ -f $GPU_TRIAL ]] || return 0
+  local bid started rec seen=0 up=0 name version dir archive files=() lines=() given=() names
+  bid=$(kv "$GPU_TRIAL" boot_id); started=$(kv "$GPU_TRIAL" started); names=$(gpu_packages)
+  for rec in "$VAR"/release/boots/*; do
+    [[ -f $rec && $(kv "$rec" boot_id) != "$bid" && ! $(kv "$rec" time) < $started ]] || continue
+    # k114s-boot-success writes an interim "incomplete" record into a boot that is still running (a login screen waiting) and replaces it
+    # until the boot is ok: only a finished verdict counts, an ok record or the record of a boot that is over
+    [[ $(kv "$rec" result) == ok || $(kv "$rec" boot_id) != "$(boot_id)" ]] || continue
+    seen=1
+    [[ $(kv "$rec" desktop) != yes ]] || up=1
+  done
+  ((seen)) || return 0
+  if ((up)); then rm -f "$GPU_TRIAL"; note "the GPU stack from the channel ($names) has been through a boot that reached the desktop; its trial is over"; return 0; fi
+  while read -r _ name version dir; do
+    archive=$(ls "$dir"/packages/"$name"-*.pkg.tar.zst 2>/dev/null | head -n 1 || true)
+    [[ -f $archive ]] || { printf '%s %s\n' "$name" "$version" >> "$GPU_GIVEN_UP"; mv -f "$GPU_TRIAL" "$GPU_TRIAL.failed-$(date +%s)"; note "PROBLEM: the boot after the GPU stack's release recorded no desktop, and the old $name archive is gone ($dir); the trial is closed as failed and $name $version is not installed again; put the old build back by hand"; return 0; }
+    files+=("$archive"); lines+=("install $name"); given+=("$name $version")
+  done < <(awk '$1 == "package"' "$GPU_TRIAL")
+  permit_write "${lines[@]}"
+  if run_pacman -U --noconfirm "${files[@]}" > "$STATE/gpu-rollback.log" 2>&1; then
+    permit_clear
+    printf '%s\n' "${given[@]}" >> "$GPU_GIVEN_UP"; rm -f "$GPU_TRIAL"
+    note "the boot after the GPU stack's release recorded no desktop: the old build of $names is back; that channel build is not installed again"
+  else
+    permit_clear
+    # do not retry this every run and block every later GPU release: close the trial as failed, and record the
+    # builds as given up so a hand rollback is not undone by the next update; a newer channel build is checked as usual
+    printf '%s\n' "${given[@]}" >> "$GPU_GIVEN_UP"
+    mv -f "$GPU_TRIAL" "$GPU_TRIAL.failed-$(date +%s)"
+    note "PROBLEM: the boot after the GPU stack's release recorded no desktop, and putting the old build back did not go through (see $STATE/gpu-rollback.log; its archives may need dependencies the system no longer has). The trial is closed as failed; a newer channel build is checked as usual. From a TTY: sudo k114s-release adopt ${files[*]}"
+  fi
+}
+adopt_userland() { # adopt_userland FILE PACKAGE VERSION: switch directly; it stays held
+  local file=$1 package=$2 version=$3 id dir lifted=() path before
+  before=$(installed_version "$package" || true)
+  id=$(new_id "adopt-$package")
+  dir=$(rollback_set "$id" "$package" --no-uki) || die "could not write the rollback set; nothing changed"
+  # the paths this package brings that are kept out by NoExtract
+  if [[ -f $(data_file noextract.list) ]]; then
+    while read -r path _; do
+      [[ -n $path && $path != \#* ]] || continue
+      bsdtar -tf "$file" 2>/dev/null | grep -Fxq -- "$path" && lifted+=("$path")
+    done < "$(data_file noextract.list)"
+  fi
+  ((${#lifted[@]} == 0)) || holds lift-noextract "${lifted[@]}" >/dev/null
+  permit_write "install $package"
+  if run_pacman -U --noconfirm "$file" > "$dir/pacman.log" 2>&1 && [[ $(installed_version "$package") == "$version" ]]; then
+    permit_clear; holds restore-noextract >/dev/null
+    # adopting over a GPU build that is on trial ends the trial: the owner chose, and auto does not put the build back
+    if grep -q "^package $package " "$GPU_TRIAL" 2>/dev/null; then echo "$package $before" >> "$GPU_GIVEN_UP"; sed -i "/^package $package /d" "$GPU_TRIAL"; [[ -n $(gpu_packages) ]] || rm -f "$GPU_TRIAL"; fi
+    log "$package $version adopted from ${file##*/}; it stays held. Rollback: sudo k114s-release adopt $dir/packages/$package-*.pkg.tar.zst (a plain pacman -U is stopped by the hold guard)"
+  else
+    permit_clear; holds restore-noextract >/dev/null
+    die "$package: the transaction did not go through (see $dir/pacman.log); nothing changed"
+  fi
+}
+cmd_adopt() { # locally built replacements of held packages. They stay held.
+  local file info package version class boot=() user=()
+  (($#)) || die "usage: k114s-release adopt FILE.pkg.tar.zst..."
+  PLAN_SOURCE=files
+  for file in "$@"; do
+    [[ -f $file ]] || die "$file is not a file"
+    file=$(cd -- "$(dirname -- "$file")" && pwd)/${file##*/}
+    info=$(bsdtar -xOf "$file" .PKGINFO 2>/dev/null) || die "$file is not a package"
+    package=$(sed -n 's/^pkgname = //p' <<<"$info" | head -n 1); version=$(sed -n 's/^pkgver = //p' <<<"$info" | head -n 1)
+    valid_name "$package" || die "$file names no package"
+    [[ -z ${PLAN_FILE[$package]:-} ]] || die "$package is given twice"
+    is_held "$package" || die "$package is not held; install it with pacman"
+    class=$(awk -v p="$package" '$1 == "package" && $2 == p { print $3; exit }' "$(data_file release-criteria.conf)")
+    PLAN_VERSION[$package]=$version; PLAN_CLASS[$package]=$class; PLAN_FILE[$package]=$file
+    if [[ $class == boot-* ]]; then boot+=("$package"); else user+=("$package"); fi
+  done
+  ((${#boot[@]} == 0 || ${#user[@]} == 0)) || die "boot-chain packages (${boot[*]}) and others (${user[*]}) are adopted in separate runs; nothing changed"
+  for package in "${user[@]}"; do adopt_userland "${PLAN_FILE[$package]}" "$package" "${PLAN_VERSION[$package]}"; done
+  if ((${#boot[@]})); then
+    # A local build of a boot-chain package takes the same road as a channel build: installed
+    # with Stage 2 frozen, as an additional boot entry, proven by a recorded boot, old one retired later.
+    stage_boot "${boot[@]}"
+    ((${#summary[@]} == 0)) || notify normal "K114s updates" "$(printf '%s\n' "${summary[@]}" | cut -c1-400)"
+    [[ -f $TRIAL ]] || [[ " ${boot[*]} " != *" linux-aurora "* && " ${boot[*]} " != *" omarchy-aurora-firmware "* ]] || die "nothing was staged (see above)"
+  fi
+}
+
+# --- boot chain: stage --------------------------------------------------------------------------
+limine_add_known_good() { # CONF FROM_REL NEW_REL: a first, top-level entry for NEW_REL with FROM_REL's command line
+  local conf=$1 cmdline block
+  cmdline=$(awk -v want="$2" '
+    /^[[:space:]]*path:/ && index($0, want) { hit = 1; next }
+    hit && /^[[:space:]]*cmdline:/ { sub(/^[[:space:]]*cmdline:[[:space:]]*/, ""); print; exit }
+    hit && /^[[:space:]]*\// { exit }' "$conf")
+  block="### K114s known-good (added by k114s-release; the proven boot image while a new one is on trial)
+/Omarchy K114s known-good
+  comment: the boot image that was proven before the last boot-chain release
+  protocol: efi
+  path: boot():/$3"
+  [[ -z $cmdline ]] || block+="
+  cmdline: $cmdline"
+  K114S_BLOCK=$block awk '/^[[:space:]]*\// && !done { print ENVIRON["K114S_BLOCK"]; print ""; done = 1 } { print }' "$conf" > "$conf.k114s-new"
+  [[ $(limine_entry_of "$conf.k114s-new" "$3") == 1 ]] || { rm -f "$conf.k114s-new"; return 1; }
+  sync "$conf.k114s-new"; mv -f "$conf.k114s-new" "$conf"
+  limine_set_default "$conf" 1
+}
+stage_boot() { # stage_boot PKG...: verdict fixed, classes boot-uki / boot-stage2
+  local packages=("$@") package class uki_pkgs=() real want file new_kver= vmlinuz_size=0 std known_uki preserve=0 drop=0
+  local estimate existing need free boot ctxr margin id dir conf index copy
+  if [[ -f $TRIAL ]]; then note "boot-chain release waits: a trial is in progress ($(kv "$TRIAL" packages))"; return 0; fi
+  if [[ -e $ENTRY_TRIAL ]]; then note "boot-chain release waits: a boot-menu trial of someone else is under way ($ENTRY_TRIAL)"; return 0; fi
+  esp_is_mounted || { note "boot-chain release waits: nothing is mounted at $ESP"; return 0; }
+  boot_lock
+  known_good_ok || { note "boot-chain release waits: $why"; return 0; }
+  if [[ -x $LIB/k114s-booted-esp && ${K114S_SKIP_ESP_CHECK:-0} != 1 ]]; then
+    OMARCHY_ROOT=$ROOT "$LIB/k114s-booted-esp" >/dev/null || { note "boot-chain release waits: $ESP is not the ESP this boot came from"; return 0; }
+  fi
+  for package in "${packages[@]}"; do
+    want=${PLAN_VERSION[$package]:-}
+    if [[ $PLAN_SOURCE == channel ]]; then
+      real=$(real_version "$package")
+      [[ $real == "$want" ]] || { note "$package: the check passed $want, but pacman's own lists offer ${real:-nothing}; boot-chain release waits (run omarchy update first)"; return 0; }
+      file=${PLAN_FILE[$package]:-}
+      [[ -f $file && $(sum "$file") == "$(verdict_of "$package" 7)" ]] || { note "$package: the archive the check verified (${file:-none}) is not there or its SHA-256 is not the one that passed; boot-chain release waits"; return 0; }
+      signed_ok "$file" || { note "$package: the archive the check verified has no signature (${file##*/}.sig) or it does not verify against pacman's keyring; boot-chain release waits"; return 0; }
+    fi
+    class=${PLAN_CLASS[$package]:-}
+    [[ $class == boot-uki ]] && uki_pkgs+=("$package")
+    if [[ $package == linux-aurora ]]; then
+      file=${PLAN_FILE[$package]:-}
+      new_kver=$(bsdtar -tf "$file" 2>/dev/null | sed -n 's#^usr/lib/modules/\([^/]*\)/vmlinuz$#\1#p' | head -n 1)
+      vmlinuz_size=$(bsdtar -tvf "$file" "usr/lib/modules/$new_kver/vmlinuz" 2>/dev/null | awk '{ print $5; exit }')
+      [[ -n $new_kver && $vmlinuz_size =~ ^[0-9]+$ ]] || { note "linux-aurora: cannot read the kernel out of $file; left held"; return 0; }
+      if [[ $new_kver == "$(running_release)" && ${K114S_ACCEPT_SHARED_MODULES:-0} != 1 ]]; then
+        note "linux-aurora $want has the release string of the running kernel ($new_kver): its modules would replace the proven kernel's. Left held; release it by hand with K114S_ACCEPT_SHARED_MODULES=1 if that is intended"
+        return 0
+      fi
+    fi
+  done
+  std=$(standard_uki_rel linux-aurora)
+  known_uki=$(kv "$KNOWN" uki)
+  conf=$(limine_conf)
+  [[ -f $conf ]] || { note "boot-chain release waits: $conf is missing"; return 0; }
+  # Space, before anything is written.
+  margin=$(( $(setting ESP_MARGIN_MB 8) * MIB ))
+  boot=$(size "$ESP/m1n1/boot.bin"); ctxr=$(size "$ESP/$STAGE2_REL")
+  need=$((2 * boot + ctxr + margin))
+  if ((${#uki_pkgs[@]})); then
+    ((vmlinuz_size)) || vmlinuz_size=$(size "$ROOT/usr/lib/modules/$(running_release)/vmlinuz")
+    estimate=$((vmlinuz_size + $(size "$ROOT/boot/initramfs-linux-aurora.img") + 2 * MIB))
+    existing=$(size "$ESP/$std")
+    ((existing > estimate)) && estimate=$existing
+    need=$((need + estimate))
+    if [[ $known_uki == "$std" ]]; then preserve=1; need=$((need + $(size "$ESP/$known_uki"))); fi
+  fi
+  free=$(esp_free)
+  [[ $free =~ ^[0-9]+$ ]] || { note "boot-chain release waits: cannot read the free space on the ESP"; return 0; }
+  if ((free < need)) && ((!preserve)) && [[ -f $ESP/$std ]] && ((${#uki_pkgs[@]})); then
+    # The image that is about to be rebuilt is not the proven one: it can go first (a copy is in the rollback set).
+    ((free + $(size "$ESP/$std") >= need)) && drop=1
+  fi
+  if ((free < need)) && ((!drop)); then
+    note "boot-chain release waits for room on the ESP: ${packages[*]} needs $((need / 1000000)) MB (new boot image, loader files, $((margin / 1000000)) MB margin), $((free / 1000000)) MB are free"
+    return 0
+  fi
+  id=$(new_id boot)
+  dir=$(rollback_set "$id" "${packages[*]}") || { note "${packages[*]}: could not write the rollback set; left held"; return 0; }
+  # The proven image must be among the copies before anything on the ESP changes.
+  [[ $(sum "$dir/esp/$known_uki") == "$(kv "$KNOWN" uki_sha256)" && $(sum "$dir/esp/$(known_stage2)") == "$(kv "$KNOWN" stage2_sha256)" &&
+     $(sum "$dir/esp/$STAGE2_REL") == "$(known_configured)" ]] ||
+    { note "${packages[*]}: the rollback set does not hold the proven boot files; left held"; return 0; }
+  if ((preserve)); then
+    # The proven image is the one the package's hooks rewrite: keep it under its own name and entry first.
+    copy=${std%.efi}-known-good.efi
+    cp "$ESP/$known_uki" "$ESP/$copy.k114s-new" && sync "$ESP/$copy.k114s-new" && mv -f "$ESP/$copy.k114s-new" "$ESP/$copy"
+    [[ $(sum "$ESP/$copy") == "$(kv "$KNOWN" uki_sha256)" ]] || { rm -f "$ESP/$copy"; note "could not keep a copy of the proven boot image; left held"; return 0; }
+    limine_add_known_good "$conf" "$known_uki" "$copy" || { rm -f "$ESP/$copy"; note "could not add the known-good menu entry; left held"; return 0; }
+    sed -i "s#^uki .*#uki $copy#" "$KNOWN"
+    known_uki=$copy
+    log "the proven boot image is kept as $copy, first in the boot menu and the default"
+  fi
+  mkdir -p "$ETC"
+  local was_frozen=0
+  [[ ! -f $FROZEN ]] || was_frozen=1
+  running_release >> "$KEEP_MODULES"; sort -u -o "$KEEP_MODULES" "$KEEP_MODULES"
+  known_configured > "$FROZEN"
+  if ((drop)); then rm -f "$ESP/$std"; log "removed $std before the transaction to make room (copy: $dir/esp/$std)"; fi
+  local lines=() files=()
+  local -A before_version=()
+  for package in "${packages[@]}"; do before_version[$package]=$(installed_version "$package" || true); done
+  for package in "${packages[@]}"; do
+    lines+=("install $package")
+    # Boot-chain packages are NOT released from the holds, not even for this transaction: the permit lets
+    # exactly these packages through the guard and pacman installs a named, ignored package. They are
+    # held before, during and after, so the next channel build has to pass the check and the trial again.
+    files+=("${PLAN_FILE[$package]}")   # the channel's verified archive or the local build: never a second download under the same name
+  done
+  permit_write "${lines[@]}"
+  local ok=1 mods=$ROOT/usr/lib/modules had_mods=0 old_rel
+  old_rel=$(running_release)
+  [[ ! -d $mods/$old_rel/kernel ]] || had_mods=1
+  run_pacman -U --noconfirm "${files[@]}" > "$dir/pacman.log" 2>&1 || ok=0
+  permit_clear
+  for package in "${packages[@]}"; do [[ $(installed_version "$package") == "${PLAN_VERSION[$package]}" ]] || ok=0; done
+  # Omarchy's 11-omarchy-mac-saved-modules.hook moves the RUNNING kernel's modules to /usr/lib/modules/.old when the
+  # installed kernel's release string sorts below the running one (7.3.0-17-ARCH < 7.3.0-17.v272-4-ARCH). The proven
+  # entry must keep its modules (Wi-Fi, the patched hid-magicmouse): they go back before anything is recorded.
+  # This and everything below runs whatever the boot partition's lock does: nothing after the transaction may stop early.
+  if ((had_mods)) && [[ ! -d $mods/$old_rel/kernel ]]; then
+    if [[ -e $mods/$old_rel ]]; then note "PROBLEM: $mods/$old_rel exists without its kernel modules after the transaction, so the proven kernel's modules ($mods/.old/$old_rel) were not put back. The proven entry would boot without them: do not restart; fix it by hand or restore from $dir (extras.tar)"
+    elif [[ -d $mods/.old/$old_rel/kernel ]] && mv "$mods/.old/$old_rel" "$mods/$old_rel"; then rmdir "$mods/.old" 2>/dev/null || true; log "the proven kernel's modules ($old_rel) had been moved to $mods/.old during the transaction; they were put back"
+    else note "PROBLEM: the proven kernel's modules ($mods/$old_rel) are gone after the transaction and could not be put back. The proven entry would boot without them: do not restart; restore them from $dir (extras.tar) or $mods/.old"; fi
+  fi
+  boot_lock soft || log "the boot partition's lock was still held after ${K114S_LOCK_WAIT:-120} s; the steps that restore the proven boot path go on without it"
+  # Whatever happened, the proven path must be exactly as it was: the configured Stage 2 and,
+  # under a standing trial, the Stage 2 the proven boots come through.
+  local rel want_sum
+  for rel in "$STAGE2_REL" "$(known_stage2)"; do
+    if [[ $rel == "$STAGE2_REL" ]]; then want_sum=$(known_configured); else want_sum=$(kv "$KNOWN" stage2_sha256); fi
+    [[ $(sum "$ESP/$rel") != "$want_sum" ]] || continue
+    cp "$dir/esp/$rel" "$ESP/$rel.k114s-new" && sync "$ESP/$rel.k114s-new" && mv -f "$ESP/$rel.k114s-new" "$ESP/$rel"
+    if [[ $(sum "$ESP/$rel") == "$want_sum" ]]; then log "$rel had changed during the transaction; the proven file was put back"
+    else note "PROBLEM: $rel changed during the transaction and could not be put back. Its copy is $dir/esp/$rel. Do not restart before it is back"; fi
+  done
+  if [[ $(sum "$ESP/$known_uki") != "$(kv "$KNOWN" uki_sha256)" ]]; then
+    note "PROBLEM: the proven boot image $known_uki changed during the transaction. Its copy is $dir/esp. Do not restart before it is back"
+  fi
+  index=$(limine_entry_of "$conf" "$known_uki")
+  if [[ -n $index && $(limine_default "$conf") != "$index" ]]; then limine_set_default "$conf" "$index" && log "the default boot entry is the proven image again (entry $index)"; fi
+  [[ -n $index ]] || note "PROBLEM: the boot menu has no entry for the proven image $known_uki any more; see $dir/esp/limine.conf"
+  if ((!ok)); then
+    if ((drop)) && [[ ! -f $ESP/$std ]]; then cp "$dir/esp/$std" "$ESP/$std" 2>/dev/null || true; fi
+    local any_installed=0
+    for package in "${packages[@]}"; do [[ $(installed_version "$package") != "${PLAN_VERSION[$package]}" || $(installed_version "$package") == "${before_version[$package]}" ]] || any_installed=1; done
+    if ((!any_installed)); then
+      # nothing was installed: the markers of a trial that never started go again
+      ((was_frozen)) || rm -f "$FROZEN"
+      grep -Fxv -- "$(running_release)" "$KEEP_MODULES" > "$KEEP_MODULES.new" 2>/dev/null || true; mv -f "$KEEP_MODULES.new" "$KEEP_MODULES"
+    fi
+    note "${packages[*]}: the transaction did not go through (see $dir/pacman.log). The proven boot path is untouched; the packages stay held"
+    return 0
+  fi
+  if ((${#uki_pkgs[@]} == 0)); then
+    note "${packages[*]} installed with Stage 2 frozen: the proven $STAGE2_REL is unchanged. Switch when ready: sudo k114s-release stage2"
+    return 0
+  fi
+  [[ -f $ESP/$std ]] || { note "PROBLEM: ${packages[*]} installed, but no boot image appeared at $std. The proven entry is still the default"; return 0; }
+  {
+    echo "id $id"
+    echo "kind uki"
+    echo "packages ${packages[*]}"
+    echo "uki $std"
+    echo "uki_sha256 $(sum "$ESP/$std")"
+    echo "kernel $(image_version "$ESP/$std")"
+    echo "stage2 $(known_stage2)"
+    echo "stage2_sha256 $(kv "$KNOWN" stage2_sha256)"
+    echo "configured_stage2_sha256 $(known_configured)"
+    echo "old_release $(running_release)"
+    echo "source $PLAN_SOURCE"
+    echo "rollback $dir"
+    echo "started $(now)"
+    echo "boot_id $(boot_id)"
+  } > "$TRIAL"
+  index=$(limine_entry_of "$conf" "$std")
+  note "${packages[*]} installed as an ADDITIONAL boot entry (${index:+entry $index, }\"$(limine_title_of "$conf" "${index:-0}")\"). The proven entry is still the default. To try it: restart and choose that entry in the boot menu. Nothing old is removed until it has booted"
+}
+
+# --- boot chain: prove and retire -----------------------------------------------------------------
+trial_boots() { # how many recorded boots match the trial exactly
+  local record count=0
+  for record in "$STATE"/boots/*; do
+    [[ -f $record ]] || continue
+    [[ $(kv "$record" result) == ok && $(kv "$record" uki) == "$(kv "$TRIAL" uki)" &&
+       $(kv "$record" uki_sha256) == "$(kv "$TRIAL" uki_sha256)" && $(kv "$record" stage2_sha256) == "$(kv "$TRIAL" stage2_sha256)" ]] || continue
+    # A boot that was already running when the trial began proves nothing: its record names the
+    # files as they are on the ESP now, not the ones it started from.
+    [[ -n $(kv "$record" boot_id) && $(kv "$record" boot_id) != "$(kv "$TRIAL" boot_id)" ]] || continue
+    [[ ! $(kv "$record" time) < $(kv "$TRIAL" started) ]] || continue
+    count=$((count + 1))
+  done
+  echo "$count"
+}
+running_trial() { # is the trial chain the one running, unchanged?
+  [[ $(boot_id) != "$(kv "$TRIAL" boot_id)" && $(booted_uki) == "$(kv "$TRIAL" uki)" && $(sum "$ESP/$(kv "$TRIAL" uki)") == "$(kv "$TRIAL" uki_sha256)" &&
+     $(booted_stage2_sum) == "$(kv "$TRIAL" stage2_sha256)" ]]
+}
+retire() {
+  local kind old_uki new_uki dir conf before after index old_release
+  kind=$(kv "$TRIAL" kind); dir=$(kv "$TRIAL" rollback); conf=$(limine_conf)
+  boot_lock
+  running_trial || { note "retire waits: the boot chain on trial is not the one running"; return 0; }
+  if [[ $kind == stage2 ]]; then promote_stage2; return 0; fi
+  if [[ $kind == uki ]]; then
+    old_uki=$(kv "$KNOWN" uki); new_uki=$(kv "$TRIAL" uki)
+    # The old image must be in the rollback set before it leaves the ESP. It is there under the
+    # name it had when the set was made (a proven standard image is renamed afterwards), so look by content.
+    local kept=0 file
+    for file in "$dir"/esp/EFI/Linux/*.efi; do
+      [[ -f $file && $(sum "$file") == "$(kv "$KNOWN" uki_sha256)" ]] && kept=1
+    done
+    ((kept)) || { note "retire waits: the rollback set $dir no longer holds the old boot image; it stays on the ESP"; return 0; }
+    cp -p "$conf" "$dir/limine.conf.before-retire"
+    if [[ $old_uki != "$new_uki" ]]; then
+      before=$(grep -c -E '^/[^/]' "$conf" || true)
+      limine_remove_entry_block "$conf" "$old_uki" > "$conf.k114s-new"
+      after=$(grep -c -E '^/[^/]' "$conf.k114s-new" || true)
+      if ((after != before - 1)) || [[ -z $(limine_entry_of "$conf.k114s-new" "$new_uki") ]] || grep -q -F "$old_uki" "$conf.k114s-new"; then
+        rm -f "$conf.k114s-new"
+        note "retire waits: the old image's menu entry is not a block this tool can take out safely; boot menu left as it is"; return 0
+      fi
+      sync "$conf.k114s-new"; mv -f "$conf.k114s-new" "$conf"
+    fi
+    index=$(limine_entry_of "$conf" "$new_uki")
+    limine_set_default "$conf" "$index" || { note "PROBLEM: could not set the default boot entry; check $conf (copy: $dir/limine.conf.before-retire)"; return 0; }
+    [[ $old_uki == "$new_uki" ]] || rm -f "$ESP/$old_uki"
+    # Stage 2 stays frozen only while a loader or U-Boot package was installed and not yet switched to.
+    [[ $(kv "$TRIAL" packages) == *m1n1-aurora* || $(kv "$TRIAL" packages) == *uboot-aurora* ]] || rm -f "$FROZEN"
+    old_release=$(kv "$TRIAL" old_release)
+    if [[ -f $KEEP_MODULES && -n $old_release ]]; then grep -Fxv -- "$old_release" "$KEEP_MODULES" > "$KEEP_MODULES.new" || true; mv -f "$KEEP_MODULES.new" "$KEEP_MODULES"; fi
+  fi
+  write_known "retired trial $(kv "$TRIAL" id) ($(kv "$TRIAL" packages)) after $(trial_boots) recorded boots" \
+    "$(kv "$TRIAL" stage2)" "$(kv "$TRIAL" stage2_sha256)" "$(kv "$TRIAL" configured_stage2_sha256)"
+  mkdir -p "$STATE/history"; mv -f "$TRIAL" "$STATE/history/$(kv "$TRIAL" id)"
+  note "the new boot chain is now the proven one and the default; the old boot image${old_uki:+ ($old_uki)} was retired. Its copy and the old packages stay in $dir"
+  [[ ! -f $FROZEN ]] || note "Stage 2 is still the earlier proven file (frozen). Switch it to the installed loader packages when ready: sudo k114s-release stage2"
+  [[ -e $LIB/use-packaged-dtb ]] || log "the device tree in Stage 2 is still the pinned K114s tree; the released kernel's own tree passed the criteria: sudo k114s-release stage2 --dtb packaged"
+}
+write_known() { # write_known SOURCE STAGE2_REL STAGE2_SHA CONFIGURED_SHA: the trial's chain, now running, becomes the proven one
+  {
+    echo "uki $(kv "$TRIAL" uki)"
+    echo "uki_sha256 $(kv "$TRIAL" uki_sha256)"
+    echo "kernel $(running_version)"
+    echo "kernel_release $(running_release)"
+    echo "stage2 ${2:-$STAGE2_REL}"
+    echo "stage2_sha256 $3"
+    echo "configured_stage2_sha256 ${4:-$3}"
+    echo "recorded $(now)"
+    echo "source $1"
+  } > "$KNOWN.new"
+  mv -f "$KNOWN.new" "$KNOWN"
+}
+advance() { # move a trial forward: prove it from the boot records; retire on a later run
+  local explicit=${1:-0} count need
+  [[ -f $TRIAL ]] || return 0
+  count=$(trial_boots)
+  if [[ -z $(kv "$TRIAL" proven) ]]; then
+    if ((count >= 1)); then
+      echo "proven $(now)" >> "$TRIAL"
+      note "the boot chain on trial ($(kv "$TRIAL" packages)) has a recorded successful boot. The old one is retired on a later run"
+    elif [[ $(kv "$TRIAL" kind) == stage2 ]]; then
+      stage2_trial_note
+    else
+      note "on trial, not booted yet: $(kv "$TRIAL" packages). Restart and choose \"$(limine_title_of "$(limine_conf)" "$(limine_entry_of "$(limine_conf)" "$(kv "$TRIAL" uki)")")\" in the boot menu to try it"
+    fi
+    return 0
+  fi
+  [[ $(kv "$TRIAL" kind) != stage2 || $(booted_stage2) == "$STAGE2_TRY_REL" ]] || { stage2_trial_note; return 0; }
+  need=$(setting RETIRE_AFTER_BOOTS 2)
+  if ((explicit)) || { enabled AUTO_RETIRE yes && ((count >= need)); }; then
+    retire
+  else
+    note "the boot chain on trial is proven ($count recorded boot(s); retired after $need, or now with: sudo k114s-release retire)"
+  fi
+}
+
+# --- Stage 2: a candidate beside the proven file, tried through the loader's one-boot trial -----------
+stage2_trial_note() { # where a Stage 2 trial stands when this start did not come through it
+  if [[ -n $(aura_try_armed) ]]; then
+    note "Stage 2 on trial: $STAGE2_TRY_REL is armed for the next start (the loader boots it once; if it hangs, its watchdog resets the Mac onto the proven $STAGE2_REL). Restart when convenient"
+  elif [[ $(boot_id) == "$(kv "$TRIAL" boot_id)" ]]; then
+    note "Stage 2 on trial: $STAGE2_TRY_REL is written but not armed. Arm it: sudo k114s-release stage2 --rearm"
+  else
+    note "Stage 2 on trial: this start did not come through $STAGE2_TRY_REL (the loader fell back to the proven file, or the start before was not recorded ok). Nothing proven changed. Try again: sudo k114s-release stage2 --rearm   give up: sudo k114s-release abandon"
+  fi
+}
+stage2_room() { # stage2_room COPIES: room for that many Stage 2 sized files and the margin?
+  local free
+  free=$(esp_free)
+  [[ $free =~ ^[0-9]+$ ]] && ((free >= $1 * $(size "$ESP/$STAGE2_REL") + $(setting ESP_MARGIN_MB 8) * MIB))
+}
+cmd_stage2() {
+  local dtb= rearm=0 id dir new hook foreign candidate
+  while (($#)); do case $1 in --dtb) dtb=${2:?}; shift 2 ;; --rearm) rearm=1; shift ;; *) die "unknown argument $1" ;; esac; done
+  [[ -z $dtb || $dtb == packaged || $dtb == pinned ]] || die "--dtb takes packaged or pinned"
+  esp_is_mounted || die "nothing is mounted at $ESP"
+  candidate=$ESP/$STAGE2_TRY_REL
+  foreign=$(foreign_trial "$STAGE2_TRY_REL")
+  [[ -z $foreign ]] || die "another trial of the boot chain is under way: $foreign. One trial at a time; nothing changed"
+  if ((rearm)); then
+    [[ -f $TRIAL && $(kv "$TRIAL" kind) == stage2 ]] || die "no Stage 2 trial is in progress"
+    [[ $(sum "$candidate") == "$(kv "$TRIAL" stage2_sha256)" ]] || die "$STAGE2_TRY_REL is not the candidate on trial; nothing armed (sudo k114s-release abandon)"
+    [[ $(sum "$ESP/$STAGE2_REL") == "$(kv "$TRIAL" configured_stage2_sha256)" ]] || die "the configured $STAGE2_REL is not the file the trial began with; nothing armed"
+    aura_try_arm "$STAGE2_TRY_REL" || die "could not arm the trial"
+    log "Stage 2 candidate $STAGE2_TRY_REL armed for the next start (one start, under the loader's watchdog)"
+    return 0
+  fi
+  [[ ! -f $TRIAL ]] || die "a trial is in progress ($(kv "$TRIAL" packages)); one change at a time"
+  known_good_ok || die "$why"
+  hook=$LIB/update-boot-ctxr
+  [[ -x $hook ]] || die "$hook is missing"
+  # Room for the candidate now, and at the switch for the copy of the old file and a temp file.
+  stage2_room 3 || die "not enough room on the ESP for the candidate, and later the kept copy and a temp file ($(( $(esp_free) / 1000000 )) MB free)"
+  if [[ -z $dtb ]]; then if [[ -e $LIB/use-packaged-dtb ]]; then dtb=packaged; else dtb=pinned; fi; fi
+  id=$(new_id stage2)
+  dir=$(rollback_set "$id" "m1n1-aurora uboot-aurora" --no-uki) || die "could not write the rollback set; nothing changed"
+  rm -f "$candidate"
+  if ! K114S_STAGE2_OUT=${STAGE2_TRY_REL#m1n1/} K114S_STAGE2_DTB=$dtb OMARCHY_ROOT=$ROOT "$hook" > "$dir/stage2.log" 2>&1; then
+    rm -f "$candidate"
+    die "the Stage 2 hook refused (see $dir/stage2.log); nothing changed, the proven Stage 2 is in place"
+  fi
+  [[ -s $candidate ]] || die "the Stage 2 hook wrote no candidate (see $dir/stage2.log); nothing changed"
+  if [[ $dtb == packaged ]]; then
+    # update-m1n1 cuts boot.bin from the newest -ARCH kernel directory, which can be the proven kernel's restored one,
+    # not the installed linux-aurora's (the one the release check read): the tree in the candidate must be the package's.
+    local pkgdtb m1n1 m1n1_size
+    pkgdtb=$(run_pacman -Qlq linux-aurora 2>/dev/null | sed -n 's#^.*\(usr/lib/modules/[^/]*/dtbs/t6050-k114s\.dtb\)$#\1#p' | head -n 1)
+    m1n1=$ROOT/usr/lib/asahi-boot/m1n1.bin; [[ ! -s $ROOT/usr/lib/asahi-boot/m1n1-ctxr.bin ]] || m1n1=$ROOT/usr/lib/asahi-boot/m1n1-ctxr.bin
+    m1n1_size=$(size "$m1n1")
+    if [[ -z $pkgdtb || ! -s $ROOT/$pkgdtb ]] || ! cmp -s -i "$m1n1_size:0" -n "$(size "$ROOT/$pkgdtb")" "$candidate" "$ROOT/$pkgdtb"; then
+      rm -f "$candidate"
+      die "the K114s device tree in boot.bin is not the one the installed linux-aurora carries${pkgdtb:+ ($pkgdtb)}: update-m1n1 took it from another kernel directory. Nothing changed. Run update-m1n1 with DTBS set to that kernel's dtbs directory (/etc/default/update-m1n1), then try again"
+    fi
+  fi
+  [[ $(sum "$ESP/$STAGE2_REL") == "$(known_configured)" ]] || { rm -f "$candidate"; die "PROBLEM: $STAGE2_REL changed while the candidate was built; its copy is in $dir/esp"; }
+  new=$(sum "$candidate")
+  if [[ $new == "$(known_configured)" ]]; then
+    rm -f "$candidate" "$FROZEN"
+    case $dtb in packaged) : > "$LIB/use-packaged-dtb" ;; pinned) rm -f "$LIB/use-packaged-dtb" ;; esac
+    log "a Stage 2 built from the installed packages is the configured one, byte for byte; nothing to try, and the freeze is lifted"; return 0
+  fi
+  if [[ $new == "$(kv "$KNOWN" stage2_sha256)" ]]; then rm -f "$candidate"; log "a Stage 2 built from the installed packages is the proven one, byte for byte; nothing to try"; return 0; fi
+  if ((STAGE2_AUTO)) && grep -Fxq -- "$new" "$STATE/stage2-given-up" 2>/dev/null; then
+    rm -f "$candidate"; note "the Stage 2 built from the installed packages was given up before (abandon); it is not tried again by itself. Try it by hand: sudo k114s-release stage2"; return 0
+  fi
+  {
+    echo "id $id"
+    echo "kind stage2"
+    echo "packages m1n1-aurora uboot-aurora (device tree: $dtb)"
+    echo "dtb $dtb"
+    echo "uki $(kv "$KNOWN" uki)"
+    echo "uki_sha256 $(kv "$KNOWN" uki_sha256)"
+    echo "stage2 $STAGE2_TRY_REL"
+    echo "stage2_sha256 $new"
+    echo "configured_stage2_sha256 $(known_configured)"
+    echo "old_stage2 $(known_stage2)"
+    echo "old_stage2_sha256 $(kv "$KNOWN" stage2_sha256)"
+    echo "rollback $dir"
+    echo "started $(now)"
+    echo "boot_id $(boot_id)"
+  } > "$TRIAL"
+  log "Stage 2 candidate written BESIDE the proven one: $STAGE2_TRY_REL (${new:0:16}), device tree $dtb. $STAGE2_REL is unchanged"
+  aura_try_arm "$STAGE2_TRY_REL" || { note "the Stage 2 candidate is written but the trial could not be armed. Arm it: sudo k114s-release stage2 --rearm"; return 0; }
+  note "Stage 2 candidate armed for ONE start: the loader boots it once under its watchdog, and a start that hangs is reset onto the proven $STAGE2_REL. Each start recorded ok through it arms it again; it becomes the configured file on a later run"
+  say "If a trial start hangs and the Mac does not come back by itself: hold the power button and start again."
+  say "The trial is spent by then, so the proven $STAGE2_REL boots. Stop trying it: sudo k114s-release abandon"
+}
+promote_stage2() { # the candidate, proven and running, becomes the configured Stage 2; the old file is kept
+  local candidate=$ESP/$STAGE2_TRY_REL new old keep foreign dir
+  new=$(kv "$TRIAL" stage2_sha256); old=$(sum "$ESP/$STAGE2_REL"); dir=$(kv "$TRIAL" rollback)
+  foreign=$(foreign_trial "$STAGE2_TRY_REL")
+  [[ -z $foreign ]] || { note "the Stage 2 switch waits: $foreign"; return 0; }
+  [[ $(sum "$candidate") == "$new" ]] || { note "the Stage 2 switch waits: $STAGE2_TRY_REL is not the candidate that was proven"; return 0; }
+  [[ $old == "$(kv "$TRIAL" configured_stage2_sha256)" ]] || { note "the Stage 2 switch waits: $STAGE2_REL is not the file the trial began with"; return 0; }
+  [[ $(sum "$dir/esp/$STAGE2_REL") == "$old" ]] || { note "the Stage 2 switch waits: the rollback set $dir does not hold the configured Stage 2"; return 0; }
+  keep=$ESP/k114s-repair/known-good
+  if [[ $(sum "$keep/boot-ctxr.bin") == "$old" ]]; then stage2_room 1 || { note "the Stage 2 switch waits for room on the ESP for a temp file"; return 0; }
+  else stage2_room 2 || { note "the Stage 2 switch waits for room on the ESP for the kept copy and a temp file"; return 0; }; fi
+  # The file the loader falls back to stays on the ESP: the way back when Linux does not start is from macOS.
+  mkdir -p "$keep"
+  if [[ $(sum "$keep/boot-ctxr.bin") != "$old" ]]; then
+    cp "$ESP/$STAGE2_REL" "$keep/boot-ctxr.bin.k114s-new" && sync "$keep/boot-ctxr.bin.k114s-new" && mv -f "$keep/boot-ctxr.bin.k114s-new" "$keep/boot-ctxr.bin"
+  fi
+  echo "$old  boot-ctxr.bin" > "$keep/boot-ctxr.bin.sha256"
+  [[ $(sum "$keep/boot-ctxr.bin") == "$old" ]] || { note "the Stage 2 switch waits: could not keep a copy of $STAGE2_REL on the ESP"; return 0; }
+  cp "$candidate" "$ESP/$STAGE2_REL.k114s-new" && sync "$ESP/$STAGE2_REL.k114s-new" && mv -f "$ESP/$STAGE2_REL.k114s-new" "$ESP/$STAGE2_REL"
+  if [[ $(sum "$ESP/$STAGE2_REL") != "$new" ]]; then
+    cp "$keep/boot-ctxr.bin" "$ESP/$STAGE2_REL.k114s-new" && sync "$ESP/$STAGE2_REL.k114s-new" && mv -f "$ESP/$STAGE2_REL.k114s-new" "$ESP/$STAGE2_REL"
+    note "PROBLEM: the new Stage 2 did not verify after it was written; the old file was put back ($(sum "$ESP/$STAGE2_REL" | cut -c1-16)). Check before restarting: sudo k114s-release status"
+    return 0
+  fi
+  aura_try_clear "$STAGE2_TRY_REL"
+  # The candidate file itself stays until a start no longer comes through it (tidy_stage2): this one did.
+  case $(kv "$TRIAL" dtb) in packaged) : > "$LIB/use-packaged-dtb" ;; pinned) rm -f "$LIB/use-packaged-dtb" ;; esac
+  rm -f "$FROZEN"
+  write_known "Stage 2 trial $(kv "$TRIAL" id) after $(trial_boots) recorded boots" "$STAGE2_REL" "$new" "$new"
+  mkdir -p "$STATE/history"; mv -f "$TRIAL" "$STATE/history/$(kv "$TRIAL" id)"
+  note "the tried Stage 2 is now the configured $STAGE2_REL (${new:0:16}; was ${old:0:16}). The old file is kept on the ESP as k114s-repair/known-good/boot-ctxr.bin and in $dir"
+  say "If Linux does not start any more: start macOS, mount the Linux EFI partition and copy"
+  say "  k114s-repair/known-good/boot-ctxr.bin  over  m1n1/boot-ctxr.bin   (sha256 ${old:0:16}...)"
+}
+tidy_stage2() { # a candidate no trial needs any more, that this start did not come through, leaves the ESP
+  [[ -f $ESP/$STAGE2_TRY_REL ]] || return 0
+  [[ ! -f $TRIAL || $(kv "$TRIAL" kind) != stage2 ]] || return 0
+  [[ $(booted_stage2) != "$STAGE2_TRY_REL" && $(aura_try_armed) != "$STAGE2_TRY_REL" ]] || return 0
+  rm -f "$ESP/$STAGE2_TRY_REL"; aura_try_clear "$STAGE2_TRY_REL"
+  log "removed the Stage 2 candidate $STAGE2_TRY_REL, which no trial needs any more"
+}
+
+cmd_abandon() {
+  local kind dir archive packages package lines=() old
+  [[ -f $TRIAL ]] || die "no trial is in progress"
+  kind=$(kv "$TRIAL" kind); dir=$(kv "$TRIAL" rollback)
+  [[ -d $dir ]] || die "the rollback set $dir is gone"
+  if [[ $kind == stage2 ]]; then
+    # Nothing proven was overwritten: the trial is disarmed and the candidate goes. While this
+    # start came through it, the file stays until a later run (tidy_stage2).
+    aura_try_clear "$STAGE2_TRY_REL"
+    [[ $(booted_stage2) == "$STAGE2_TRY_REL" ]] || rm -f "$ESP/$STAGE2_TRY_REL"
+    kv "$TRIAL" stage2_sha256 >> "$STATE/stage2-given-up"     # the automatic switch does not try this one again
+    [[ $(sum "$ESP/$STAGE2_REL") == "$(kv "$TRIAL" configured_stage2_sha256)" ]] || warn "$STAGE2_REL is not the file the trial began with; see: k114s-release status"
+    mkdir -p "$ETC"; kv "$TRIAL" configured_stage2_sha256 > "$FROZEN"
+  else
+    packages=$(kv "$TRIAL" packages)
+    local files=()
+    for package in $packages; do
+      archive=$(ls "$dir"/packages/"$package"-*.pkg.tar.zst 2>/dev/null | head -n 1 || true)
+      [[ -f $archive ]] || die "no archive of $package in $dir"
+      files+=("$archive"); lines+=("install $package"); holds hold "$package" >/dev/null
+    done
+    # The old kernel's module tree was put back by kernel-modules-hook when the new kernel was
+    # installed and belongs to no package now; its package takes those paths over again.
+    local overwrite=()
+    old=$(kv "$TRIAL" old_release)
+    if [[ " $packages " == *" linux-aurora "* && $old =~ ^[A-Za-z0-9._+-]+$ ]]; then overwrite=(--overwrite "usr/lib/modules/$old/*"); fi
+    permit_write "${lines[@]}"
+    if ! run_pacman -U --noconfirm "${overwrite[@]}" "${files[@]}" > "$dir/abandon.log" 2>&1; then
+      permit_clear
+      die "putting the old packages back did not go through (see $dir/abandon.log); the trial stays as it was"
+    fi
+    permit_clear
+    [[ ! -f $dir/extras.tar ]] || bsdtar -xpf "$dir/extras.tar" -C "${ROOT:-/}" 2>/dev/null || true
+    # The old packages are back and Stage 2 never left the proven file: the trial's markers go.
+    old=$(kv "$TRIAL" old_release)
+    if [[ -f $KEEP_MODULES && -n $old ]]; then grep -Fxv -- "$old" "$KEEP_MODULES" > "$KEEP_MODULES.new" || true; mv -f "$KEEP_MODULES.new" "$KEEP_MODULES"; fi
+    if [[ -f $KNOWN && $(sum "$ESP/$STAGE2_REL") == "$(known_configured)" ]]; then rm -f "$FROZEN"
+    else warn "Stage 2 is not the proven file; it stays frozen as it is. See: k114s-release status"; fi
+  fi
+  mkdir -p "$STATE/history"; mv -f "$TRIAL" "$STATE/history/$(kv "$TRIAL" id).abandoned"
+  log "trial abandoned: $kind put back from $dir"
+}
+
+# --- make room: take a boot image that is neither proven, nor running, nor on trial off the ESP -------
+cmd_forget_image() {
+  local rel=${1:-} conf id dir before after index proven
+  [[ $rel =~ ^EFI/Linux/[A-Za-z0-9._+-]+\.efi$ ]] || die "usage: k114s-release forget-image EFI/Linux/NAME.efi"
+  esp_is_mounted || die "nothing is mounted at $ESP"
+  [[ -f $ESP/$rel ]] || die "$rel is not on the ESP"
+  boot_lock
+  [[ ! -f $TRIAL ]] || die "a trial is in progress; finish or abandon it first"
+  known_good_ok || die "$why"
+  proven=$(kv "$KNOWN" uki)
+  [[ $rel != "$proven" ]] || die "$rel is the proven boot image; it is not forgotten"
+  [[ $rel != "$(booted_uki)" ]] || die "$rel is the image this boot came from"
+  conf=$(limine_conf)
+  [[ -f $conf ]] || die "$conf is missing"
+  id=$(new_id forget); dir=$VAR/rollback/$id
+  mkdir -p "$dir/esp/EFI/Linux"
+  cp -p "$ESP/$rel" "$dir/esp/$rel" && cp -p "$conf" "$dir/esp/limine.conf"
+  [[ $(sum "$dir/esp/$rel") == "$(sum "$ESP/$rel")" ]] || die "could not keep a copy of $rel; nothing changed"
+  (cd "$dir" && sha256sum "esp/$rel" esp/limine.conf > SHA256SUMS)
+  if grep -q -F "$rel" "$conf"; then
+    before=$(grep -c -E '^/[^/]' "$conf" || true)
+    limine_remove_entry_block "$conf" "$rel" > "$conf.k114s-new"
+    after=$(grep -c -E '^/[^/]' "$conf.k114s-new" || true)
+    if ((after != before - 1)) || grep -q -F "$rel" "$conf.k114s-new" || [[ -z $(limine_entry_of "$conf.k114s-new" "$proven") ]]; then
+      rm -f "$conf.k114s-new"
+      die "the menu entry of $rel is not a block this tool can take out safely; nothing changed (its copy is in $dir)"
+    fi
+    sync "$conf.k114s-new"; mv -f "$conf.k114s-new" "$conf"
+  fi
+  index=$(limine_entry_of "$conf" "$proven")
+  [[ -z $index ]] || limine_set_default "$conf" "$index" || die "could not set the default boot entry; $rel was NOT removed (menu copy: $dir/esp/limine.conf)"
+  rm -f "$ESP/$rel"
+  log "$rel was taken off the ESP ($(( $(size "$dir/esp/$rel") / 1000000 )) MB); copy and the menu as it was: $dir. Default entry: $(limine_title_of "$conf" "${index:-0}")"
+}
+
+# --- auto / release --------------------------------------------------------------------------------
+do_release() { # do_release MODE PKG...: MODE auto obeys release.conf, MODE named releases what was asked
+  local mode=$1 fixed=() boot=() name class verdict
+  shift
+  boot_unlock     # the check downloads packages: the boot partition's lock is not held meanwhile
+  run_check ${1:+--packages "$*"} || { note "the release check could not run (network?); nothing released"; return 0; }
+  while IFS=$'\t' read -r name class verdict _; do
+    [[ $verdict == fixed ]] || continue
+    is_held "$name" || continue
+    fixed+=("$name")
+    case $class in
+      userland) if [[ $mode == named ]] || { enabled AUTO_RELEASE yes && { ! gpu_stack "$name" || enabled AUTO_RELEASE_GPU no; }; }; then release_userland "$name"
+                elif gpu_stack "$name"; then note "$name: the channel's build is fit for the K114s; the GPU stack is not switched unattended (AUTO_RELEASE_GPU=no); release with: sudo k114s-release release $name"
+                else note "$name: the channel's build is fit for the K114s; release with: sudo k114s-release release $name"; fi ;;
+      boot-uki | boot-stage2) boot+=("$name") ;;
+    esac
+  done < "$VAR/check/verdict.tsv"
+  if ((${#boot[@]})); then
+    PLAN_SOURCE=channel
+    for name in "${boot[@]}"; do PLAN_VERSION[$name]=$(verdict_of "$name" 5); PLAN_CLASS[$name]=$(verdict_of "$name" 2); PLAN_FILE[$name]=$(verdict_of "$name" 8); done
+    if [[ $mode == named ]] || { enabled AUTO_RELEASE yes && enabled AUTO_RELEASE_BOOT yes; }; then stage_boot "${boot[@]}"
+    else note "${boot[*]}: the channel's build is fit for the K114s; stage it with: sudo k114s-release release ${boot[*]}"; fi
+  fi
+  if [[ $mode == named ]]; then
+    for name in "$@"; do [[ " ${fixed[*]:-} " == *" $name "* ]] || note "$name is not released: $(verdict_of "$name" 3)"; done
+  fi
+}
+preflight_conflicts() { # preflight_conflicts OUT: the held packages that a package of the upgrade list (-Sup prints no conflict step) would replace
+  local held rival upgrade
+  upgrade=$(awk 'NF == 2 && $2 ~ /[0-9]/ { print $1 }' <<<"$1")
+  [[ -n $upgrade ]] || return 0
+  for held in $(held_names); do
+    for rival in $(awk -v h="$held" '$2 == h { print $1 }' "$(data_file rivals.list)" 2>/dev/null) \
+                 $(LC_ALL=C "$PACMAN" "${PACMAN_ARGS[@]}" -Qi "$held" 2>/dev/null | sed -n 's/^Conflicts With *: *//p' | tr -s ' ' '\n' | sed 's/[<>=].*//'); do
+      if grep -Fxq -- "$rival" <<<"$upgrade"; then echo "$held"; break; fi
+    done
+  done
+}
+cmd_preflight() { # the upgrade the channel offers, worked out in the check's private copy of the lists; releases a fixed blocker as release.conf allows
+  local out status=0 name blocked=() fixed=() pending=() lines=() verdict needers
+  boot_unlock
+  # a trial that a later boot has already decided is closed first, so a fixed blocker is not kept waiting on it
+  advance 0; gpu_trial_advance
+  run_check || { say "preflight: the release check could not run (network?); nothing checked"; return 0; }
+  # LC_ALL=C: the parser below reads pacman's English messages
+  out=$(LC_ALL=C "$PACMAN" "${PACMAN_ARGS[@]}" --dbpath "$VAR/check/db" -Sup --print-format '%n %v' --noconfirm 2>&1) || status=$?
+  # only the dependency errors count: pacman also prints "NAME: ignoring package upgrade" for every held package with a newer build
+  # "breaks dependency 'D' required by NAME": NAME (held) is what the upgrade would break.
+  # "unable to satisfy dependency 'D>=v' required by NAME": D is missing (a held package that is too old), and NAME may be held too.
+  # ":: A and B are in conflict": either name may be held.
+  needers=$( { awk '/breaks dependency/ && /required by / { sub(/.*required by /, ""); print $1 }' <<<"$out"
+               awk -F"'" '/unable to satisfy dependency/ { d = $2; sub(/[<>=].*/, "", d); print d; r = $0; if (sub(/.*required by /, "", r)) { split(r, w, " "); print w[1] } }' <<<"$out"
+               awk '/^:: .* and .* are in conflict/ { for (i = 2; i <= 4; i += 2) { n = $i; sub(/-[^-]+-[^-]+$/, "", n); print n } }' <<<"$out"
+               preflight_conflicts "$out"; } | sort -u)
+  for name in $(held_names); do grep -Fxq -- "$name" <<<"$needers" && blocked+=("$name"); done
+  if ((${#blocked[@]} == 0)); then
+    if ((status)); then say "preflight: the channel's upgrade would fail, not because of a held package: $(tail -n 2 <<<"$out" | tr '\n' ' ')"
+    else say "preflight: no held package stands in the way of the channel's upgrade"; fi
+    return 0
+  fi
+  for name in "${blocked[@]}"; do
+    verdict=$(verdict_of "$name" 3)
+    if [[ $verdict == fixed ]]; then fixed+=("$name"); lines+=("$name: the channel's build is fit for the K114s")
+    else lines+=("$name: the channel's build is not fit yet (${verdict:-no verdict}); the update stops until it is. Look at: sudo k114s-release status"); fi
+  done
+  say "preflight: the channel's upgrade would FAIL on a dependency or conflict of held package(s): ${blocked[*]}"
+  printf '%s\n' "${lines[@]}" | sed 's/^/  /'
+  # A fit build is released here as release.conf allows (auto: AUTO_RELEASE, AUTO_RELEASE_BOOT, the trial rules). pacman's own lists
+  # may not offer it yet (this runs before the update refreshes them): it then stays held and the next preflight, after the failed
+  # update has refreshed the lists, releases it. Otherwise the line says what to run.
+  if ((${#fixed[@]})); then
+    do_release auto "${fixed[@]}"
+    # keep-held and boot-chain packages are held after a successful release too: the hint goes by the installed build
+    for name in "${fixed[@]}"; do [[ $(installed_version "$name") == "$(verdict_of "$name" 5)" ]] || pending+=("$name"); done
+    ((${#pending[@]} == 0)) || say "preflight: if ${pending[*]} is not at the build that passed the check yet, run: sudo k114s-release release ${pending[*]} (add --accept-manual where the criteria say a person decides), then update again"
+  fi
+  notify normal "K114s updates" "$(printf '%s\n' "The next omarchy update would fail on held ${blocked[*]}" "${lines[@]}" "${summary[@]}" | cut -c1-400)"
+}
+cmd_status() {
+  local conf name
+  echo "K114s release status, $(date '+%Y-%m-%d %H:%M')"
+  echo "held:      $(held_names | tr '\n' ' ')"
+  echo "released:  $(list_names "$LIB/released.list" | tr '\n' ' ')"
+  if holds check 2>/dev/null; then echo "pacman.conf: the holds are in place"; else echo "pacman.conf: THE HOLDS ARE MISSING OR OUT OF DATE (sudo k114s-holds apply)"; fi
+  for name in 00-k114s-guard-install.hook 00-k114s-guard-remove.hook 01-k114s-guard-esp.hook; do
+    [[ -f $ROOT/etc/pacman.d/hooks/$name ]] || echo "guard:     $name IS MISSING"
+  done
+  if [[ -f $KNOWN ]]; then
+    echo "proven:    $(kv "$KNOWN" uki) (${ROOT:+fake root, }Stage 2 $(kv "$KNOWN" stage2_sha256 | cut -c1-16), recorded $(kv "$KNOWN" recorded))"
+    known_good_ok && echo "           intact and running" || echo "           NOTE: $why"
+  else
+    echo "proven:    not recorded (sudo k114s-release mark-known-good)"
+  fi
+  if [[ -f $TRIAL ]]; then
+    echo "trial:     $(kv "$TRIAL" kind): $(kv "$TRIAL" packages), started $(kv "$TRIAL" started), $(trial_boots) recorded boot(s)${ROOT:+}$( [[ -n $(kv "$TRIAL" proven) ]] && echo ", proven" )"
+  else
+    echo "trial:     none"
+  fi
+  [[ ! -f $GPU_TRIAL ]] || echo "GPU stack: $(gpu_packages) from the channel, on trial (put back by itself if the next boot has no desktop)"
+  [[ -f $FROZEN ]] && echo "Stage 2:   frozen at the proven file (packages may be newer: sudo k114s-release stage2)"
+  echo "booted:    Stage 2 $(booted_stage2)$( [[ -z $(booted_trial) ]] || echo " (a one-boot trial)" )"
+  [[ -z $(foreign_trial "$STAGE2_TRY_REL") ]] || echo "elsewhere: $(foreign_trial "$STAGE2_TRY_REL"); Stage 2 trials of this tool wait for it"
+  if [[ -f $ESP/$AURA_TRY_REL ]]; then echo "aura-try:  $(sed -n 1p "$ESP/$AURA_TRY_REL" 2>/dev/null) $(aura_try_path)"; fi
+  [[ $(id -u) == 0 || -n ${K114S_ROOT:-} ]] || echo "(run with sudo to read the ESP: boot images, menu, proven-chain check)"
+  if esp_is_mounted && [[ -d $ESP ]]; then
+    echo "ESP:       $(( $(esp_free) / 1000000 )) MB free"
+    if snapper_sync_on; then echo "           limine-snapper-sync is on: snapshot boot files use $(( $(snapshot_bytes) / 1000000 )) MB (limine_history); it limits itself and checks the usage before it writes"; fi
+    conf=$(limine_conf)
+    [[ -f $conf ]] && echo "           default entry $(limine_default "$conf"): $(limine_title_of "$conf" "$(limine_default "$conf")")"
+    for name in "$ESP"/EFI/Linux/*.efi "$ESP"/m1n1/*.bin; do [[ -f $name ]] && echo "           $(( $(size "$name") / 1000000 )) MB  ${name#"$ESP"/}"; done
+  fi
+  if [[ -f $VAR/check/verdict.tsv ]]; then
+    echo "last check:"
+    awk -F'\t' '{ printf "           %-28s %-12s %s -> %s\n", $1, $3, $4, ($5 == "" ? "-" : $5) }' "$VAR/check/verdict.tsv"
+  fi
+}
+
+command=${1:-status}
+[[ $# -eq 0 ]] || shift
+case $command in
+  status) cmd_status; exit 0 ;;
+esac
+need_root
+mkdir -p "$STATE" "$VAR/rollback"
+exec 9> "$STATE/.lock"
+flock -n 9 || die "another k114s-release is running"
+trap 'permit_clear' EXIT
+case $command in
+  auto)
+    tidy_stage2
+    advance 0
+    gpu_trial_advance
+    do_release auto
+    if [[ -f $FROZEN && ! -f $TRIAL ]] && enabled AUTO_STAGE2_SWITCH no; then
+      (STAGE2_AUTO=1; cmd_stage2) || note "the automatic Stage 2 switch did not go through; the proven Stage 2 is in place"
+    elif [[ -f $FROZEN && ! -f $TRIAL ]]; then
+      note "loader packages are installed but Stage 2 is still the proven file. Switch when ready: sudo k114s-release stage2"
+    fi
+    if ((${#summary[@]})); then notify normal "K114s updates" "$(printf '%s\n' "${summary[@]}" | cut -c1-400)"; fi ;;
+  release)
+    if [[ ${1:-} == --accept-manual ]]; then accept_manual=1; shift; fi
+    (($#)) || die "usage: k114s-release release [--accept-manual] PKG..."
+    advance 0; gpu_trial_advance
+    do_release named "$@" ;;
+  preflight) cmd_preflight ;;
+  adopt) cmd_adopt "$@" ;;
+  mark-known-good) cmd_mark_known_good ;;
+  retire) [[ -f $TRIAL ]] || die "no trial is in progress"; [[ -n $(kv "$TRIAL" proven) ]] || die "the trial has no recorded successful boot yet"; advance 1 ;;
+  stage2) tidy_stage2; cmd_stage2 "$@" ;;
+  abandon) cmd_abandon ;;
+  forget-image) cmd_forget_image "$@" ;;
+  *) die "unknown command $command (status, auto, preflight, release, adopt, mark-known-good, retire, stage2, abandon, forget-image)" ;;
+esac

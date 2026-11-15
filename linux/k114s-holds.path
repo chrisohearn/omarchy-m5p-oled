@@ -1,0 +1,12 @@
+# K114s (omarchy-m5p-oled) r3: put the package holds back whenever /etc/pacman.conf is replaced.
+# Omarchy's channel refresh copies a template over it and upgrades right after; this needs no
+# sudo prompt, so the holds are back before that upgrade starts. The pacman hooks stay the backstop.
+[Unit]
+Description=K114s: watch /etc/pacman.conf for the package holds
+
+[Path]
+PathChanged=/etc/pacman.conf
+Unit=k114s-holds.service
+
+[Install]
+WantedBy=multi-user.target

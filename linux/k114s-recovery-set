@@ -1,0 +1,154 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled) r3: keep a recovery set from one moment. Writes only its own folder.
+#
+#     sudo k114s-recovery-set                      every held and protected package, /boot, the ESP boot files
+#     sudo k114s-recovery-set --packages "a b"     only these packages (k114s-release does this before a release)
+#     sudo k114s-recovery-set --out DIR --label TEXT --no-uki --keep N
+#
+# A set is a folder under /var/lib/omarchy-k114s/recovery (on the root filesystem, never the ESP):
+#   packages/        each installed package rebuilt into a pacman archive by k114s-repackage,
+#                    with its report (what differs from the package as installed, what is missing)
+#   boot/            the files directly in /boot (kernel copy, initramfs)
+#   esp/             limine.conf, m1n1/*.bin (boot.bin, the configured Stage 2, any trial image),
+#                    the aura-try marker, EFI/BOOT/*, EFI/Linux/*.efi, k114s-repair/k114s.dtb
+#                    (--no-uki leaves the 80-112 MB boot images out)
+#   extras.tar       files no package owns that the K114s boot needs (extras.list)
+#   esp-files.sha256 a hash of EVERY file on the ESP, copied or not
+#   state.txt        packages, kernel, booted image, default menu entry, free space
+#   SHA256SUMS       over the set itself; README.txt says how to put things back
+#
+# The 2026-11-14 recovery worked only because a root snapshot from the install still existed.
+# This makes the way back independent of snapshots.
+set -euo pipefail
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=k114s-lib.sh
+. "${K114S_LIB_SH:-$HERE/k114s-lib.sh}"
+
+out= packages= label=recovery uki=1 keep=$(setting RECOVERY_KEEP 3)
+while (($#)); do
+  case $1 in
+    --out) out=${2:?}; shift 2 ;;
+    --packages) packages=${2?}; shift 2 ;;
+    --label) label=${2:?}; shift 2 ;;
+    --no-uki) uki=0; shift ;;
+    --keep) keep=${2:?}; shift 2 ;;
+    *) warn "unknown argument $1"; exit 2 ;;
+  esac
+done
+need_root
+[[ $label =~ ^[A-Za-z0-9._+-]+$ ]] || die "the label may hold letters, digits, . _ + - only"
+esp_is_mounted || die "nothing is mounted at $ESP; a recovery set without the ESP boot files would be half a set"
+default_place=0
+if [[ -z $out ]]; then out=$VAR/recovery/$(now)-$label; default_place=1; fi
+[[ ! -e $out ]] || die "$out exists already"
+if [[ -z $packages ]]; then
+  packages=$( { list_names "$LIB/holds.list"; list_names "$LIB/released.list"; list_names "$LIB/protected.list"; } | LC_ALL=C sort -u | tr '\n' ' ')
+fi
+free=$(df -B1 --output=avail "$(dirname "$(dirname "$out")")" 2>/dev/null | tail -n 1 | tr -d ' ')
+[[ ! $free =~ ^[0-9]+$ ]] || ((free > 2147483648)) || [[ -n ${K114S_ROOT:-} ]] || die "less than 2 GB free for the set"
+
+mkdir -p "$out/packages" "$out/boot" "$out/esp"
+trap 'warn "stopped part-way; the incomplete set is $out"' ERR
+skipped=() made=()
+for package in $packages; do
+  valid_name "$package" || continue
+  if ! installed_version "$package" >/dev/null; then skipped+=("$package"); continue; fi
+  bash "$HERE/k114s-repackage" --out "$out/packages" --allow-missing "$package" >/dev/null || die "could not archive $package"
+  made+=("$package")
+done
+
+# /boot: the files directly in it (not the ESP mounted below it)
+for file in "$ROOT"/boot/*; do
+  [[ -f $file && ! -L $file ]] || continue
+  cp -p "$file" "$out/boot/"
+done
+# The ESP boot files
+copy_esp() { # copy_esp REL: keep the folder structure
+  [[ -f $ESP/$1 ]] || return 0
+  mkdir -p "$out/esp/$(dirname "$1")"
+  cp -p "$ESP/$1" "$out/esp/$1"
+}
+copy_esp limine.conf
+for file in "$ESP"/m1n1/*.bin; do [[ -f $file ]] && copy_esp "m1n1/${file##*/}"; done
+copy_esp "$AURA_TRY_REL"
+copy_esp k114s-repair/k114s.dtb
+for file in "$ESP"/EFI/BOOT/*; do [[ -f $file ]] && copy_esp "EFI/BOOT/${file##*/}"; done
+if ((uki)); then
+  for file in "$ESP"/EFI/Linux/*.efi; do [[ -f $file ]] && copy_esp "EFI/Linux/${file##*/}"; done
+fi
+(cd "$ESP" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum) > "$out/esp-files.sha256"
+
+# Files no package owns that this boot depends on
+if [[ -f $LIB/extras.list ]]; then
+  : > "$out/extras.list"
+  while read -r path _; do
+    [[ -n $path && $path != \#* && $path != /* && $path != *..* ]] || continue
+    for match in "${ROOT:-}"/$path; do
+      [[ -e $match ]] && echo "${match#"${ROOT:-}"/}" >> "$out/extras.list"
+    done
+  done < "$LIB/extras.list"
+  if [[ -s $out/extras.list ]]; then
+    (cd "${ROOT:-/}" && bsdtar -cf "$out/extras.tar" --files-from "$out/extras.list")
+  fi
+fi
+
+{
+  echo "made            $(now)"
+  echo "label           $label"
+  echo "running kernel  $(running_version)"
+  echo "booted image    $(booted_uki)"
+  conf=$(limine_conf)
+  if [[ -f $conf ]]; then
+    default=$(limine_default "$conf")
+    echo "default entry   $default: $(limine_title_of "$conf" "${default:-0}")"
+  fi
+  echo "esp free bytes  $(esp_free)"
+  echo "stage2 sha256   $(sum "$ESP/$STAGE2_REL")   ($STAGE2_REL, the configured Stage 2)"
+  echo "booted stage2   $(booted_stage2) $(booted_stage2_sum)"
+  [[ -z $(aura_try_path) ]] || echo "aura-try        $(sed -n 1p "$ESP/$AURA_TRY_REL") $(aura_try_path)"
+  echo "archived        ${made[*]:-}"
+  echo "not installed   ${skipped[*]:-}"
+} > "$out/state.txt"
+"$PACMAN" "${PACMAN_ARGS[@]}" -Q > "$out/packages.txt" 2>/dev/null || true
+cp -p "$PACCONF" "$out/pacman.conf"
+for file in holds.list released.list; do [[ -f $LIB/$file ]] && cp -p "$LIB/$file" "$out/$file"; done
+
+cat > "$out/README.txt" <<'TEXT'
+K114s recovery set (omarchy-m5p-oled). Made by k114s-recovery-set; state.txt says when and from what.
+
+Put a package back (pacman checks and installs it like any package):
+    sudo touch /etc/omarchy-k114s/allow-coupled-update
+    sudo pacman -U packages/NAME-VERSION-ARCH.pkg.tar.zst
+    sudo rm /etc/omarchy-k114s/allow-coupled-update
+A package's .repackage.txt lists files that were not as the package installed them; they are in
+the archive as they were when the set was made (the repair kernel is one of them).
+Going back to an older kernel package after a newer one was installed: the older kernel's module
+folder is still on disk without an owner (kernel-modules-hook keeps it for the running kernel), so
+pacman needs to be told that the package may take it over:
+    sudo pacman -U --overwrite 'usr/lib/modules/*' packages/linux-aurora-VERSION-ARCH.pkg.tar.zst
+During a boot-chain trial, "sudo k114s-release abandon" does all of this from the trial's own set.
+
+Put an ESP boot file back (check the hash first; the ESP has little room, so one file at a time):
+    sha256sum -c SHA256SUMS
+    sudo cp esp/m1n1/boot-ctxr.bin /boot/efi/m1n1/boot-ctxr.bin
+    sudo cp esp/limine.conf /boot/efi/limine.conf
+    sudo cp esp/EFI/Linux/NAME.efi /boot/efi/EFI/Linux/NAME.efi
+
+Files no package owns:  sudo bsdtar -xpf extras.tar -C /
+If Linux does not start at all, the way back is from macOS: the k114s-repair tool's
+"rollback" and "stage2" commands rewrite the same ESP files from the bundle.
+TEXT
+(cd "$out" && find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$out/SHA256SUMS"
+trap - ERR
+say "recovery set: $out ($(du -sm "$out" | cut -f1) MB; packages: ${made[*]:-none}${skipped:+; not installed: ${skipped[*]}})"
+
+# Keep the newest sets of this label in the default place.
+if ((default_place)) && [[ $keep =~ ^[0-9]+$ ]] && ((keep > 0)); then
+  mapfile -t old < <(ls -1d "$VAR"/recovery/*-"$label" 2>/dev/null | LC_ALL=C sort -r | tail -n +$((keep + 1)))
+  for dir in "${old[@]}"; do
+    [[ -d $dir && $dir == "$VAR"/recovery/*-"$label" ]] || continue
+    rm -rf -- "$dir"
+    say "removed the older set $dir"
+  done
+fi
+echo "$out" > "$VAR/recovery/.latest-$label" 2>/dev/null || true

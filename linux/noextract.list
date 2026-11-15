@@ -1,0 +1,8 @@
+# K114s (omarchy-m5p-oled) r3: "PATH PACKAGE GLOB". pacman extracts PATH from no package until
+# the installed version of PACKAGE matches GLOB, or PACKAGE has been released (its channel build
+# passed release-criteria.conf). k114s-holds turns this into the NoExtract line.
+#
+# The channel's title-bar plugin is built against stock Hyprland and crashes hyprland-m5 on the
+# first click on a floating workspace. The build against hyprland-m5's headers has "+m5" in its
+# version; until it is installed the plugin file stays out, whatever installs the package.
+usr/lib/omarchy-hyprland-titlebars/titlebars.so omarchy-hyprland-titlebars *+m5*

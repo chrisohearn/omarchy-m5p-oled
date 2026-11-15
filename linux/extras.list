@@ -1,0 +1,9 @@
+# K114s (omarchy-m5p-oled) r3: files no package owns that this Mac's boot depends on. Globs,
+# relative to /. k114s-recovery-set puts them in extras.tar.
+usr/lib/modules/*/updates
+usr/lib/firmware/updates/apple
+usr/local/lib/omarchy-k114s/k114s.dtb
+usr/local/lib/omarchy-j714s/update-boot-ctxr
+etc/omarchy-mac-boot/owner-boot-chain
+etc/default/limine
+etc/m1n1.conf

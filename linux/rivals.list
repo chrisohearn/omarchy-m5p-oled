@@ -1,0 +1,14 @@
+# K114s (omarchy-m5p-oled) r3: "RIVAL HELD". Installing RIVAL replaces HELD through a package
+# conflict or a provides; while HELD is held, the hold guard stops RIVAL too.
+hyprland        hyprland-m5
+hyprland-git    hyprland-m5
+mesa            mesa-aurora
+mesa-git        mesa-aurora
+vulkan-asahi    vulkan-aurora
+linux-asahi     linux-aurora
+m1n1            m1n1-aurora
+uboot-asahi     uboot-aurora
+uboot-asahi-j700 uboot-aurora
+vulkan-asahi-aurora vulkan-aurora
+aura            m1n1-aurora
+m1n1-neo        m1n1-aurora

@@ -1,0 +1,20 @@
+# K114s (omarchy-m5p-oled) r3: packages that are never removed or replaced by another package,
+# held or released. An upgrade is not a removal; the hold decides about upgrades.
+linux-aurora
+m1n1-aurora
+uboot-aurora
+omarchy-aurora-firmware
+omarchy-mac
+omarchy-mac-boot
+limine
+limine-mkinitcpio-hook
+asahi-fwextract
+asahi-scripts
+mkinitcpio
+kernel-modules-hook
+hyprland-m5
+mesa-aurora
+vulkan-aurora
+# The Edge desktop. A switch to stable or rc removes these two for omarchy and omarchy-settings.
+omarchy-dev
+omarchy-settings-dev

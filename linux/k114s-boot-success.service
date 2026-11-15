@@ -1,0 +1,12 @@
+# K114s (omarchy-m5p-oled) r3: record what this boot came up with (k114s-boot-success).
+[Unit]
+Description=K114s: record a successful boot of this boot chain
+After=multi-user.target
+RequiresMountsFor=/boot/efi
+ConditionPathExists=/usr/local/lib/omarchy-k114s/k114s-boot-success
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/omarchy-k114s/k114s-boot-success
+TimeoutStartSec=600
+Nice=10

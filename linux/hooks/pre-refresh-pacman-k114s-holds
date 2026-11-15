@@ -1,0 +1,60 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled) r3: Omarchy user hook, ~/.config/omarchy/hooks/pre-refresh-pacman.d/k114s-holds
+#
+# omarchy-refresh-pacman has just copied a channel template over /etc/pacman.conf (no holds in
+# it) and runs "pacman -Syyuu --noconfirm" right after this hook. The holds must be back first.
+#   1. k114s-holds.path (root) rewrites them by itself when pacman.conf changes: wait for that.
+#   2. Otherwise ask sudo to do it.
+#   3. If neither worked, FAIL LOUDLY. omarchy-hook only prints "Hook failed" and goes on, so
+#      the refresh cannot be stopped by an exit status. The K114s pacman hooks stop the upgrade
+#      then; if even they are missing, this ends the refresh itself.
+# It also says so when the template that was just written is not the channel this Mac follows.
+root=${K114S_ROOT:-}                       # tests only; empty on the Mac
+lib=$root/usr/local/lib/omarchy-k114s
+sudo=${K114S_SUDO:-sudo}
+red=$'\e[1;31m'; off=$'\e[0m'
+loud() {
+  printf '\n%s%s%s\n' "$red" "================ K114s: $1 ================" "$off" >&2
+  shift
+  printf '%s\n' "$@" >&2
+  printf '\n' >&2
+  [[ -n $root ]] || notify-send -u critical -a "K114s updates" "K114s: package holds NOT restored" "$1" 2>/dev/null || true
+}
+[[ -x $lib/k114s-holds ]] || { loud "the K114s update tooling is not installed" "$lib/k114s-holds is missing; the K114s holds cannot be restored."; exit 1; }
+
+want=$(awk '!/^[[:space:]]*(#|$)/ { print $1; exit }' "$root/etc/omarchy-k114s/channel" 2>/dev/null); want=${want:-edge}
+channel=$(awk '/^\[/ { on = ($0 == "[omarchy]") } on && /^[[:space:]]*Server[[:space:]]*=/ { print $NF }' "$root/etc/pacman.conf" | grep -o -E '/(stable|rc|edge)/' | tr -d '/' | head -n 1)
+if [[ -n $channel && $channel != "$want" && ! -e $root/etc/omarchy-k114s/allow-channel-change ]]; then
+  loud "this refresh moves to the $channel channel" \
+    "This K114s install follows $want. The K114s channel guard will stop the upgrade that follows;" \
+    "nothing will be installed. Put the channel back with:  omarchy-refresh-pacman $want"
+fi
+
+# With the holds back: would the channel's upgrade fail on a dependency of a held package (a new LLVM soname
+# against the held Mesa)? Said now, before the long update fails; it never stops the update itself.
+preflight() { [[ -x $lib/k114s-release ]] && $sudo -n "$lib/k114s-release" preflight 2>/dev/null || true; }
+for _ in $(seq 1 "${K114S_HOLDS_WAIT:-10}"); do
+  if "$lib/k114s-holds" check 2>/dev/null; then preflight; exit 0; fi
+  sleep 0.5
+done
+if $sudo "$lib/k114s-holds" apply && "$lib/k114s-holds" check; then preflight; exit 0; fi
+
+hooks=$root/etc/pacman.d/hooks
+if [[ -f $hooks/00-k114s-guard-install.hook && -x $lib/k114s-guard ]]; then
+  loud "the package holds could NOT be put back (sudo failed)" \
+    "The upgrade that follows will be stopped by the K114s hold guard; that is expected, and" \
+    "nothing will be changed. Then run:   sudo $lib/k114s-holds apply   and update again."
+  exit 1
+fi
+loud "the package holds could NOT be put back and the hold guard is not installed" \
+  "Continuing would downgrade the K114s kernel, loader and firmware (this happened on 2026-11-14)." \
+  "Stopping this refresh now. Run:   sudo $lib/k114s-holds apply   and update again."
+# Last resort only: end the refresh that called us, before its pacman starts.
+pid=$PPID
+for _ in 1 2 3 4 5; do
+  [[ -r /proc/$pid/cmdline ]] || break
+  if tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q 'omarchy-refresh-pacman'; then kill -TERM "$pid" 2>/dev/null; break; fi
+  pid=$(awk '{ print $4 }' "/proc/$pid/stat" 2>/dev/null) || break
+  [[ $pid =~ ^[0-9]+$ && $pid -gt 1 ]] || break
+done
+exit 1

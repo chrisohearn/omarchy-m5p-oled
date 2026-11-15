@@ -1,0 +1,14 @@
+# K114s (omarchy-m5p-oled) r3: options a channel kernel must set before it replaces ours.
+# Read by the kconfig check of release-criteria.conf against the configuration built into the
+# package's kernel image (CONFIG_IKCONFIG). The language is the one build/validate-config.py reads:
+#   CONFIG_X=y   built in          CONFIG_X=m   module or built in
+#   CONFIG_X="text" / =123   exactly that value      # CONFIG_X is not set   off or absent
+# Each line is here because its absence broke something on this Mac on 2026-11-14 (firewall IPv6
+# rules, Bluetooth hands-free, the key parser). To require the whole r3 configuration of a
+# channel kernel, replace this file with the r3 fragment (patches/linux/config/k114s-r3.config).
+CONFIG_IKCONFIG=y
+CONFIG_BT_RFCOMM=m
+CONFIG_NETFILTER_XT_MATCH_HL=m
+CONFIG_IP6_NF_MATCH_HL=m
+CONFIG_IP6_NF_MATCH_RT=m
+CONFIG_PKCS8_PRIVATE_KEY_PARSER=m

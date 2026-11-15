@@ -1,0 +1,14 @@
+# K114s (omarchy-m5p-oled) r3: no held or boot-critical package is removed or replaced by another.
+# A channel switch swaps omarchy-dev for omarchy this way; "omarchy reinstall" swaps hyprland-m5
+# for hyprland. The names are data (holds.list, protected.list beside k114s-guard).
+[Trigger]
+Type = Package
+Operation = Remove
+Target = *
+
+[Action]
+Description = K114s: checking that nothing this install is built on is being removed...
+When = PreTransaction
+Exec = /usr/local/lib/omarchy-k114s/k114s-guard remove
+AbortOnFail
+NeedsTargets

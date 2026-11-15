@@ -9,6 +9,7 @@
 #
 # To go back to the packaged K114s device tree once upstream carries the fixes:
 #   touch /usr/local/lib/omarchy-k114s/use-packaged-dtb
+# (r3: "k114s-release stage2 --dtb packaged" does this as a recorded, reversible step.)
 set -eu
 root=${OMARCHY_ROOT:-}
 esp=$root/boot/efi/m1n1
@@ -23,6 +24,45 @@ m1n1=$root/usr/lib/asahi-boot/m1n1.bin
 fail() { echo "update-boot-ctxr-k114s: $*; boot-ctxr.bin left as it was" >&2; exit 1; }
 be32() { od -An -tu1 -j "$2" -N 4 "$1" | awk '{print (($1*256+$2)*256+$3)*256+$4}'; }
 magic() { od -An -tx1 -j "$2" -N 4 "$1" | tr -d ' \n'; }
+
+# r3: k114s-release builds a CANDIDATE beside the configured file, for a one-boot trial (aura-try):
+#   K114S_STAGE2_OUT=boot-ctxr-NAME.bin   write m1n1/<that name>; boot-ctxr.bin is not touched
+#   K114S_STAGE2_DTB=packaged|pinned      which K114s tree, whatever the use-packaged-dtb marker says
+out=boot-ctxr.bin
+case ${K114S_STAGE2_OUT:-} in
+  '') ;;
+  */* | boot-ctxr.bin) fail "K114S_STAGE2_OUT must be a file name boot-ctxr-NAME.bin" ;;
+  boot-ctxr-*.bin) out=$K114S_STAGE2_OUT ;;
+  *) fail "K114S_STAGE2_OUT must be a file name boot-ctxr-NAME.bin" ;;
+esac
+packaged=0
+[ -e "$lib/use-packaged-dtb" ] && packaged=1
+case ${K114S_STAGE2_DTB:-} in
+  '') ;;
+  packaged) packaged=1 ;;
+  pinned) packaged=0 ;;
+  *) fail "K114S_STAGE2_DTB must be packaged or pinned" ;;
+esac
+
+# r3: once the update tooling is installed (stage2-managed), m1n1/boot-ctxr.bin is written by NOBODY
+# but k114s-release, which switches it only after a candidate (K114S_STAGE2_OUT above) has booted
+# under the loader's one-boot trial. The pacman hook (96-omarchy-j714s-boot-ctxr.hook) calls this
+# with no K114S_STAGE2_OUT; it must not rewrite the one Stage 2 that every boot entry shares,
+# whatever packages or use-packaged-dtb say.
+managed=$root/etc/omarchy-k114s/stage2-managed
+if [ "$out" = boot-ctxr.bin ] && [ -e "$managed" ] && [ -s "$esp/boot-ctxr.bin" ]; then
+  echo "update-boot-ctxr-k114s: Stage 2 is managed by k114s-release ($managed exists); m1n1/boot-ctxr.bin left as it is"
+  exit 0
+fi
+
+# r3: while a new kernel or loader package is on trial, the proven Stage 2 must stay byte for byte
+# (it is shared by every boot entry). k114s-release writes this marker before the transaction
+# and removes it when the Stage 2 switch has been made on purpose (k114s-release stage2).
+frozen=$root/etc/omarchy-k114s/stage2-frozen
+if [ "$out" = boot-ctxr.bin ] && [ -e "$frozen" ] && [ -s "$esp/boot-ctxr.bin" ]; then
+  echo "update-boot-ctxr-k114s: Stage 2 is frozen ($frozen exists); m1n1/boot-ctxr.bin left as it is"
+  exit 0
+fi
 
 [ -s "$boot" ] || fail "$boot is missing; is the ESP mounted?"
 # Refuse to write to an ESP this boot did not come from (another Omarchy image on a visible disk
@@ -50,9 +90,9 @@ done
 [ "$count" -ge 1 ] || fail "no device trees after the Aura Stage 2"
 [ "$(od -An -tx1 -j "$off" -N 3 "$boot" | tr -d ' \n')" = 1f8b08 ] || fail "no gzip next stage after the device trees"
 
-tmp=$esp/.boot-ctxr.bin.k114s-new
+tmp=$esp/.$out.k114s-new
 trap 'rm -f "$tmp" "$tmp.dtb"' EXIT
-if [ -e "$lib/use-packaged-dtb" ]; then
+if [ "$packaged" = 1 ]; then
   [ -n "$found_off" ] || fail "boot.bin has no apple,k114s device tree"
   dd if="$boot" of="$tmp.dtb" bs=1M iflag=skip_bytes,count_bytes skip="$found_off" count="$found_len" 2>/dev/null
   dtb=$tmp.dtb
@@ -67,7 +107,7 @@ out_size=$(stat -c %s "$tmp")
 [ "$out_size" -le 16777216 ] || fail "Stage 2 would exceed Aura's 16 MiB slot"
 [ "$out_size" -eq $(( $(stat -c %s "$m1n1_out") + $(stat -c %s "$dtb") + total - off )) ] || fail "assembled size is wrong"
 sync "$tmp"
-mv -f "$tmp" "$esp/boot-ctxr.bin"
+mv -f "$tmp" "$esp/$out"
 trap - EXIT
 rm -f "$tmp.dtb"
-echo "update-boot-ctxr-k114s: wrote $esp/boot-ctxr.bin ($out_size bytes, K114s device tree $(sha256sum "$dtb" | cut -c1-16))"
+echo "update-boot-ctxr-k114s: wrote $esp/$out ($out_size bytes, K114s device tree $(sha256sum "$dtb" | cut -c1-16))"

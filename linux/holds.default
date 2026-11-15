@@ -1,0 +1,18 @@
+# K114s (omarchy-m5p-oled) r3: what the installer makes sure is held (merged into holds.list;
+# names that are not installed are left out). The image's own pinned set stays as it was found.
+# boot chain
+linux-aurora
+m1n1-aurora
+uboot-aurora
+omarchy-aurora-firmware
+omarchy-mac-boot
+limine-mkinitcpio-hook
+limine
+asahi-fwextract
+asahi-scripts
+omarchy-mac
+# desktop stack built for this image
+hyprland-m5
+mesa-aurora
+vulkan-aurora
+omarchy-hyprland-titlebars

@@ -1,0 +1,3 @@
+# Hooks whose command mentions the boot tools but which write nothing to the EFI partition.
+# One hook file name per line; "k114s-guard audit" skips them. Reviewed 2026-11-14.
+10-limine-snapper-lock.hook        # waits for limine-snapper-sync; writes nothing
