@@ -1,0 +1,101 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled): free a little room on the EFI partition. DRY RUN unless --apply is given.
+#
+#   esp-trim                       dry run: list each item, its size, what recreates it, and the free space after
+#   esp-trim --apply [ITEM...]     back the items up to root, check the copies, then delete them from the ESP
+#   esp-trim --restore BACKUPDIR   put a backup's files back (never over a file that exists)
+# Items (default: all that are safe now; see docs/esp-space.md for why only these two):
+#   macos-junk   .Spotlight-V100 and .Trashes: macOS index and trash folders, nothing reads them (~1.5 MB)
+#   m1n1-old     m1n1/boot.bin.old: update-m1n1's copy of the previous loader bundle; the Mac boots m1n1/boot-ctxr.bin (~10 MB)
+# Not installed by anything and not run by any hook. Needs root (the ESP is root-only). The kernel images, the firmware, the Stage 2
+# files and the repair bundle are not items and cannot be named. A stop leaves the ESP as it was.
+# Test hooks (K114S_TEST=1 only): K114S_ROOT redirects every path; K114S_NO_MOUNTCHECK skips the mountpoint test.
+set -u
+root=; [ -z "${K114S_TEST:-}" ] || root=${K114S_ROOT:-}
+esp=$root/boot/efi; etc=$root/etc/omarchy-k114s
+min=${K114S_ESP_MIN_FREE:-88080384}      # the installed space guard's minimum (84 MiB)
+stop() { echo "esp-trim: stopped. $*" >&2; exit 1; }
+apply=0; restore=; items=
+while [ $# -gt 0 ]; do
+  case $1 in
+    --apply) apply=1 ;;
+    --restore) shift; restore=${1:-}; [ -n "$restore" ] || stop "--restore needs the backup folder" ;;
+    macos-junk | m1n1-old) items="$items $1" ;;
+    *) stop "unknown argument '$1' (items: macos-junk m1n1-old)" ;;
+  esac
+  shift
+done
+[ -n "$items" ] || items="macos-junk m1n1-old"
+[ -d "$esp" ] || stop "$esp does not exist"
+if [ -z "${K114S_NO_MOUNTCHECK:-}" ] || [ -z "$root" ]; then mountpoint -q "$esp" || stop "$esp is not a mount point; a delete here would hit the root filesystem"; fi
+if [ "$apply" = 1 ] || [ -n "$restore" ]; then [ "$(id -u)" = 0 ] || [ -n "$root" ] || stop "--apply and --restore need root"; fi
+[ -r "$esp" ] && [ -x "$esp" ] || stop "$esp is not readable (run with sudo)"
+
+paths() { # paths ITEM -> the ESP-relative paths that exist
+  case $1 in
+    macos-junk) for p in .Spotlight-V100 .Trashes .fseventsd; do [ -e "$esp/$p" ] && echo "$p"; done ;;
+    m1n1-old) [ -f "$esp/m1n1/boot.bin.old" ] && echo m1n1/boot.bin.old ;;
+  esac
+  return 0
+}
+refuse() { # refuse ITEM -> a reason, or nothing
+  case $1 in
+    m1n1-old)
+      [ -s "$esp/m1n1/boot.bin" ] || { echo "m1n1/boot.bin is missing or empty: .old may be the only loader bundle"; return; }
+      [ -s "$esp/m1n1/boot-ctxr.bin" ] || { echo "m1n1/boot-ctxr.bin (the file the Mac boots) is missing or empty"; return; }
+      [ ! -e "$etc/stage2-frozen" ] || echo "a Stage 2 switch is pending (stage2-frozen)" ;;
+  esac
+}
+free() { df -B1 --output=avail "$esp" | tail -n 1 | tr -d ' '; }
+
+if [ -n "$restore" ]; then
+  [ -f "$restore/SHA256SUMS" ] && [ -d "$restore/files" ] || stop "$restore is not a backup made by this tool"
+  (cd "$restore/files" && sha256sum -c --quiet ../SHA256SUMS) || stop "the backup does not match its SHA256SUMS; nothing was restored"
+  n=0
+  while IFS= read -r f; do # only the paths this tool can back up
+    case $f in .Spotlight-V100/* | .Trashes/* | .fseventsd/* | m1n1/boot.bin.old) ;; *) stop "the backup holds a path this tool never saves ($f); nothing was restored" ;; esac
+  done < <(cd "$restore/files" && find . -type f | sed 's#^\./##')
+  need=$(du -sB1 "$restore/files" | awk '{ print $1 }')
+  [ "$(free)" -ge "$need" ] || stop "the ESP has too little room ($(free) bytes free, $need needed); nothing was restored"
+  while IFS= read -r f; do
+    [ ! -e "$esp/$f" ] || { echo "kept (exists): $f"; continue; }
+    mkdir -p "$esp/$(dirname "$f")" && cp -p "$restore/files/$f" "$esp/$f" && n=$((n + 1)) || { rm -f -- "$esp/$f"; stop "copy of $f failed (partial copy removed); run --restore again"; }
+  done < <(cd "$restore/files" && find . -type f | sed 's#^\./##')
+  sync -f "$esp" || stop "sync failed after the restore; check the ESP"; echo "restored $n file(s); free now $(free) bytes"; exit 0
+fi
+
+total=0; chosen=
+echo "EFI partition $esp: $(free) bytes free; the space guard needs $min"
+for i in $items; do
+  list=$(paths "$i"); why=$(refuse "$i")
+  [ -n "$list" ] || { echo "  $i: nothing there"; continue; }
+  size=$(cd "$esp" && echo "$list" | tr '\n' '\0' | xargs -0 du -sB1 -- | awk '{ s += $1 } END { print s + 0 }')
+  if [ -n "$why" ]; then echo "  $i: REFUSED, $why"; continue; fi
+  echo "  $i: $size bytes in $(echo "$list" | tr '\n' ' ')"
+  total=$((total + size)); chosen="$chosen $i"
+done
+after=$(( $(free) + total ))
+echo "free after: $after bytes ($([ "$after" -ge "$min" ] && echo "at or above" || echo "still below") the guard's minimum)"
+echo "note: with linux-aurora's and linux-k114s's boot images both on the partition, passing the guard does not make a rebuild-all fit (docs/esp-space.md)"
+[ "$apply" = 1 ] || { echo "dry run: nothing was changed. Run with --apply to back up and delete."; exit 0; }
+[ -n "$chosen" ] || stop "nothing to do"
+
+bk=$root/var/lib/k114s-recovery/esp-trim-$(date +%Y%m%d-%H%M%S)
+case $(readlink -f "$bk") in "$(readlink -f "$esp")"/*) stop "the backup folder would be on the ESP" ;; esac
+mkdir -p "$bk/files" || stop "cannot make $bk"
+avail=$(df -B1 --output=avail "$bk" | tail -n 1 | tr -d ' ')
+[ "$avail" -ge $((total + 52428800)) ] || stop "the backup folder has too little room ($avail bytes free, $total needed plus 50 MiB)"
+for i in $chosen; do
+  for p in $(paths "$i"); do
+    case $p in .Spotlight-V100 | .Trashes | .fseventsd | m1n1/boot.bin.old) ;; *) stop "internal: unexpected path $p" ;; esac
+    mkdir -p "$bk/files/$(dirname "$p")"; cp -a "$esp/$p" "$bk/files/$p" || stop "backup of $p failed; the ESP is unchanged ($bk)"
+  done
+done
+( cd "$bk/files" && find . -type f | sed 's#^\./##' | sort | xargs -r -d '\n' sha256sum > ../SHA256SUMS ) || stop "cannot hash the backup; the ESP is unchanged"
+# the backup must match the live files before anything is deleted
+( cd "$esp" && sha256sum -c --quiet "$bk/SHA256SUMS" ) || stop "the backup does not match the ESP files; the ESP is unchanged ($bk)"
+for i in $chosen; do for p in $(paths "$i"); do
+  rm -rf -- "${esp:?}/$p" || stop "delete of $p failed; the ESP may be partly trimmed. Undo: $0 --restore $bk"
+done; done
+sync -f "$esp" || stop "sync failed after the delete; the ESP may be partly trimmed. Undo: $0 --restore $bk"
+echo "deleted: $chosen. Backup: $bk (undo: $0 --restore $bk). Free now $(free) bytes."
