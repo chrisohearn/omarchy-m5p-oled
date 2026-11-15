@@ -273,6 +273,12 @@ does not set it, keeps building and checking the r3a package. For r3b: `K114S_CA
 same file list, sizes and modes as the delivered package, and `check-package.sh` passes again; the delivered package and its hash
 above stand (its `.PKGINFO` time stamps would only change the hash).
 
+Superseded for installing (docs/r3-display-plan.md, D0): `K114S_CAND=r3b` now names the package `linux-k114s-r3b`
+(`pkgname`, `pkgbase`, the module directory's `pkgbase` file, `/usr/share/linux-k114s-r3b/`), so it installs beside r3a
+instead of replacing it. The same build, repackaged: `linux-k114s-r3b-7.3.0.r3b-1-aarch64.pkg.tar.zst`, sha256
+`438c4efe03d5271ffb5beae0125199e4d5cdba2bc97e5fdc2a05455eeb93f905`. The shared-name package above is kept for the
+record only and now fails `check-package.sh`.
+
 Not verified: anything on the hardware; the Image against an installed one; the trackpad stack booted; the GPU
 mailbox interrupts on a K114s; the KUnit cases; the sound checker.
 
