@@ -34,6 +34,8 @@ for f in sys.argv[1:]:
     blob=open(f,'rb').read()
     want=[80] if b'pci106b,1900' in blob else []
     if b'cirrus,cs42l84' in blob: want+=[134,139]  # the jack codec's interrupt and reset (dts/t6050-k114s-sound.dtsi)
+    if b'pci17a0,9755' in blob: want+=[81]  # the SD reader's PERST# (dts/t6050-k114s-sd.dtsi)
+    want.sort()
     if compat!='apple,k114s': print(f'FAIL {f}: root compatible {compat}'); bad+=1
     if exposed_ap is not None and exposed_ap!=want: print(f'FAIL {f}: AP pin controller exposes {exposed_ap}, expected {want}'); bad+=1
 print('dtb lint:', 'FAILED' if bad else 'passed', f'({len(sys.argv)-1} trees)'); sys.exit(1 if bad else 0)
