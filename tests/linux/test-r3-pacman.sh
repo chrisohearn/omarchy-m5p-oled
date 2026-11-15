@@ -315,6 +315,7 @@ out=$(rel adopt "$archive"); ok "rollback: k114s-release adopt installs the arch
 ok "rollback: the file is ours again, byte for byte" "$(tr '\0' ' ' < "$S/usr/lib/libgallium-99.0.0-test.so")" "gallium-j714s2 G17S "
 ok "rollback: pacman finds nothing wrong with the reinstalled package" "$(sb pacman -Qkk mesa-aurora | grep -c ' 0 altered files')" 1
 sb /usr/local/lib/omarchy-k114s/k114s-holds hold mesa-aurora >/dev/null; ok "and it is held (still)" "$(sb pacman-conf IgnorePkg | grep -c -x mesa-aurora)" 1
+ok "adopting over a GPU build that is on trial ends the trial and auto does not put that build back" "$(test -e "$STATE/release/gpu-trial"; status) $(grep -c '^mesa-aurora 1:26.3.0_devel.20261210.bbbbbbb-1$' "$STATE/release/gpu-given-up")" "1 1"
 held_before=$(state)
 
 # --- release: the boot chain, never in one step -----------------------------------------------------------------------
@@ -383,6 +384,17 @@ ok "the proven kernel's modules are back, the proven entry is the default, and i
 sleep 4
 out=$(rel abandon); ok "abandon after it: the old kernel package is whole again" "$? $(Q linux-aurora)" "0 7.3.0.aurora17.v272-4"
 rm -f "$S/usr/share/libalpm/hooks/99-test-hold-lock.hook"
+# The proven kernel's modules folder exists again, without its modules, when the tool wants to put them back (something recreated it after
+# Omarchy's hook): they must not be moved INTO it (that would nest them one level down); the tool says so and leaves both alone.
+printf '#!/bin/sh\n[ -e /etc/k114s-test/nest-dir ] || exit 0\nmkdir -p "/usr/lib/modules/$K114S_UNAME_R/leftover"\n' > "$S/usr/share/libalpm/scripts/test-nest-dir"; chmod 755 "$S/usr/share/libalpm/scripts/test-nest-dir"
+hook "$S/usr/share/libalpm/hooks/99-test-nest-dir.hook" PostTransaction /usr/share/libalpm/scripts/test-nest-dir 'usr/lib/modules/*/vmlinuz'
+mkrepo edge "$c_below" "$c_fw" "$c_m1n1" "$c_app2" "$c_lfw2" "$c_vulkan_bad"; sb pacman -Syy >/dev/null
+: > "$S/etc/k114s-test/nest-dir"; : > "$S/var/log/notify.log"
+out=$(rel auto); rm -f "$S/etc/k114s-test/nest-dir" "$S/usr/share/libalpm/hooks/99-test-nest-dir.hook"
+ok "the modules folder is back without its modules: a PROBLEM is raised and nothing is moved into it" "$(notes | grep -c "PROBLEM: .*/usr/lib/modules/$KOLD exists without its kernel modules") $(test -d "$S/usr/lib/modules/$KOLD/$KOLD"; status) $(test -d "$S/usr/lib/modules/.old/$KOLD/kernel"; status)" "1 1 0"
+rm -rf "$S/usr/lib/modules/$KOLD/leftover"
+out=$(rel abandon); ok "abandon after it: the old kernel package is whole again" "$? $(Q linux-aurora) $(sb pacman -Qkk linux-aurora | grep -c ' 0 altered files')" "0 7.3.0.aurora17.v272-4 1"
+rm -rf "$S/usr/lib/modules/.old"; : > "$S/var/log/notify.log"
 mkrepo edge "$c_kernel" "$c_fw" "$c_m1n1" "$c_app2" "$c_lfw2" "$c_vulkan_bad"; sb pacman -Syy >/dev/null
 
 # stage again, then the boots
@@ -498,6 +510,35 @@ ok "adopt: the package stays held (it is ours, not the channel's)" "$(sb pacman-
 out=$(update); ok "an update during the trial leaves the adopted kernel alone" "$? $(Q linux-aurora)" "0 7.5.0.aurora20.k114s3-1"
 boot EFI/Linux/omarchy_linux-aurora.efi "$K4"; rel auto >/dev/null; boot EFI/Linux/omarchy_linux-aurora.efi "$K4"; out=$(rel auto)
 ok "after two recorded boots the old image is retired; one image again" "$(ls "$ESPD/EFI/Linux" | tr '\n' ' ') $(default_title) $(sb pacman-conf IgnorePkg | grep -c -x linux-aurora)" "omarchy_linux-aurora.efi  linux-aurora 1"
+
+# --- a blocking held package with a fit channel build is released by the preflight; the GPU stack from the channel is on trial ---------------
+g_mesa() { gfx libgallium-99.0.0-test.so mesa-aurora "gallium-$1 G17S ASAHI_M5_BRINGUP llvmpipe" "1:26.3.0_devel.$2-1"; }
+cat > "$BASE/pacman-wrap" <<'WRAP'
+#!/bin/bash
+# real pacman, except that the dry-run upgrade fails on a dependency of the held Mesa until the wanted Mesa build is installed
+case " $* " in *" -Sup "*)
+  pacman -Q mesa-aurora | grep -q "$(cat "$(dirname "$0")/wrap-want")" && exit 0
+  echo "warning: vulkan-aurora: ignoring package upgrade (1 => 2)"
+  echo "error: failed to prepare transaction (could not satisfy dependencies)"
+  echo ":: installing llvm-libs (23.1-2) breaks dependency 'libLLVM.so=23.1-64' required by mesa-aurora"; exit 1 ;; esac
+exec pacman "$@"
+WRAP
+chmod 755 "$BASE/pacman-wrap"
+mesa_before=$(Q mesa-aurora); rm -f "$STATE/release/gpu-given-up" "$STATE/release/gpu-trial"
+g1=$(g_mesa trial-1 20270101.cccccc1); mkrepo edge "$g1"; sb pacman -Syy >/dev/null; echo cccccc1 > "$BASE/wrap-want"; : > "$S/var/log/notify.log"
+out=$(sb env K114S_PACMAN="$BASE/pacman-wrap" /usr/local/lib/omarchy-k114s/k114s-release preflight)
+ok "preflight: the held Mesa blocks the upgrade and its channel build is fit: the preflight installs it, and it stays held" "$? $(echo "$out" | grep -c 'would FAIL on a dependency of held package(s): mesa-aurora') $(Q mesa-aurora) $(sb pacman-conf IgnorePkg | grep -c -x mesa-aurora)" "0 1 1:26.3.0_devel.20270101.cccccc1-1 1"
+ok "preflight: the vulkan-aurora 'ignoring package upgrade' warning was not taken for a blocker" "$(echo "$out" | grep -c 'would FAIL on a dependency of held package(s): mesa-aurora$')" 1
+ok "the GPU stack is on trial: the record names the package and its rollback archive" "$(awk '$1 == "package" { print $2 }' "$STATE/release/gpu-trial") $(sb ls "$(awk '$1 == "package" { print $4 }' "$STATE/release/gpu-trial")"/packages | grep -c '^mesa-aurora-.*pkg.tar.zst$')" "mesa-aurora 1"
+sleep 1; BOOT_ID=b00000a1; sb env K114S_DESKTOP=no /usr/local/lib/omarchy-k114s/k114s-boot-success >/dev/null; out=$(rel auto)
+ok "the next boot recorded no desktop: auto puts the old Mesa back, held" "$? $(Q mesa-aurora) $(sb pacman-conf IgnorePkg | grep -c -x mesa-aurora) $(test -e "$STATE/release/gpu-trial"; status)" "0 $mesa_before 1 1"
+ok "and says so" "$(notes | grep -c 'recorded no desktop: the old build of mesa-aurora is back')" 1
+out=$(rel auto); ok "the channel's build that failed is not installed again" "$(Q mesa-aurora) $(grep -c 'rolled back after a boot without a desktop' "$STATE/release/log")" "$mesa_before 2"
+g2=$(g_mesa trial-2 20270102.dddddd2); mkrepo edge "$g2"; sb pacman -Syy >/dev/null; sleep 1
+out=$(rel auto); ok "a newer channel build is installed (on trial again)" "$(Q mesa-aurora) $(test -e "$STATE/release/gpu-trial"; status)" "1:26.3.0_devel.20270102.dddddd2-1 0"
+BOOT_ID=b00000a2; out=$(rel auto); ok "the boot it was installed in decides nothing; a later boot is waited for" "$(test -e "$STATE/release/gpu-trial"; status)" 0
+sleep 1; BOOT_ID=b00000a3; sb /usr/local/lib/omarchy-k114s/k114s-boot-success >/dev/null; out=$(rel auto)
+ok "a later boot with a desktop ends the trial; the build stays" "$(Q mesa-aurora) $(test -e "$STATE/release/gpu-trial"; status) $(notes | grep -c 'been through a boot that reached the desktop')" "1:26.3.0_devel.20270102.dddddd2-1 1 1"
 
 # --- the installer's undo ---------------------------------------------------------------------------------------------------
 out=$(sb bash "$L/k114s-tooling-install" --undo); ok "installer --undo" "$? $(echo "$out" | grep -c 'k114s-tooling-install: undone')" "0 1"

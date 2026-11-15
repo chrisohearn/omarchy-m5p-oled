@@ -5,7 +5,8 @@
 #     sudo k114s-release auto                what the post-update hook runs: check, release what is
 #                                            fixed, move a trial forward. Obeys release.conf. Never reboots.
 #     sudo k114s-release preflight           before "omarchy update": would a held package's dependency make the upgrade fail?
-#                                            (the pre-refresh hook runs it; it only reports)
+#                                            (the pre-refresh hook runs it; a blocking package whose channel build is fixed is
+#                                            released as release.conf allows, otherwise it only reports)
 #     sudo k114s-release release PKG...      the same for named packages, whatever AUTO_* says
 #     sudo k114s-release release --accept-manual PKG...   also where the criteria say "a person decides"
 #     sudo k114s-release adopt FILE...       install locally built replacements of held packages (they stay
@@ -29,6 +30,8 @@
 #  - Userland packages switch directly. The GPU stack (mesa-aurora, vulkan-aurora: "keep-held" in the
 #    criteria) and every boot-chain package STAY HELD: they are installed under the permit for that one
 #    transaction, so the next channel build is checked again, never installed by an ordinary update.
+#    A GPU-stack build from the channel is on TRIAL (gpu-trial): if the next recorded boot has no desktop,
+#    "auto" puts the rollback archive back by itself and does not install that build again.
 #  - Boot-chain packages never replace the proven boot path in one step:
 #      1. the fixed kernel/firmware is installed while Stage 2 is frozen. Its boot image becomes
 #         an ADDITIONAL menu entry; the proven image stays the default; the proven kernel's
@@ -58,6 +61,8 @@ KNOWN=$STATE/known-good
 TRIAL=$STATE/trial
 FROZEN=$ETC/stage2-frozen
 KEEP_MODULES=$ETC/keep-modules
+GPU_TRIAL=$STATE/gpu-trial          # the GPU stack installed from the channel, until a later boot shows a desktop
+GPU_GIVEN_UP=$STATE/gpu-given-up    # "PACKAGE VERSION" of GPU builds that were rolled back: "auto" never installs them again
 MIB=1048576
 STAGE2_AUTO=0   # set while "auto" starts a Stage 2 trial by itself (AUTO_STAGE2_SWITCH=yes)
 summary=()      # lines for the notification at the end of "auto"
@@ -158,6 +163,10 @@ cmd_mark_known_good() {
 release_userland() { # release_userland PKG: verdict fixed, class userland
   local package=$1 want real id dir
   want=$(verdict_of "$package" 5)
+  if keep_held "$package"; then
+    if grep -Fxq -- "$package $want" "$GPU_GIVEN_UP" 2>/dev/null; then log "$package $want was rolled back after a boot without a desktop; it is not installed again (a newer build is checked)"; return 0; fi
+    if [[ -f $GPU_TRIAL && $(kv "$GPU_TRIAL" boot_id) != "$(boot_id)" ]]; then note "$package: waits, the GPU stack from the channel ($(gpu_packages)) has not been through a boot yet"; return 0; fi
+  fi
   real=$(real_version "$package")
   if [[ $real != "$want" ]]; then
     note "$package: the check passed $want, but pacman's own lists offer ${real:-nothing}; left held (run omarchy update first)"; return 0
@@ -170,7 +179,8 @@ release_userland() { # release_userland PKG: verdict fixed, class userland
   if run_pacman -S --noconfirm --needed "$package" > "$dir/pacman.log" 2>&1 && [[ $(installed_version "$package") == "$want" ]]; then
     permit_clear
     if keep_held "$package"; then
-      note "$package installed (it stays held: the next channel build is checked again): now $want from the channel. Rollback: sudo k114s-release adopt $dir/packages/$package-*.pkg.tar.zst"
+      gpu_trial_add "$package" "$dir" "$want"
+      note "$package installed (it stays held: the next channel build is checked again): now $want from the channel. Rollback: sudo k114s-release adopt $dir/packages/$package-*.pkg.tar.zst (it is on trial: put back by itself if the next boot shows no desktop)"
     else
       note "$package released: now $want from the channel. Rollback: sudo pacman -U $dir/packages/$package-*.pkg.tar.zst"
     fi
@@ -180,8 +190,42 @@ release_userland() { # release_userland PKG: verdict fixed, class userland
     note "$package: the transaction did not go through (see $dir/pacman.log); held again, nothing lost"
   fi
 }
+gpu_packages() { awk '$1 == "package" { printf "%s ", $2 }' "$GPU_TRIAL" 2>/dev/null | sed 's/ $//'; }
+gpu_trial_add() { # gpu_trial_add PKG ROLLBACK_DIR VERSION: this channel build of the GPU stack is on trial
+  [[ -f $GPU_TRIAL ]] || printf 'started %s\nboot_id %s\n' "$(now)" "$(boot_id)" > "$GPU_TRIAL"
+  printf 'package %s %s %s\n' "$1" "$3" "$2" >> "$GPU_TRIAL"
+}
+gpu_trial_advance() { # a later boot with a desktop ends the trial; a later boot without one puts the old build back
+  [[ -f $GPU_TRIAL ]] || return 0
+  local bid started rec seen=0 up=0 name version dir archive files=() lines=() given=() names
+  bid=$(kv "$GPU_TRIAL" boot_id); started=$(kv "$GPU_TRIAL" started); names=$(gpu_packages)
+  for rec in "$VAR"/release/boots/*; do
+    [[ -f $rec && $(kv "$rec" boot_id) != "$bid" && ! $(kv "$rec" time) < $started ]] || continue
+    seen=1
+    [[ $(kv "$rec" desktop) != yes ]] || up=1
+  done
+  ((seen)) || return 0
+  if ((up)); then rm -f "$GPU_TRIAL"; note "the GPU stack from the channel ($names) has been through a boot that reached the desktop; its trial is over"; return 0; fi
+  while read -r _ name version dir; do
+    archive=$(ls "$dir"/packages/"$name"-*.pkg.tar.zst 2>/dev/null | head -n 1 || true)
+    [[ -f $archive ]] || { note "PROBLEM: the boot after the GPU stack's release recorded no desktop, and the old $name archive is gone ($dir); put it back by hand"; return 0; }
+    files+=("$archive"); lines+=("install $name"); given+=("$name $version")
+  done < <(awk '$1 == "package"' "$GPU_TRIAL")
+  permit_write "${lines[@]}"
+  if run_pacman -U --noconfirm "${files[@]}" > "$STATE/gpu-rollback.log" 2>&1; then
+    permit_clear
+    printf '%s\n' "${given[@]}" >> "$GPU_GIVEN_UP"; rm -f "$GPU_TRIAL"
+    note "the boot after the GPU stack's release recorded no desktop: the old build of $names is back; that channel build is not installed again"
+  else
+    permit_clear
+    # do not retry this every run and block every later GPU release: close the trial as failed; a newer channel build is checked as usual
+    mv -f "$GPU_TRIAL" "$GPU_TRIAL.failed-$(date +%s)"
+    note "PROBLEM: the boot after the GPU stack's release recorded no desktop, and putting the old build back did not go through (see $STATE/gpu-rollback.log; its archives may need dependencies the system no longer has). The trial is closed as failed; a newer channel build is checked as usual. From a TTY: sudo k114s-release adopt ${files[*]}"
+  fi
+}
 adopt_userland() { # adopt_userland FILE PACKAGE VERSION: switch directly; it stays held
-  local file=$1 package=$2 version=$3 id dir lifted=() path
+  local file=$1 package=$2 version=$3 id dir lifted=() path before
+  before=$(installed_version "$package" || true)
   id=$(new_id "adopt-$package")
   dir=$(rollback_set "$id" "$package" --no-uki) || die "could not write the rollback set; nothing changed"
   # the paths this package brings that are kept out by NoExtract
@@ -195,6 +239,8 @@ adopt_userland() { # adopt_userland FILE PACKAGE VERSION: switch directly; it st
   permit_write "install $package"
   if run_pacman -U --noconfirm "$file" > "$dir/pacman.log" 2>&1 && [[ $(installed_version "$package") == "$version" ]]; then
     permit_clear; holds restore-noextract >/dev/null
+    # adopting over a GPU build that is on trial ends the trial: the owner chose, and auto does not put the build back
+    if grep -q "^package $package " "$GPU_TRIAL" 2>/dev/null; then echo "$package $before" >> "$GPU_GIVEN_UP"; sed -i "/^package $package /d" "$GPU_TRIAL"; [[ -n $(gpu_packages) ]] || rm -f "$GPU_TRIAL"; fi
     log "$package $version adopted from ${file##*/}; it stays held. Rollback: sudo k114s-release adopt $dir/packages/$package-*.pkg.tar.zst (a plain pacman -U is stopped by the hold guard)"
   else
     permit_clear; holds restore-noextract >/dev/null
@@ -740,22 +786,36 @@ do_release() { # do_release MODE PKG...: MODE auto obeys release.conf, MODE name
     for name in "$@"; do [[ " ${fixed[*]:-} " == *" $name "* ]] || note "$name is not released: $(verdict_of "$name" 3)"; done
   fi
 }
-cmd_preflight() { # the upgrade the channel offers, worked out in the check's private copy of the lists; nothing is installed
-  local out status=0 name blocked=() lines=() verdict
+cmd_preflight() { # the upgrade the channel offers, worked out in the check's private copy of the lists; releases a fixed blocker as release.conf allows
+  local out status=0 name blocked=() fixed=() lines=() verdict needers
   boot_unlock
+  # a trial that a later boot has already decided is closed first, so a fixed blocker is not kept waiting on it
+  advance 0; gpu_trial_advance
   run_check || { say "preflight: the release check could not run (network?); nothing checked"; return 0; }
   out=$("$PACMAN" "${PACMAN_ARGS[@]}" --dbpath "$VAR/check/db" -Sup --noconfirm 2>&1) || status=$?
   ((status)) || { say "preflight: no held package stands in the way of the channel's upgrade"; return 0; }
-  for name in $(held_names); do grep -Fq -- "$name" <<<"$out" && blocked+=("$name"); done
+  # only the dependency errors count: pacman also prints "NAME: ignoring package upgrade" for every held package with a newer build
+  # "breaks dependency 'D' required by NAME": NAME (held) is what the upgrade would break.
+  # "unable to satisfy dependency 'D>=v' required by NAME": D is missing (a held package that is too old), and NAME may be held too.
+  needers=$( { awk '/breaks dependency/ && /required by / { sub(/.*required by /, ""); print $1 }' <<<"$out"
+               awk -F"'" '/unable to satisfy dependency/ { d = $2; sub(/[<>=].*/, "", d); print d; r = $0; if (sub(/.*required by /, "", r)) { split(r, w, " "); print w[1] } }' <<<"$out"; } | sort -u)
+  for name in $(held_names); do grep -Fxq -- "$name" <<<"$needers" && blocked+=("$name"); done
   if ((${#blocked[@]} == 0)); then say "preflight: the channel's upgrade would fail, not because of a held package: $(tail -n 2 <<<"$out" | tr '\n' ' ')"; return 0; fi
   for name in "${blocked[@]}"; do
     verdict=$(verdict_of "$name" 3)
-    if [[ $verdict == fixed ]]; then lines+=("$name: the channel's build is fit for the K114s. After the update stops, run: sudo k114s-release release $name (add --accept-manual where the criteria say a person decides), then update again")
+    if [[ $verdict == fixed ]]; then fixed+=("$name"); lines+=("$name: the channel's build is fit for the K114s")
     else lines+=("$name: the channel's build is not fit yet (${verdict:-no verdict}); the update stops until it is. Look at: sudo k114s-release status"); fi
   done
   say "preflight: the channel's upgrade would FAIL on a dependency of held package(s): ${blocked[*]}"
   printf '%s\n' "${lines[@]}" | sed 's/^/  /'
-  notify normal "K114s updates" "$(printf '%s\n' "The next omarchy update would fail on held ${blocked[*]}" "${lines[@]}" | cut -c1-400)"
+  # A fit build is released here as release.conf allows (auto: AUTO_RELEASE, AUTO_RELEASE_BOOT, the trial rules). pacman's own lists
+  # may not offer it yet (this runs before the update refreshes them): it then stays held and the next preflight, after the failed
+  # update has refreshed the lists, releases it. Otherwise the line says what to run.
+  if ((${#fixed[@]})); then
+    do_release auto "${fixed[@]}"
+    say "preflight: if ${fixed[*]} is still held, run: sudo k114s-release release ${fixed[*]} (add --accept-manual where the criteria say a person decides), then update again"
+  fi
+  notify normal "K114s updates" "$(printf '%s\n' "The next omarchy update would fail on held ${blocked[*]}" "${lines[@]}" "${summary[@]}" | cut -c1-400)"
 }
 cmd_status() {
   local conf name
@@ -777,6 +837,7 @@ cmd_status() {
   else
     echo "trial:     none"
   fi
+  [[ ! -f $GPU_TRIAL ]] || echo "GPU stack: $(gpu_packages) from the channel, on trial (put back by itself if the next boot has no desktop)"
   [[ -f $FROZEN ]] && echo "Stage 2:   frozen at the proven file (packages may be newer: sudo k114s-release stage2)"
   echo "booted:    Stage 2 $(booted_stage2)$( [[ -z $(booted_trial) ]] || echo " (a one-boot trial)" )"
   [[ -z $(foreign_trial "$STAGE2_TRY_REL") ]] || echo "elsewhere: $(foreign_trial "$STAGE2_TRY_REL"); Stage 2 trials of this tool wait for it"
@@ -809,6 +870,7 @@ case $command in
   auto)
     tidy_stage2
     advance 0
+    gpu_trial_advance
     do_release auto
     if [[ -f $FROZEN && ! -f $TRIAL ]] && enabled AUTO_STAGE2_SWITCH no; then
       (STAGE2_AUTO=1; cmd_stage2) || note "the automatic Stage 2 switch did not go through; the proven Stage 2 is in place"
@@ -819,6 +881,7 @@ case $command in
   release)
     if [[ ${1:-} == --accept-manual ]]; then accept_manual=1; shift; fi
     (($#)) || die "usage: k114s-release release [--accept-manual] PKG..."
+    advance 0; gpu_trial_advance
     do_release named "$@" ;;
   preflight) cmd_preflight ;;
   adopt) cmd_adopt "$@" ;;
