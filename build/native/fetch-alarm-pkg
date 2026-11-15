@@ -1,0 +1,28 @@
+#!/bin/bash
+# usage: fetch-alarm-pkg PREFIX PKG...   Download Arch Linux ARM packages (extra, then core) from the
+# mirror this machine uses, verify the sha256 the repository database records, extract into PREFIX.
+# User-local only: nothing is installed system-wide and pacman is not involved.
+set -euo pipefail
+B=${B:-$HOME/k114s-build}; MIRROR=${MIRROR:-https://arm-mirror.omarchy.org/aarch64}
+prefix=$1; shift; mkdir -p "$prefix" "$B/pkgcache/db" "$B/pkgcache/pkg"
+for repo in extra core; do
+  db=$B/pkgcache/db/$repo.db
+  [[ -s $db ]] || curl -fsSL -o "$db" "$MIRROR/$repo/$repo.db"
+done
+for pkg in "$@"; do
+  found=
+  for repo in extra core; do
+    db=$B/pkgcache/db/$repo.db
+    desc=$(bsdtar -tf "$db" | grep -E "^${pkg//+/\\+}-[^-/]+-[^-/]+/desc$" | head -1) || true
+    [[ -n $desc ]] || continue
+    file=$(bsdtar -xOf "$db" "$desc" | awk '/^%FILENAME%$/{getline; print}')
+    sum=$(bsdtar -xOf "$db" "$desc" | awk '/^%SHA256SUM%$/{getline; print}')
+    out=$B/pkgcache/pkg/$file
+    [[ -s $out ]] || curl -fsSL --retry 3 -o "$out" "$MIRROR/$repo/${file//:/%3A}"
+    echo "$sum  $out" | sha256sum -c --quiet -
+    bsdtar -xf "$out" -C "$prefix" --exclude .PKGINFO --exclude .MTREE --exclude .BUILDINFO --exclude .INSTALL
+    echo "$pkg: $file ($repo) -> $prefix"
+    found=1; break
+  done
+  [[ -n $found ]] || { echo "$pkg: not found in extra or core" >&2; exit 1; }
+done

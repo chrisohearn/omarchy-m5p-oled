@@ -1,0 +1,17 @@
+#!/bin/bash
+# kmake: `make` for the K114s kernel trees with the pinned toolchain.
+#   LLVM=1 ARCH=arm64, clang/lld 23.1.3, rustc 1.98.1, the private bindgen 0.73.2, LOCALVERSION= (so the
+#   release is 7.3.0 + localversion.10-pkgrel + CONFIG_LOCALVERSION = 7.3.0-17.v272-4-ARCH).
+# usage: cd ~/k114s-build/src/<variant> && kmake O=~/k114s-build/build/<variant> [-jN] targets...
+# Modelled on betizzel/omarchy-m5 installer/recipes/linux-aurora-j714s/PKGBUILD (_make) and on
+# build/kernel-build-scripts.txt of chrisohearn/omarchy-m5p-oled.
+set -euo pipefail
+source "${K114S_BUILD_ROOT:-$HOME/k114s-build}/env.sh"
+[[ -x $K114S_BINDGEN ]] || { echo "kmake: $K114S_BINDGEN missing (see README-build.md, 'Toolchain')" >&2; exit 1; }
+# `uname -v` of the result: "#N SMP PREEMPT <this>". The running kernel says K114S-R1.
+export KBUILD_BUILD_TIMESTAMP="${KBUILD_BUILD_TIMESTAMP:-${K114S_LABEL:-K114S-DEV} $(date '+%a %b %e %Y' | tr -s ' ')}"
+jobs=(-j"$K114S_JOBS")
+for a in "$@"; do case $a in -j*|--jobs*) jobs=() ;; esac; done
+exec make LLVM=1 ARCH=arm64 BINDGEN="$K114S_BINDGEN" \
+  RUSTFMT="$RUSTUP_HOME/toolchains/1.98.1-aarch64-unknown-linux-gnu/bin/rustfmt" \
+  LOCALVERSION= "${jobs[@]}" "$@"
