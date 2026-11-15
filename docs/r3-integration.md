@@ -391,13 +391,11 @@ Each step has an expected result; stop at the first one that is not met.
 On the Mac, once, in Terminal (the owner): mount the Linux EFI partition (`diskutil list`, then `sudo diskutil mount readOnly <the EFI volume of the internal disk>`: read-only, because the Linux ESP has about 84 MB free and a read-write mount lets macOS add `.fseventsd`, Spotlight or AppleDouble files), copy
 `/Volumes/EFI/k114s-repair/macos-r3a/k114s_repair.py` over `tools/k114s_repair.py` in the repair bundle folder, run `diskutil unmount <the EFI volume>`, and run `sudo ./k114s-repair status` (read-only). The owner reports that it printed the status and not "STOPPED"; only then does the root continue past step 5's D0.
 
-**2. Step A: the key file, by itself, on a plain reboot (the owner's decision; no new kernel or tree).** This boot still goes through the standing GPU trial.
+**2. Step A: a plain reboot on the current command line (no new kernel or tree).** This boot still goes through the standing GPU trial. The r3a UKI embeds the same command line, so the trial must not be the first boot to test it.
 
     sudo systemctl reboot
 
-After the boot (no passphrase was asked): `tr ' ' '\n' </proc/cmdline | grep '^rd.luks'` shows `rd.luks.key=` and `rd.luks.options=...keyfile-timeout=10s,tries=4`; `systemctl status k114s-keydev-release --no-pager` is
-active or exited without error; `findmnt /boot/efi` shows the ESP mounted; `sudo journalctl -b -p warning --no-pager | head -40` shows nothing about the key. If it asked for the passphrase or anything is
-off, **stop**: the r3a UKI's embedded command line carries the same key words, and the trial must not be the first boot to test them.
+After the boot: `findmnt /boot/efi` shows the ESP mounted and `sudo journalctl -b -p warning --no-pager | head -40` shows nothing new. If anything is off, **stop**.
 
 **3. Step B: install the helper and measure the one-shot mechanism on a request that changes nothing.** This is the first and only proof that U-Boot persists a boot-time erase; it can fail.
 
@@ -488,7 +486,7 @@ D4. Restore `update-m1n1` and check what happened, before anything is armed.
     norm() { tr -d '\0' | tr -s ' \n' '\n' | sed '/^$/d' | sort; }        # the hook's .cmdline ends in a space, a newline and a NUL: drop the empty token
     sudo cat $t/c | norm > $t/embedded
     sudo sh -c "grep -m1 '^  cmdline:' /boot/efi/limine.conf | sed 's/^  cmdline: //'" | norm > $t/entry1
-    diff $t/embedded $t/entry1 && echo "UKI embedded command line = entry 1's"             # expect no difference (dry-run on the existing hook-built UKI: 23 tokens, no empty one): same key words, which step A proved
+    diff $t/embedded $t/entry1 && echo "UKI embedded command line = entry 1's"             # expect no difference (dry-run on the existing hook-built UKI: 23 tokens, no empty one): same command line, which step A proved
     # the trial boots the new entry's own cmdline: line (systemd-stub prefers the loader's options over .cmdline), so compare that one too
     sudo awk '/^[ \t]*\/\/linux-k114s/ {f=1} f && /^[ \t]*cmdline:/ {sub(/^[ \t]*cmdline:[ \t]*/,""); print; exit}' /boot/efi/limine.conf | norm > $t/new
     diff $t/new $t/entry1 && echo "new entry's cmdline: line = entry 1's"                  # expect no difference
