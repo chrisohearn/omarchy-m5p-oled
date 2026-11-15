@@ -10,12 +10,16 @@
 #
 # It is built so that it does not leave you with a dark screen:
 #   - it never writes a level below --lowest (default: the larger of 10 nits, 1 % of the
-#     maximum and the kernel's own floor), and never 0;
+#     maximum and the device-tree floor apple,min-brightness), and never 0. The device-tree
+#     floor is only enforced by a kernel with patch 0006; the script says whether this kernel
+#     logged that it applies it, and does not depend on it;
+#   - a write that fails is reported as failed (never as "wrote N nits") and stops the descent;
 #   - every question has a time limit (default 20 s). NO ANSWER PUTS BACK THE LAST LEVEL YOU
 #     CONFIRMED YOU COULD READ, and the descent stops there. So if the screen goes dark or
 #     unreadable: do nothing and wait;
 #   - Ctrl-C, or closing the terminal, puts that level back too.
-# Independent of this script, Shift + brightness-up asks Omarchy for 100 %.
+# Independent of this script, Shift + brightness-up asks Omarchy for 100 % (if the shell's key
+# handler is not running, use the blind terminal step in docs/r3-brightness.md).
 #
 # --read-only prints the first part and writes nothing.
 # K114S_BL_SYSFS=DIR uses DIR/apple-panel-bl instead of the real device and writes the file
@@ -72,10 +76,20 @@ max=$(<"$p/max_brightness")
 start=$(<"$p/brightness")
 dt_max=$(dt_u32 apple,max-brightness)
 dt_min=$(dt_u32 apple,min-brightness)
+# Does this kernel apply the floor? Only patch 0006 logs this line at probe.
+klog=${K114S_BL_KLOG:-}
+if [[ -n $klog ]]; then kfloor=$(grep -m1 'brightness requests below' "$klog" 2>/dev/null || true)
+else kfloor=$(journalctl -k -b --no-pager 2>/dev/null | grep -m1 'brightness requests below' || true); fi
+kign=
+if [[ -n $klog ]]; then kign=$(grep -m1 'brightness floor .* ignored' "$klog" 2>/dev/null || true)
+else kign=$(journalctl -k -b --no-pager 2>/dev/null | grep -m1 'brightness floor .* ignored' || true); fi
 echo "device              $dev"
 echo "type / scale        $(cat "$p/type" 2>/dev/null) / $(cat "$p/scale" 2>/dev/null)   (expected: platform / linear)"
 echo "max_brightness      $max nits   (device tree, written by the loader: ${dt_max:-not readable})"
-echo "kernel floor        ${dt_min:-none} (apple,min-brightness)"
+echo "device-tree floor   ${dt_min:-none} (apple,min-brightness; enforced only by a kernel with patch 0006)"
+if [[ -n $kign ]]; then echo "kernel applies it   NOT APPLIED: the kernel dropped the floor after probe (${kign#*] }); a write of 0 would reach the panel as 0 nits"; kfloor=
+elif [[ -n $kfloor ]]; then echo "kernel applies it   yes: ${kfloor#*] }"
+else echo "kernel applies it   NOT SEEN in the kernel log: a write of 0 would reach the panel as 0 nits"; fi
 echo "brightness          $start"
 echo "actual_brightness   $(cat "$p/actual_brightness" 2>/dev/null)"
 echo "connectors          $(ls /sys/class/drm 2>/dev/null | grep -- - | tr '\n' ' ')"
@@ -95,9 +109,9 @@ mkdir -p "$out_dir"
 out=$out_dir/result-$(date +%Y%m%d-%H%M%S).txt
 note() { echo "$*" | tee -a "$out"; }
 
-set_level() {
+set_level() { # returns brightnessctl's status; the caller decides what a failure means
   if [[ -n ${K114S_BL_SYSFS:-} ]]; then
-    echo "$1" >"$p/brightness"; echo "$1" >"$p/actual_brightness"; echo "$1" >>"$p/writes.log"
+    echo "$1" >"$p/brightness" && echo "$1" >"$p/actual_brightness" && echo "$1" >>"$p/writes.log"
   else
     brightnessctl -q -d "$dev" set "$1"
   fi
@@ -105,16 +119,20 @@ set_level() {
 
 good=""   # the last level the owner confirmed readable
 restore() {
-  local to=${good:-$max}
-  set_level "$to" || true
-  note "restored $to nits (${good:+last level confirmed readable}${good:-no level was confirmed, so the maximum})"
+  local to=${good:-$max} err
+  if err=$(set_level "$to" 2>&1); then
+    note "restored $to nits ($([[ -n $good ]] && echo 'last level confirmed readable' || echo 'no level was confirmed, so the maximum'))"
+  else note "RESTORE OF $to NITS FAILED: $err. If the screen is dark see the way back in docs/r3-brightness.md"; fi
 }
 trap 'trap - EXIT INT TERM HUP; restore; exit 130' INT TERM HUP
 
 # Write a level, wait for the fade, ask. Returns 1 when the owner cannot read the screen.
 step() {
-  local n=$1 what=$2 ans=""
-  set_level "$n"
+  local n=$1 what=$2 ans="" err
+  if ! err=$(set_level "$n" 2>&1); then
+    note "level $n nits ($what): WRITE FAILED: ${err:-no message}; nothing was changed by this step"
+    return 2
+  fi
   sleep "${K114S_BL_SETTLE:-1}"
   printf '\n%s: wrote %s nits (%s %%), actual_brightness reads %s.\n' "$what" "$n" "$(( 100 * n / max ))" \
     "$(cat "$p/actual_brightness" 2>/dev/null)"
@@ -131,10 +149,11 @@ step() {
 }
 
 note "k114s-backlight-check $(date -Is), kernel $(uname -r)"
-note "max_brightness $max, device-tree max ${dt_max:-?}, kernel floor ${dt_min:-none}, start reading $start, lowest level this run writes $lowest"
+note "max_brightness $max, device-tree max ${dt_max:-?}, device-tree floor ${dt_min:-none}, kernel applies floor: $( [[ -n $kfloor ]] && echo yes || echo "not seen" ), start reading $start, lowest level this run writes $lowest"
 echo
 echo "If the screen goes dark or unreadable at any point: do nothing. After $timeout s the last level"
-echo "you confirmed comes back. Shift + brightness-up asks for 100 % independently of this script."
+echo "you confirmed comes back (if the coprocessor crashed, writes fail with an I/O error: see the way"
+echo "back in docs/r3-brightness.md). Shift + brightness-up asks for 100 % independently of this script."
 
 # 1. Take over at the level the device reports. Until the first write the kernel may not know
 #    the panel's real level (it then reports half the maximum), so the picture may jump here.
@@ -153,8 +172,9 @@ for pct in 50 25 10 5 2 1; do
   if ! step "$n" "$pct % of the maximum"; then restore; note "descent stopped below $good nits"; break; fi
 done
 # 4. Back to where it started.
-set_level "$first"
-note "finished; left at $first nits. lowest level confirmed readable: ${good:-none}"
+if err=$(set_level "$first" 2>&1); then note "finished; left at $first nits. lowest level confirmed readable: ${good:-none}"
+else note "FINAL WRITE OF $first NITS FAILED: $err; the level is whatever the last successful step left. Lowest level confirmed readable: ${good:-none}"; fi
 trap - INT TERM HUP
 echo
+echo "To let systemd restore the level at boot (off by default on this Mac), see docs/r3-brightness.md."
 echo "Result file (no serials or addresses in it): $out"

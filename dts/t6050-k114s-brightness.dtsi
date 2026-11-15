@@ -41,7 +41,8 @@
 		 * Lowest level a brightness write can reach, in nits. Needs kernel patches
 		 * 0005 and 0006 of patches/linux/brightness; a kernel without them ignores
 		 * the property and accepts 0, which it presents as 0 nits (the level it uses
-		 * for display off).
+		 * for display off). Omarchy's Alt + brightness-down (held) asks for 0 too, so
+		 * without 0006 and this line an ordinary key can take the panel to 0 nits.
 		 *
 		 * 10 is a first value, not a measured one: nobody has reported what this
 		 * panel shows at low levels. It is 1 % of the K116s scale, the lowest step

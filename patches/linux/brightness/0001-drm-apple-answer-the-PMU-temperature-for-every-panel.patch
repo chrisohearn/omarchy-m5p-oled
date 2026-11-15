@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Jens Axboe <axboe@kernel.dk>
+From: Jens Axboe <address-in-upstream-commit@localhost>
 Date: Wed, 11 Nov 2026 11:18:49 -0700
 Subject: [PATCH] drm/apple: answer the PMU temperature for every panel, quiet
  the TAOC fallback
@@ -23,9 +23,9 @@ request used to get "false" there and now gets the battery temperature,
 which its panel compensation then takes as the panel's initial
 temperature. Mini-LED panels got the temperature before and still do.
 
-Signed-off-by: Jens Axboe <axboe@kernel.dk>
+Signed-off-by: Jens Axboe <address-in-upstream-commit@localhost>
 [thomas: describe the PMUS reply as a behaviour change]
-Signed-off-by: Thomas Glanzmann <thomas@glanzmann.de>
+Signed-off-by: Thomas Glanzmann <address-in-upstream-commit@localhost>
 (cherry picked from commit 50db17f86f92b0a68a58f1f28a84a216cdf73552)
 [k114s: aurora-silicon/linux pull request 1646 (open, head 907bb7ec5990), commit 1 of 3. Tested upstream on a K116s; not booted on a K114s]
 ---

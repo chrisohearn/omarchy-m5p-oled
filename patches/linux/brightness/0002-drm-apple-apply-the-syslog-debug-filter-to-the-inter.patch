@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Jens Axboe <axboe@kernel.dk>
+From: Jens Axboe <address-in-upstream-commit@localhost>
 Date: Wed, 11 Nov 2026 11:51:39 -0700
 Subject: [PATCH] drm/apple: apply the syslog debug filter to the internal
  panel's DCP too
@@ -11,9 +11,9 @@ a second on the internal panel.
 The apple-dcp host test's syslog check expects the hook on both RTKit
 ops now.
 
-Signed-off-by: Jens Axboe <axboe@kernel.dk>
+Signed-off-by: Jens Axboe <address-in-upstream-commit@localhost>
 [thomas: update the apple-dcp host test to the new policy]
-Signed-off-by: Thomas Glanzmann <thomas@glanzmann.de>
+Signed-off-by: Thomas Glanzmann <address-in-upstream-commit@localhost>
 (cherry picked from commit 8847a289036a656b360475b334d77db3ad0b879e)
 [k114s: aurora-silicon/linux pull request 1646 (open, head 907bb7ec5990), commit 2 of 3. Tested upstream on a K116s; not booted on a K114s]
 ---

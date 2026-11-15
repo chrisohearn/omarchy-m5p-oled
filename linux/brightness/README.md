@@ -10,18 +10,20 @@ installed Omarchy on this Mac (2026-11-14), not yet seen working:
 
 | Omarchy piece | What it needs | What the K114s gives once the candidate boots |
 | --- | --- | --- |
-| `omarchy-brightness-display` (keys through the script, the slider, `omarchy brightness display N%`) | the focused monitor named `eDP-*`, `LVDS-*` or `DSI-*` | the coprocessor's connector is eDP, so `eDP-1` (today: `Unknown-1`, which is why the script exits 1) |
+| `omarchy-brightness-display` (keys through the script, the slider, `omarchy brightness display N%`) | the focused monitor named `eDP-*`, `LVDS-*` or `DSI-*` | the coprocessor's connector is eDP: `eDP-1`, or `eDP-2` as the J714s reports (which this Mac gets: could not determine; today: `Unknown-1`, which is why the script exits 1) |
 | `omarchy-hw-display` | a device in `/sys/class/backlight`; `/usr/share/omarchy-platform/displays.conf` already says `backlight-prefer apple-panel-bl` | the kernel names the device `apple-panel-bl` |
 | the shell's key handler (`shell/services/BrightnessKeys.qml`) | the same device, found when the shell starts; without one it falls back to the script | either path works; the device can appear a few seconds after the desktop |
 | `brightnessctl` 0.5 | permission to write | none needed: it asks logind, as it already does for the keyboard backlight |
-| `systemd-backlight@backlight:apple-panel-bl` | nothing | saves the level at shutdown and writes it back at boot, clamped to at least 5 % of the maximum (`systemd-backlight@.service(8)`, `ID_BACKLIGHT_CLAMP`; not run here) |
+| `systemd-backlight@backlight:apple-panel-bl` | **a drop-in on this Mac** (`systemd/k114s-first-boot.conf`) | started by udev for the device; with no saved level its `load` reads the current level, raises it to at least 1 % (newer systemd) or 5 % (262 man page) of the maximum and writes it back, which on a device that reads N/2 is a level-carrying write a few seconds into the first boot, unattended. The drop-in skips the unit until `/var/lib/k114s-backlight/restore-enabled` exists, and turning restore on needs one `systemctl start` of the unit after creating the file (not run here; see `docs/r3-brightness.md`, "The first write") |
 
 The device's type is `platform` and its scale is `linear`, in nits; Omarchy does not look at
-either. Omarchy's own paths never ask for less than 1 %: the keys stop at 1 %, Shift + brightness
-down is 1 %, and the slider clamps to 1..100. Screen-off (`omarchy-brightness-display off`, which the
-lock screen uses) is display power management, not a level.
-Only a direct write (`brightnessctl set 0`, another tool) can ask for 0, and the kernel floor in
-`patches/linux/brightness` (0005, 0006) with `dts/t6050-k114s-brightness.dtsi` is there for that.
+either. The plain keys stop at 1 %, Shift + brightness down is 1 %, and the slider clamps to
+1..100. **But Alt + brightness-down (held) is bound to `omarchy-brightness-display 1%-`, which is
+not clamped and reaches 0.** A direct write (`brightnessctl set 0`) can ask for 0 too. What stops
+all of them is the kernel floor in `patches/linux/brightness` (0005, 0006) with
+`dts/t6050-k114s-brightness.dtsi`; without those three an ordinary key chord can take the panel to
+0 nits. Screen-off (`omarchy-brightness-display off`, which the lock screen uses) is display power
+management, not a level.
 
 ## `k114s-backlight-check`: the owner's first hardware check
 
@@ -31,10 +33,12 @@ Run it in a terminal on the first boot with the panel on the coprocessor. No sud
     linux/brightness/k114s-backlight-check                 # the stepped check, with questions
 
 It writes a short series of levels and asks after each what you see. No answer within 20 s puts
-back the last level you confirmed you could read, so a dark screen recovers by waiting. It never
-writes 0 and never goes below the larger of 10 nits, 1 % of the maximum and the kernel's floor.
+back the last level you confirmed you could read (if the coprocessor crashed, writes fail with an
+I/O error and a restart is needed). It never writes 0 and never goes below the larger of 10 nits,
+1 % of the maximum and the device-tree floor; it reports a failed write as failed and says
+whether the kernel log shows the floor is applied.
 `tests/brightness/test-backlight-check.sh` exercises those rules against a stand-in directory
-(emulator/replica; 15 checks pass).
+(emulator/replica).
 
 ## `interim/`: software dimming for today (optional, dimming only, not yet run)
 

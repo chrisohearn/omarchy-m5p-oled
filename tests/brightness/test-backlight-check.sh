@@ -86,5 +86,29 @@ wait "$pid" 2>/dev/null || true
 check "SIGTERM: restores the last confirmed level" "[[ \"\$(writes $s)\" == '500 1000 250 100 250 ' ]]"
 pkill -P $$ sleep 2>/dev/null || true
 
+# 10. A failing write is reported as failed, never as "wrote N nits", and stops the run.
+s=$(fake ro2 1000 500)
+chmod a-w "$s/apple-panel-bl/brightness"
+rc=0; printf 's\nb\n' | run "$s" >"$tmp/ro2.out" 2>&1 || rc=$?
+check "failed write: exit 1, says WRITE FAILED" "(( rc == 1 )) && grep -q 'WRITE FAILED' '$tmp/ro2.out'"
+check "failed write: no 'wrote N nits' line" "! grep -q 'wrote [0-9]' '$tmp/ro2.out'"
+check "failed write: restore failure is reported" "grep -q 'RESTORE OF' '$tmp/ro2.out'"
+
+# 11. The kernel floor is reported from the kernel log line, not from the device tree alone.
+s=$(fake kl 1000 500)
+run "$s" --read-only </dev/null >"$tmp/kl0.out"
+check "no kernel log line: says the floor is not seen" "grep -q 'NOT SEEN' '$tmp/kl0.out'"
+echo '[    5.1] apple-dcp x: brightness requests below 10 nits are raised to 10 nits' >"$tmp/klog"
+K114S_BL_KLOG=$tmp/klog run "$s" --read-only </dev/null >"$tmp/kl1.out"
+check "kernel log line present: says yes" "grep -q 'kernel applies it   yes' '$tmp/kl1.out'"
+
+echo '[    5.2] apple-dcp x: brightness floor 10 ignored for a ceiling of 5' >>"$tmp/klog"
+K114S_BL_KLOG=$tmp/klog run "$s" --read-only </dev/null >"$tmp/kl2.out"
+check "floor dropped after probe: says NOT APPLIED, not yes" "grep -q 'NOT APPLIED' '$tmp/kl2.out' && ! grep -q 'applies it   yes' '$tmp/kl2.out'"
+
+# 12. The systemd drop-in holds the unit off until the marker file exists.
+conf=$here/../../linux/brightness/systemd/k114s-first-boot.conf
+check "drop-in: unit conditional on the marker file" "grep -qx 'ConditionPathExists=/var/lib/k114s-backlight/restore-enabled' '$conf'"
+
 echo "# backlight-check replica: $fails failed"
 exit $(( fails > 0 ))

@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Jens Axboe <axboe@kernel.dk>
+From: Jens Axboe <address-in-upstream-commit@localhost>
 Date: Wed, 11 Nov 2026 13:29:58 -0700
 Subject: [PATCH] drm/apple: take the 27.2 D590 notification as a no-op
 
@@ -8,7 +8,7 @@ swaps (the macOS handler next to swap_info is the buffer-release
 notification). Nothing here consumes it, so take it as a no-op instead of
 warning about an unknown callback.
 
-Signed-off-by: Jens Axboe <axboe@kernel.dk>
+Signed-off-by: Jens Axboe <address-in-upstream-commit@localhost>
 (cherry picked from commit 907bb7ec5990a7662ce65087c70432252aeceadf)
 [k114s: aurora-silicon/linux pull request 1646 (open, head 907bb7ec5990), commit 3 of 3. Tested upstream on a K116s; not booted on a K114s]
 ---
