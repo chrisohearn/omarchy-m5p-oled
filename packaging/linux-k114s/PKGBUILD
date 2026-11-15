@@ -1,25 +1,29 @@
-# Maintainer: none (K114s r3a candidate; built from a finished kernel tree, see docs/r3-integration.md)
+# Maintainer: none (K114s r3a/r3b candidates; built from a finished kernel tree, see docs/r3-integration.md, docs/r3b-kernel.md)
 #
-# linux-k114s: the K114s r3a kernel as its own package, beside linux-aurora and not replacing it.
+# linux-k114s: the K114s r3a or r3b kernel as its own package, beside linux-aurora and not replacing it.
 #
-# Everything lands in /usr/lib/modules/<release>/ and the release string (7.3.0-17.v272-4-k114s-r3a-ARCH)
-# differs from linux-aurora's (7.3.0-17.v272-4-ARCH), so no file is shared with linux-aurora and the
+# Everything lands in /usr/lib/modules/<release>/ and the release string (7.3.0-17.v272-4-k114s-r3a-ARCH, or
+# 7.3.0-17.v272-11-k114s-r3b-ARCH) differs from linux-aurora's (7.3.0-17.v272-4-ARCH today), so no file is shared and the
 # running kernel's module directory stays package-owned (linux-modules-cleanup.service leaves it alone).
 # The layout is Arch's: vmlinuz (the raw arm64 Image), pkgbase, modules.*, kernel/, dtbs/ (flat).
 # The system's hooks do the rest: pkgbase names the mkinitcpio preset, and the Limine hook builds
 # omarchy_linux-k114s.efi for it.
 #
 # This file does not compile anything. It packages a finished build:
-#   K114S_SRC   the kernel source tree      (default $K114S_BUILD_ROOT/src/r3a)
-#   K114S_OUT   its output directory        (default $K114S_BUILD_ROOT/build/r3a)
+#   K114S_CAND  the candidate, r3a or r3b   (default r3a, the one the runbook docs/r3-integration.md names;
+#               r3b: docs/r3b-kernel.md, K114S_CAND=r3b makepkg ...)
+#   K114S_SRC   the kernel source tree      (default $K114S_BUILD_ROOT/src/<candidate>)
+#   K114S_OUT   its output directory        (default $K114S_BUILD_ROOT/build/<candidate>)
 # with the toolchain of $K114S_BUILD_ROOT (default ~/k114s-build; env.sh and bin/kmake there).
 #   source ~/k114s-build/env.sh; cd packaging/linux-k114s
 #   BUILDDIR=... PKGDEST=... makepkg -f --nodeps --skipinteg      (no root; takes about a minute)
 
 pkgname=linux-k114s
-pkgver=7.3.0.r3a
-pkgrel=2
-pkgdesc='K114s (MacBook Pro 14-inch, M5 Pro) kernel candidate r3a and its modules; installs beside linux-aurora'
+_cand=${K114S_CAND:-r3a}
+case $_cand in r3a) _rel=2 ;; r3b) _rel=1 ;; *) echo "K114S_CAND must be r3a or r3b" >&2; exit 1 ;; esac
+pkgver=7.3.0.$_cand
+pkgrel=$_rel
+pkgdesc="K114s (MacBook Pro 14-inch, M5 Pro) kernel candidate $_cand and its modules; installs beside linux-aurora"
 arch=('aarch64')
 url='https://github.com/chrisohearn/omarchy-m5p-oled'
 license=('GPL-2.0-only')
@@ -27,8 +31,8 @@ depends=('coreutils' 'kmod' 'initramfs')
 options=('!strip' '!debug' '!lto' '!emptydirs')
 # no source=(): the kernel tree and its output directory are named by the environment
 _root=${K114S_BUILD_ROOT:-$HOME/k114s-build}
-_src=${K114S_SRC:-$_root/src/r3a}
-_out=${K114S_OUT:-$_root/build/r3a}
+_src=${K114S_SRC:-$_root/src/$_cand}
+_out=${K114S_OUT:-$_root/build/$_cand}
 
 package() {
   local kernel_release modpath
@@ -38,6 +42,8 @@ package() {
     *) echo "release '$kernel_release' does not end in -ARCH (boot bundle discovery needs it)" >&2; return 1 ;;
   esac
   [[ $kernel_release != 7.3.0-17.v272-4-ARCH ]] || { echo "release equals linux-aurora's" >&2; return 1; }
+  [[ $_cand != r3b || $kernel_release != 7.3.0-17.v272-4-k114s-r3a-ARCH ]] || { echo "r3b release equals r3a's" >&2; return 1; }
+  [[ $kernel_release == *-k114s-${_cand}-ARCH ]] || { echo "release '$kernel_release' is not a $_cand release (missing the k114s release suffix?)" >&2; return 1; }
   modpath="$pkgdir/usr/lib/modules/$kernel_release"
 
   # vmlinuz: the uncompressed Image, as linux-aurora ships it

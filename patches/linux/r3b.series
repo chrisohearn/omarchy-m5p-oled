@@ -1,0 +1,34 @@
+# K114s r3b kernel: what is applied to betizzel/omarchy-m5's v272-11 kernel (release omarchy-j714s-6).
+#
+# Base, built exactly as the recipe builds it (docs/r3b-kernel.md, "Base"):
+#   aurora-silicon/linux a5ebec5fd092 (integration/aurora) + installer/recipes/linux-aurora-j714s
+#   linux-j714s-27.2.patch (patches/j714s-27.2/linux 0001-0032, applied with `patch -Np1`; the 32 files
+#   applied one by one with `git am` give the same tree: git tree 674e3eeeeef7). Everything below is ours, K114s-only.
+#
+#   1. localversion.10-pkgrel   the file's content becomes  -17.v272-11-k114s-r3b  (no newline needed), so the
+#                               release is 7.3.0-17.v272-11-k114s-r3b-ARCH: not the running kernel's
+#                               7.3.0-17.v272-4-ARCH, not r3a's 7.3.0-17.v272-4-k114s-r3a-ARCH, and it still
+#                               ends in -ARCH (boot bundle discovery, update-m1n1).
+#   2. the patches below, with `git am`, in this order (agent-run: all apply, no fuzz)
+#   3. configuration: betizzel's v272-11 config + patches/linux/config/k114s-r3.config, then olddefconfig
+#
+# r3b replaces pr1568.patch (which no longer applies: 2 of 4 hunks fail on a5ebec5f) with the four commits
+# that are the same trackpad fix, cut on this base by their authors (aurora-silicon/linux #1737, #2011, #1568).
+# They are open drafts, not booted at these heads; drop each one when upstream merges it.
+r3b/0001-HID-dockchannel-hid-clamp-Report-Size-items-where-th.patch
+r3b/0002-HID-dockchannel-hid-pad-short-reports-to-the-clamped.patch
+r3b/0003-HID-magicmouse-drop-the-GD-Mouse-usages-on-dockchann.patch
+r3b/0004-HID-magicmouse-parse-the-0x5a-MTP-report-of-the-K114.patch
+# K114s-only, unchanged from r3a (needs only the K116 admission that the base already has).
+sound/0004-ASoC-apple-macaudio-Add-K114-with-the-speakers-off.patch
+# K114s-only, cut down from r3a's sleep-lid/0003 so that it applies without the K116s patches 0001 and 0002.
+r3b/0005-PCI-apple-qualify-the-K114s-for-suspend-to-idle-over.patch
+#
+# Decision for every other r3a patch (evidence in docs/r3b-kernel.md):
+#   in v272-11 (not carried):  sleep-lid/0008 (= v272-11 0028, #1789), sleep-lid/0009 (#1844, 41c359da81),
+#       display-gpu/0003-0006 (#1868; upstream's only_120hz_modes flag, same behaviour),
+#       display-gpu/0009, 0010, sound/0001, usb/0001 (reverse-apply cleanly)
+#   not needed on a K114s (not carried):  sleep-lid/0001, 0002 (K116s, #1647; 0002 only for a kernel-trained second port)
+#   T6050-generic, missing in v272-11, the K114s boot does not need them (not carried, send to betizzel):
+#       sleep-lid/0004, 0005, 0006 (#1688, eDP connector for apple,internal-panel), sleep-lid/0007 (#1615,
+#       battery manufacture_year), sound/0002 (tas2764 bus quiet), sound/0003 (i2c-pasemi NACK)

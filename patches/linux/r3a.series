@@ -14,7 +14,7 @@
 #
 # NOT in r3a: sleep-lid/0010 (788441e0, GPU mailboxes by interrupt only). The GPU Stage 2 trial that runs on this Mac
 # receives on those mailboxes by polling, and 0010 removes the polling for an interrupt never seen on a 14-inch T6050
-# (device-tree review, docs/r3-integration.md). It belongs to r3b, after the line is proven on a 0009-only kernel.
+# (device-tree review, docs/r3-integration.md). It belongs to the r3-gpu candidate, after the line is proven on a 0009-only kernel.
 #
 # Order: sleep-lid first (it carries #1688 and #1844, which r3/display-gpu also has: taken once, from here),
 # then the display driver's 120 Hz gate and bindings, then sound, then USB. Every patch applies cleanly

@@ -8,10 +8,10 @@
 #   - no file in common with an installed package of the other kernel (pacman -Qlq linux-aurora), only directories
 #   - the kernel inside vmlinuz carries the same release string
 # usage: check-package.sh PACKAGE.pkg.tar.zst [OTHER-KERNEL-PACKAGE=linux-aurora] [Module.symvers]
-# The symbol check needs the build's Module.symvers (default $K114S_BUILD_ROOT/build/r3a/Module.symvers); without it only plain depmod -a runs.
+# The symbol check needs the build's Module.symvers (default $K114S_BUILD_ROOT/build/${K114S_CAND:-r3a}/Module.symvers); without it only plain depmod -a runs.
 set -u
 pkg=${1:?usage: check-package.sh PACKAGE.pkg.tar.zst [other kernel package] [Module.symvers]}; other=${2:-linux-aurora}
-symvers=${3:-${K114S_BUILD_ROOT:-$HOME/k114s-build}/build/r3a/Module.symvers}
+symvers=${3:-${K114S_BUILD_ROOT:-$HOME/k114s-build}/build/${K114S_CAND:-r3a}/Module.symvers}
 here=$(cd "$(dirname "$0")" && pwd); w=$(mktemp -d); trap 'rm -rf "$w"' EXIT
 fail=0; ok() { echo "ok   $*"; }; no() { echo "FAIL $*"; fail=1; }
 bsdtar -xf "$pkg" -C "$w" || { echo "cannot unpack $pkg"; exit 2; }
@@ -30,9 +30,9 @@ fi
 [ -z "$(find "$w" -type l)" ] && ok "no symbolic links (no build/source)" || { no "symbolic links:"; find "$w" -type l; }
 diff <(ls "$m/dtbs") "$here/dtbs.list" >/dev/null && ok "dtbs are exactly dtbs.list ($(wc -l < "$here/dtbs.list"))" || no "dtbs differ from dtbs.list"
 [ -s "$m/dtbs/t6050-k114s.dtb" ] && ok "t6050-k114s.dtb present" || no "t6050-k114s.dtb missing"
-# The packaged tree is the kernel tree's own preliminary t6050-k114s.dts, not the r3a tree of dts/ (which the Stage 2 carries).
-# Printed so nobody takes it for the r3a tree: it lacks the N1, USB and SMC sensor nodes.
-echo "info packaged t6050-k114s.dtb sha256 $(sha256sum "$m/dtbs/t6050-k114s.dtb" | cut -c1-64) (the preliminary kernel tree, NOT the r3a tree 154568fe...)"
+# The packaged tree is the kernel tree's own preliminary t6050-k114s.dts, not a tree of dts/ (which the Stage 2 carries).
+# Printed so nobody takes it for an r3 tree: it lacks the N1, USB and SMC sensor nodes.
+echo "info packaged t6050-k114s.dtb sha256 $(sha256sum "$m/dtbs/t6050-k114s.dtb" | cut -c1-64) (the preliminary kernel tree, NOT an r3 tree from dts/)"
 bad=$(find "$m" -name '*.ko' -print0 | xargs -0 -n200 modinfo -F vermagic | grep -vc "^$rel ")
 total=$(find "$m" -name '*.ko' | wc -l)
 [ "$bad" = 0 ] && ok "$total modules, all with vermagic $rel" || no "$bad of $total modules have another vermagic"

@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: chrisohearn <137103567+chrisohearn@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 11:13:59 -0700
+Subject: [PATCH] PCI: apple: qualify the K114s for suspend-to-idle over the
+ adopted N1 link
+
+The adopted link's suspend check admits the J716c and the K114c. On a
+K114s (MacBook Pro 14-inch OLED, M5 Pro, Mac17,13) with the N1 described
+on port 0, every suspend-to-idle is therefore refused with -EBUSY from
+the host's noirq suspend.
+
+The K114s has the same T6050 host as the K114c and the K116s, the N1 on
+the port the boot loader trains, and in the macOS 27.2 (26B8125) Apple
+device trees its PCIe nodes are identical to the K116s's. It describes no
+second, kernel-trained port, so every device below the host must still be
+in D0, as on the J716c and the K114c. Let it through the same checks.
+
+This is the K114s-only half of sleep-lid/0001 to 0003 of r3a, cut to
+apply on the shared kernel series without the K116s changes (aurora-silicon/linux
+pull request 1647), which a K114s with no second port does not need.
+
+Compile-tested only (pcie-apple.o, clang 23, no warnings). Not yet run
+through a suspend on a K114s.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ drivers/pci/controller/pcie-apple.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/pci/controller/pcie-apple.c b/drivers/pci/controller/pcie-apple.c
+index b6c3b98af2..b28b9d1f4b 100644
+--- a/drivers/pci/controller/pcie-apple.c
++++ b/drivers/pci/controller/pcie-apple.c
+@@ -5819,9 +5819,16 @@ static int apple_pcie_check_adopted_s2idle(struct apple_pcie *pcie)
+ 	struct apple_pcie_port *port;
+ 	int error = 0;
+ 
+-	/* Other adopted platforms and deeper sleep remain unqualified. */
++	/*
++	 * Qualified on the J716c, the K114c and the K114s. The K114s is the
++	 * K114c's M5 Pro sibling: the same PCIe host and the N1 on the
++	 * loader-trained port 0, and no second port. It takes the same checks; it
++	 * has not been through a suspend on the hardware yet. Other adopted
++	 * platforms and deeper sleep remain unqualified.
++	 */
+ 	if (!(of_machine_is_compatible("apple,j716c") ||
+-	      of_machine_is_compatible("apple,k114c")) || !pm_suspend_no_platform())
++	      of_machine_is_compatible("apple,k114c") ||
++	      of_machine_is_compatible("apple,k114s")) || !pm_suspend_no_platform())
+ 		return -EBUSY;
+ 
+ 	if (!(readl(pcie->base + CORE_RC_CTL) & CORE_RC_CTL_RUN) ||

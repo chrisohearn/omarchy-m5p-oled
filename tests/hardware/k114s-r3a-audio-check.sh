@@ -50,7 +50,7 @@ irqs() { awk '/cs42l84/ {s+=$2} END {print s+0}' /proc/interrupts 2>/dev/null; }
 echo "== K114s r3a audio and Bluetooth check, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "== 1. kernel and tree"
 rel=$(uname -r)
-case $rel in *k114s-r3a-ARCH) ok "running kernel $rel" ;; *) bad "running kernel is $rel, not the r3a kernel: stop here, the rest is meaningless"; nospk ;; esac
+case $rel in *k114s-r3[ab]-ARCH) ok "running kernel $rel" ;; *) bad "running kernel is $rel, not an r3a or r3b kernel: stop here, the rest is meaningless"; nospk ;; esac
 trial=$(tr -d '\0' < /proc/device-tree/chosen/aurora,trial 2>/dev/null)
 info "Stage 2: ${trial:-the configured m1n1/boot-ctxr.bin}"
 tc=/usr/local/lib/omarchy-k114s/audio/tree-check; [ -x "$tc" ] || tc=$here/linux/audio/tree-check

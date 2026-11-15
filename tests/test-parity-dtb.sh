@@ -1,10 +1,11 @@
 #!/bin/bash
-# Software tests for the three disabled draft fragments (video decode, SD reader, AOP sensors).
+# Software tests for the five disabled draft fragments (video decode, SD reader, AOP sensors, fan manual control, fast-die).
 # Replica and compile tests only: nothing here is hardware proof and nothing here touches the Mac.
 #
 #   tests/test-parity-dtb.sh KTREE [--real]
 #
-# KTREE   a kernel tree at the installed base (aurora-silicon/linux a34d26c2 + linux-j714s-27.2.patch);
+# KTREE   a kernel tree with the J714s nodes the fragments rely on: src/r3b (v272-11, docs/r3b-kernel.md) for all five
+#         (the first three also build on the older base, aurora-silicon/linux a34d26c2 + linux-j714s-27.2.patch);
 #         it is only read. KEEP=DIR keeps the compiled trees there. Needs python3, a C preprocessor (CPP, default "clang -E") and dtc (DTC).
 # --real  also compare the trees with THIS Mac's ADT (tests/k114s-adt-parity-facts.py). Reading
 #         /dev/mtd*ro takes root, so this one read-only step runs under sudo; nothing is written.
@@ -37,7 +38,7 @@ frag() { printf '%s\n#include "t6050-k114s-%s.dtsi"\n' "$head" "$1"; }
 on()   { printf '%s\n#define %s\n#include "t6050-k114s-%s.dtsi"\n' "$head" "$2" "$1"; }
 
 build r1 "$head"
-for f in avd:K114S_R3_AVD sd:K114S_R3_SD aop-sensors:K114S_R3_AOP_SENSORS; do
+for f in avd:K114S_R3_AVD sd:K114S_R3_SD aop-sensors:K114S_R3_AOP_SENSORS fan:K114S_R3B_FAN_MANUAL fast-die:K114S_R3B_FAST_DIE; do
   n=${f%%:*}; m=${f##*:}
   build "off-$n" "$(frag "$n")"
   if cmp -s "$W/r1.dtb" "$W/off-$n.dtb"; then echo "ok   $n: without $m the tree is byte-identical to r1"
