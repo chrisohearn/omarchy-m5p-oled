@@ -5,7 +5,7 @@ user-space scripts that this machine needs before Omarchy ships them. Each one i
 change that is still open, kept here as a patch with its authorship (see `NOTICE.md`).
 
 The Omarchy package (`omarchy`, or `omarchy-dev` on the Edge channel) owns most of
-`/usr/bin/omarchy-*`, and every update replaces those files. So a fix made by hand there is silently lost on the next
+`/usr/bin/omarchy-*`, and `omarchy-mac` (the Apple Silicon platform data and audio rules) owns a few files that patches 0003 and 0004 change, and every update replaces those files. So a fix made by hand there is silently lost on the next
 `omarchy update`. A pacman hook puts the patches back after every transaction that installs or
 upgrades the package, and stops reapplying them once they no longer fit.
 
@@ -38,7 +38,7 @@ Omarchy does not depend on. Without it, the installer refuses and the hook write
 Script patches take effect on the next run. A patch to the shell's QML (such as 0002) is not
 picked up by the running bar: run `omarchy-restart-shell` once after installing or after an update.
 
-A patch may only change files the `omarchy` or `omarchy-dev` package installed (the two the hook
+A patch may only change files the `omarchy`, `omarchy-dev` or `omarchy-mac` package installed (the three the hook
 watches), as recorded in the package database. The installer refuses one that creates or deletes a
 file (a file it created could later collide with one Omarchy ships and stop an update) or that changes
 a file neither package installed, such as one of `omarchy-settings-dev`'s.
@@ -86,8 +86,11 @@ the wanted set goes back on from the bottom up.
 | --- | --- | --- | --- |
 | `0001-claude-account-by-user-and-organization.patch` | The agents panel keys a Claude account by the claude.ai user alone. One user who belongs to two organizations (a personal plan and a Team) cannot add the second one ("That's Main ..., sign in as the other account"), and both would share one usage cache. The patch keys the account by user and organization in the account registry, the account copy and the Claude usage cache. | [omacom/omarchy#18681](https://github.com/omacom/omarchy/pull/18681) (head `0d6d7c27a790`), carrying [#16144](https://github.com/omacom/omarchy/pull/16144) onto `quattro` | open upstream; applied here 2026-11-14 |
 | `0002-agents-panel-room-left-pace-and-model-rows.patch` | Local preference, not an upstream fix. In the agents panel every limit meter reads as room left (it drains), as T3 Code's usage view does, so Claude's and Codex's bars move the same way. A hairline marks even pace (the share of the window's time left), and the tooltip says ahead of, on or under pace within 5 points. A model-scoped window such as Fable Weekly gets its own row instead of a tick on the Weekly bar. The usage records still hold the share used. | none (this machine's choice) | applied here 2026-11-15 |
+| `0003-omarchy-mac-k114s-display-cutout.patch` | The bar has no notch floor on the K114s: omarchy-mac's `display-cutouts.json` has no 3024x1986 entry. Two lines: `eDP` (for upstream) and `Unknown-1` (local only: the boot framebuffer's name). `top = 96` is derived, not measured. | to be sent to omacom/omarchy-mac-pkgs ([draft](platform-data.md#upstream-draft-omacomomarchy-mac-pkgs)) | written 2026-11-15, not installed |
+| `0004-omarchy-mac-k-board-audio-names.patch` | The M5 MacBook Pros are K boards (`AppleK114`, `effect_output.k114-mic`), so omarchy-mac's jNNN patterns miss them: the stereo microphone mapper, `audio.json`, the microphone name and the no-suspend rule. | same draft | written 2026-11-15, not installed |
 
-Tests: `tests/linux/test-omarchy-patches.sh linux [OMARCHY_SRC]` runs the mechanism in a fake
+Tests: `tests/test-platform-data.sh` runs 0003 and 0004 through the installer in a fake root and checks the K114s names against them (docs/platform-data.md).
+`tests/linux/test-omarchy-patches.sh linux [OMARCHY_SRC]` runs the mechanism in a fake
 root. With `OMARCHY_SRC`, an omacom/omarchy checkout at the installed revision, it also checks that
 each real patch applies to it without fuzz and comes out again byte for byte. For 0001 against
 `9ac0883` (the Edge build `4.0.0.r7859.g9ac0883`), the pull request's own tests
