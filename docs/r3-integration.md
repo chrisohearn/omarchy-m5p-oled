@@ -590,8 +590,11 @@ re-arms the GPU trial for the next boot, which returns the Mac to the standing s
           echo "STOP: linux-k114s was not removed; the request is cleared and aura-try is spent, nothing else changed. Run Z again"; exit 1; }
     fi
     sudo rm /etc/omarchy-k114s/allow-low-esp
-    # the update-m1n1 setting from before the install (D2's copy) when there is one: D4 may never have run
-    if [ -f /var/lib/k114s-recovery/update-m1n1.before-r3a ]; then sudo cp -p /var/lib/k114s-recovery/update-m1n1.before-r3a /etc/default/update-m1n1
+    # D2's copy when D2's line is still in force (D4 never ran), else the file as it was when Z started
+    if [ -f /var/lib/k114s-recovery/update-m1n1.before-r3a ] &&
+       [ "$(grep -v -x 'export M1N1_UPDATE_DISABLED=1' /var/lib/k114s-recovery/update-m1n1.before-undo)" = "$(cat /var/lib/k114s-recovery/update-m1n1.before-r3a)" ] &&
+       [ "$(tail -n1 /var/lib/k114s-recovery/update-m1n1.before-undo)" = 'export M1N1_UPDATE_DISABLED=1' ]; then
+      sudo cp -p /var/lib/k114s-recovery/update-m1n1.before-r3a /etc/default/update-m1n1
     else sudo cp -p /var/lib/k114s-recovery/update-m1n1.before-undo /etc/default/update-m1n1; fi
     sudo cp -p /var/lib/k114s-recovery/uki/omarchy_linux-aurora.efi /boot/efi/EFI/Linux/omarchy_linux-aurora.efi
     # the repair image too, if step D1 (limine-entry-tool) removed or changed it
