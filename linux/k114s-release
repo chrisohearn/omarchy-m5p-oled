@@ -25,7 +25,7 @@
 #  - Only a package whose channel build passes release-criteria.conf (k114s-release-check, run
 #    fresh as root) is released, and only at the version and SHA-256 that passed: the archive the check verified is what is
 #    installed (pacman -U of that file, after its SHA-256 is compared with the verdict again and its detached
-#    signature is verified against pacman's keyring, the check pacman -S would have made).
+#    signature is verified with gpg on pacman's keyring at full trust, the check pacman -S would have made).
 #  - A rollback set is written first: the installed package rebuilt into an archive, /boot and
 #    the ESP boot files with hashes (k114s-recovery-set). No set, no release.
 #  - The hold guard lets exactly this transaction through (a permit naming its packages).
@@ -76,11 +76,21 @@ PLAN_SOURCE=channel
 declare -A PLAN_VERSION=() PLAN_CLASS=() PLAN_FILE=()
 
 log() { mkdir -p "$STATE"; echo "$(now) $*" >> "$STATE/log"; say "$*"; }
-# The archive is installed with pacman -U, and pacman -U goes by LocalFileSigLevel (Optional here), so the
-# signature check that pacman -S would make is made here: the channel's detached signature (FILE.sig, fetched by
-# the check next to the archive) must verify against pacman's own keyring at full trust, as pacman -S requires.
-SIGCHECK=${K114S_SIGCHECK:-pacman-key --verify}
-signed_ok() { [[ -f $1.sig ]] && $SIGCHECK "$1.sig" "$1" >/dev/null 2>&1; }   # word splitting of SIGCHECK is meant
+# The archive is installed with pacman -U, and pacman -U goes by LocalFileSigLevel (Optional here): it checks FILE.sig
+# when one lies beside the archive and accepts an unsigned file. So the signature pacman -S would require is required
+# here: FILE.sig (fetched by the check) must exist and gpg, on pacman's own keyring, must report a valid signature from a
+# key at full or ultimate trust. pacman-key --verify is not used: it does not fail on an untrusted key.
+# K114S_SIGCHECK replaces the verifier only in the test sandboxes (K114S_TEST or a fake K114S_ROOT).
+signed_ok() {
+  local status
+  [[ -s $1.sig ]] || return 1
+  if [[ -n ${K114S_SIGCHECK:-} && -n ${K114S_TEST:-}${K114S_ROOT:-} ]]; then
+    $K114S_SIGCHECK "$1.sig" "$1" >/dev/null 2>&1; return    # word splitting is meant
+  fi
+  status=$(LC_ALL=C gpg --homedir "$ROOT/etc/pacman.d/gnupg" --no-permission-warning --batch --no-tty --no-auto-key-retrieve \
+    --status-fd 1 --verify "$1.sig" "$1" 2>/dev/null) || return 1
+  grep -q '^\[GNUPG:\] VALIDSIG ' <<< "$status" && grep -qE '^\[GNUPG:\] TRUST_(FULLY|ULTIMATE)' <<< "$status"
+}
 note() { summary+=("$*"); log "$*"; }
 run_pacman() { # a transaction runs its boot hooks (limine-entry-tool takes the boot-partition lock itself), so this process lets go of the lock meanwhile
   local status=0 transaction=0

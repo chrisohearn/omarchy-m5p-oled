@@ -81,6 +81,7 @@ fetch() { # make the channel's package available unpacked; sets $unpacked, or $f
       curl -fsSL --proto '=https,http' --retry 2 --max-time 900 -o "$file.part" "$url" 2> "$cache/download.log" ||
         { fetch_error="download failed: ${url##*/}"; rm -f "$file.part"; return 0; }
       mv -f "$file.part" "$file"
+      rm -f "$file.sig"     # a new archive: the signature of the old one must not stay beside it
     fi
   fi
   [[ -f $file && $(sum "$file") == "$want" ]] || { fetch_error="${file##*/} does not match the repository list's SHA-256"; return 0; }
@@ -88,6 +89,9 @@ fetch() { # make the channel's package available unpacked; sets $unpacked, or $f
   if [[ $url != file://* && ! -s $file.sig ]]; then
     curl -fsSL --proto '=https,http' --retry 2 --max-time 120 -o "$file.sig.part" "$url.sig" 2>> "$cache/download.log" && mv -f "$file.sig.part" "$file.sig" || rm -f "$file.sig.part"
   fi
+  # a binary OpenPGP signature starts with a packet tag byte (0x88, 0x89 or 0xc2); anything else (an HTML page from a
+  # portal, an armored file) is dropped so that the next check fetches it again instead of failing on it for good
+  if [[ $url != file://* && -s $file.sig ]] && ! od -An -tx1 -N1 "$file.sig" | grep -qE '^ *(88|89|c2)$'; then rm -f "$file.sig"; fi
   package_file=$file
   rm -rf "${cache:?}/x/$package"; mkdir -p "$cache/x/$package"
   # Unpack only: no scriptlet runs, no ownership or special permissions are taken from the archive.

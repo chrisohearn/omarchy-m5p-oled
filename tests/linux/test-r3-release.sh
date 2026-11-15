@@ -389,4 +389,30 @@ ok "boot-success timer: a minute after boot, then every ten minutes until the bo
 ok "holds path unit watches pacman.conf" "$(grep -c -E '^PathChanged=/etc/pacman.conf$|^Unit=k114s-holds.service$' "$L/k114s-holds.path")" 2
 ok "no unit, hook or script of the tooling can restart the machine" "$(for f in "$L"/k114s-* "$L"/hooks/* "$L"/*.hook "$L"/*.service "$L"/*.timer "$L"/*.path; do grep -v '^[[:space:]]*#' "$f" | grep -q -E '\b(reboot|shutdown|kexec|poweroff|halt)\b' && echo "$f"; done | wc -l | tr -d ' ')" 0
 
+# --- the signature check itself (the real gpg path, on a throwaway keyring standing in for pacman's) -------------------------
+if have gpg; then
+  sr=$BASE/sigroot; g=$sr/etc/pacman.d/gnupg; mkdir -p "$g"; chmod 700 "$g"
+  G() { gpg --homedir "$g" --batch --no-tty --quiet "$@" 2>/dev/null; }
+  G --passphrase '' --quick-gen-key 'K114s test signer <signer@example.invalid>' ed25519 sign never
+  G --passphrase '' --quick-gen-key 'K114s stranger <stranger@example.invalid>' ed25519 sign never
+  fpr() { G --with-colons --list-keys "$1" | awk -F: '$1 == "fpr" { print $10; exit }'; }
+  printf '%s:6:\n' "$(fpr signer@example.invalid)" | G --import-ownertrust     # ultimate, as a pacman master key's signed key ends up
+  printf '%s:2:\n' "$(fpr stranger@example.invalid)" | G --import-ownertrust   # in the keyring, trust undefined
+  a=$sr/pkg.tar.zst; echo archive > "$a"
+  eval "$(sed -n '/^signed_ok() {/,/^}/p' "$L/k114s-release")"
+  ROOT=$sr; unset K114S_SIGCHECK K114S_TEST K114S_ROOT
+  G --local-user signer@example.invalid --detach-sign -o "$a.sig" "$a"
+  ok "signature: a valid signature by a fully trusted key passes" "$(signed_ok "$a"; status)" 0
+  rm -f "$a.sig"; ok "signature: a missing .sig is refused" "$(signed_ok "$a"; status)" 1
+  : > "$a.sig"; ok "signature: an empty .sig is refused" "$(signed_ok "$a"; status)" 1
+  G --local-user stranger@example.invalid --detach-sign -o "$a.sig.new" "$a"; mv -f "$a.sig.new" "$a.sig"
+  ok "signature: a valid signature by a key in the keyring that is not trusted is refused (pacman-key --verify would pass it)" "$(signed_ok "$a"; status)" 1
+  G --local-user signer@example.invalid --detach-sign -o "$a.sig.new" "$a"; mv -f "$a.sig.new" "$a.sig"; echo changed >> "$a"
+  ok "signature: an archive changed after signing is refused" "$(signed_ok "$a"; status)" 1
+  K114S_SIGCHECK=true; ok "signature: K114S_SIGCHECK is ignored outside the test sandboxes" "$(signed_ok "$a"; status)" 1
+  unset K114S_SIGCHECK; ROOT=
+else
+  echo "SKIP signature check (no gpg)"
+fi
+
 finish "r3 release tests"
