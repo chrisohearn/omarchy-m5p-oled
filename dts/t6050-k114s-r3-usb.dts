@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s candidate r3, USB-C: r1 (N1, two USB-C host ports, SMC sensors) with the r3 USB file
+ * included and none of its sections on. It compiles to the same tree as t6050-k114s-r1.dts:
+ * the USB host ports need no device-tree change (docs/r3-usb.md). Kept as the name r3 builds on.
+ */
+#define K114S_R1_N1
+#define K114S_R1_USB
+#include "t6050-k114s-common.dtsi"
+#include "t6050-k114s-usb.dtsi"
