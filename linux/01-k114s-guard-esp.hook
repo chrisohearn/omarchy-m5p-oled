@@ -1,0 +1,82 @@
+# K114s (omarchy-m5p-oled) r3: is there room on the EFI partition for what this transaction writes?
+#
+# The triggers are every trigger of every hook that can rewrite a boot file on this system (the
+# initramfs and boot image, m1n1 Stage 2, Limine), read from /usr/share/libalpm/hooks and
+# /etc/pacman.d/hooks on 2026-11-14. pacman matches them against the old and the new file list of
+# every package in the transaction, so a transaction that cannot reach the EFI partition does not
+# run this hook at all and is never stopped for space. "k114s-guard audit" compares this list with
+# the hooks present; if a hook appears with a trigger not named here, every install is checked.
+[Trigger]
+Type = Path
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Target = usr/lib/modules/*/vmlinuz
+Target = usr/lib/modules/*/modules.builtin
+Target = usr/lib/modules/*/pkgbase
+Target = usr/lib/modules/*/extramodules/
+Target = usr/lib/modules/*/dtbs/*
+Target = usr/lib/asahi-boot/*
+Target = usr/lib/asahi-boot-*/*
+Target = usr/lib/omarchy-mac-boot/dtb-overlays/*/*.dtbo
+Target = usr/lib/initcpio/*
+Target = usr/lib/initcpio/install/*
+Target = etc/initcpio/install/*
+Target = usr/lib/omarchy/initcpio/*
+Target = etc/mkinitcpio.conf
+Target = etc/mkinitcpio.conf.d/*
+Target = etc/mkinitcpio.conf.d/90-omarchy-mac.conf
+Target = etc/mkinitcpio.conf.d/91-omarchy-mac-encrypt.conf
+Target = etc/mkinitcpio.conf.d/92-omarchy-mac-hid.conf
+Target = etc/mkinitcpio.conf.d/92-omarchy-mac-kbd-backlight.conf
+Target = etc/mkinitcpio.conf.d/92-omarchy-mac-pmp.conf
+Target = etc/mkinitcpio.conf.d/93-omarchy-mac-plymouth.conf
+Target = etc/mkinitcpio.conf.d/94-omarchy-mac-vconsole.conf
+Target = etc/mkinitcpio.d/*
+Target = usr/lib/udev/rules.d/90-omarchy-mac-kbd-backlight.rules
+Target = usr/lib/firmware/*
+Target = boot/dtbs/*
+Target = usr/lib/systemd/boot/hwids/*
+Target = usr/lib/systemd/boot/efi/*
+Target = usr/src/*/dkms.conf
+Target = usr/lib/systemd/systemd
+Target = usr/lib/systemd/systemd-udevd
+Target = usr/bin/cryptsetup
+Target = usr/bin/lvm
+Target = usr/bin/mdadm
+Target = usr/bin/pdata_tools
+Target = usr/lib/libcryptsetup.so
+Target = usr/lib/libp11-kit.so
+Target = usr/lib/libpcsclite.so
+Target = usr/lib/modprobe.d/
+Target = usr/share/limine/*
+Target = usr/share/limine/BOOTAA64.EFI
+Target = usr/share/libalpm/hooks/*
+Target = usr/share/libalpm/scripts/*
+Target = etc/pacman.d/hooks/*
+
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Target = mkinitcpio
+Target = mkinitcpio-git
+Target = limine
+Target = limine-git
+Target = limine-dev
+Target = limine-mkinitcpio-hook
+Target = limine-mkinitcpio-hook-git
+Target = linux-aurora
+Target = m1n1-aurora
+Target = uboot-aurora
+Target = omarchy-mac-boot
+Target = omarchy-aurora-firmware
+Target = asahi-scripts
+
+[Action]
+Description = K114s: checking free space on the EFI partition for this transaction's boot files...
+When = PreTransaction
+Exec = /usr/local/lib/omarchy-k114s/k114s-guard esp
+AbortOnFail
+NeedsTargets

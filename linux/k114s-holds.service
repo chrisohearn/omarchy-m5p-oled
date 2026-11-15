@@ -1,0 +1,13 @@
+# K114s (omarchy-m5p-oled) r3: write the package holds into /etc/pacman.conf (k114s-holds apply).
+[Unit]
+Description=K114s: keep the package holds in /etc/pacman.conf
+ConditionPathExists=/usr/local/lib/omarchy-k114s/k114s-holds
+StartLimitIntervalSec=10
+StartLimitBurst=20
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/omarchy-k114s/k114s-holds apply
+
+[Install]
+WantedBy=multi-user.target

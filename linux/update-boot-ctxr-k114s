@@ -9,6 +9,7 @@
 #
 # To go back to the packaged K114s device tree once upstream carries the fixes:
 #   touch /usr/local/lib/omarchy-k114s/use-packaged-dtb
+# (r3: "k114s-release stage2 --dtb packaged" does this as a recorded, reversible step.)
 set -eu
 root=${OMARCHY_ROOT:-}
 esp=$root/boot/efi/m1n1
@@ -23,6 +24,15 @@ m1n1=$root/usr/lib/asahi-boot/m1n1.bin
 fail() { echo "update-boot-ctxr-k114s: $*; boot-ctxr.bin left as it was" >&2; exit 1; }
 be32() { od -An -tu1 -j "$2" -N 4 "$1" | awk '{print (($1*256+$2)*256+$3)*256+$4}'; }
 magic() { od -An -tx1 -j "$2" -N 4 "$1" | tr -d ' \n'; }
+
+# r3: while a new kernel or loader package is on trial, the proven Stage 2 must stay byte for byte
+# (it is shared by every boot entry). k114s-release writes this marker before the transaction
+# and removes it when the Stage 2 switch is made on purpose (k114s-release stage2).
+frozen=$root/etc/omarchy-k114s/stage2-frozen
+if [ -e "$frozen" ] && [ -s "$esp/boot-ctxr.bin" ]; then
+  echo "update-boot-ctxr-k114s: Stage 2 is frozen ($frozen exists); m1n1/boot-ctxr.bin left as it is"
+  exit 0
+fi
 
 [ -s "$boot" ] || fail "$boot is missing; is the ESP mounted?"
 # Refuse to write to an ESP this boot did not come from (another Omarchy image on a visible disk

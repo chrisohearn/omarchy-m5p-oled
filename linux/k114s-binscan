@@ -1,0 +1,83 @@
+#!/usr/bin/python3 -I
+# K114s (omarchy-m5p-oled): does AArch64 code in FILE use a given 16-bit constant? Read-only.
+#
+#   k114s-binscan FILE imm16 0x0361      prints the number of instructions found
+#   exit 0 at least one; 1 none; 2 the file could not be read
+#
+# The release check asks this of hid-magicmouse.ko: the trackpad fix that came from the K116s is
+# gated on the product id, and the K114s reports 0x0361. A driver that handles it compares with
+# or loads that constant. This looks for the ways a compiler writes that:
+#   cmp  wN, #imm      (subs wzr/xzr)      sub wD, wN, #imm   (range checks: x - imm < n)
+#   movz wD, #imm      (then a register compare, or a table initialiser built in code)
+# and for the constant as a little-endian 16/32-bit word in a read-only data section of an ELF
+# file (a product-id table). Evidence, not proof: the release of a kernel is staged and tried
+# as an extra boot entry whatever this says.
+import struct
+import sys
+
+
+def exec_and_data(blob):
+    """-> (code ranges, read-only data ranges); the whole file as code when it is not ELF64 LE."""
+    if blob[:6] != b"\x7fELF\x02\x01":
+        return [(0, len(blob))], []
+    shoff, = struct.unpack_from("<Q", blob, 0x28)
+    shentsize, shnum = struct.unpack_from("<HH", blob, 0x3A)
+    code, data = [], []
+    for i in range(shnum):
+        base = shoff + i * shentsize
+        if base + 64 > len(blob):
+            break
+        _name, kind, flags, _addr, offset, size = struct.unpack_from("<IIQQQQ", blob, base)
+        if kind != 1 or offset + size > len(blob):      # SHT_PROGBITS only
+            continue
+        if flags & 0x4:                                    # SHF_EXECINSTR
+            code.append((offset, offset + size))
+        elif flags & 0x2 and not flags & 0x1:              # SHF_ALLOC, not SHF_WRITE
+            data.append((offset, offset + size))
+    return code or [(0, len(blob))], data
+
+
+def scan(blob, want):
+    code, data = exec_and_data(blob)
+    hits = 0
+    for start, end in code:
+        start = (start + 3) & ~3
+        for (word,) in struct.iter_unpack("<I", blob[start:start + ((end - start) & ~3)]):
+            top = word & 0x7FC00000                         # sf ignored, shift must be 0
+            if top in (0x71000000, 0x51000000) and want <= 0xFFF and (word >> 10) & 0xFFF == want:
+                hits += 1                                   # subs/cmp, sub with a 12-bit immediate
+            elif word & 0x7FE00000 == 0x52800000 and (word >> 5) & 0xFFFF == want:
+                hits += 1                                   # movz, hw = 0
+    table = 0
+    for start, end in data:
+        section = blob[start:end]
+        for width, fmt in ((2, "<H"), (4, "<I")):
+            needle = struct.pack(fmt, want)
+            at = section.find(needle)
+            while at != -1:
+                if at % width == 0:
+                    table += 1
+                at = section.find(needle, at + 1)
+    return hits, table
+
+
+def main(argv):
+    if len(argv) != 4 or argv[2] != "imm16":
+        sys.stderr.write("usage: k114s-binscan FILE imm16 0xNNNN\n")
+        return 2
+    try:
+        want = int(argv[3], 16)
+        with open(argv[1], "rb") as handle:
+            blob = handle.read(256 << 20)
+    except (OSError, ValueError) as error:
+        sys.stderr.write("k114s-binscan: %s\n" % error)
+        return 2
+    if not 0 < want <= 0xFFFF:
+        return 2
+    hits, table = scan(blob, want)
+    print("%d instruction(s), %d read-only table word(s) with %#06x" % (hits, table, want))
+    return 0 if hits else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

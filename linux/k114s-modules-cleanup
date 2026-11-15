@@ -1,0 +1,31 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled) r3: linux-modules-cleanup, with a keep list.
+#
+# kernel-modules-hook's service moves every /usr/lib/modules/<release> that is neither the
+# running kernel's nor a package's to /usr/lib/modules/.old at boot. While a new kernel is on
+# trial, the proven kernel's modules belong to no package any more; booting the new kernel once
+# would move them away and the proven boot entry would come up without modules (no Wi-Fi, no
+# trackpad). Releases named in /etc/omarchy-k114s/keep-modules stay. k114s-release writes that
+# file when a kernel trial starts and empties it when the old kernel is retired.
+# The drop-in linux-modules-cleanup.service.d/k114s-keep.conf runs this instead of the original
+# command; without a keep file it does exactly what the original does.
+# The loop is the ExecStart line of linux-modules-cleanup.service from kernel-modules-hook 0.1.7
+# (saber-nyan, https://github.com/saber-nyan/kernel-modules-hook, The Unlicense), written out,
+# with the keep list added.
+set -u
+root=${K114S_ROOT:-}
+keep=$root/etc/omarchy-k114s/keep-modules
+running=${K114S_UNAME_R:-$(uname -r)}
+for dir in "$root"/usr/lib/modules/[0-9]*; do
+  [ -d "$dir" ] || continue
+  release=${dir##*/}
+  [ "$release" = "$running" ] && continue
+  if [ -f "$keep" ] && grep -Fxq -- "$release" "$keep"; then
+    echo "k114s-modules-cleanup: keeping $release (proven kernel while another is on trial)"
+    continue
+  fi
+  ${K114S_PACMAN:-pacman} -Qo "$dir" >/dev/null 2>&1 && continue
+  mkdir -p "$root/usr/lib/modules/.old"
+  rsync -AHXal "$dir" "$root/usr/lib/modules/.old/" && rm -rf -- "$dir"
+done
+exit 0

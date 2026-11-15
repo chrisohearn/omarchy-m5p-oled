@@ -1,0 +1,325 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled) r3: does the channel now carry a K114s-fit build of a held package?
+#
+#     k114s-release-check                    every held package that has criteria
+#     k114s-release-check --packages "a b"   only these
+#     k114s-release-check --full             evaluate every check even when the version is not newer
+#     k114s-release-check --accept-manual    a "manual" criterion counts as decided by the person running this
+#     k114s-release-check --cache DIR --no-refresh --keep-unpacked --quiet
+#
+# Read-only for the system: it refreshes the repository lists into a PRIVATE copy of the package
+# database, downloads the channel's package into a PRIVATE cache (or reads it from pacman's cache
+# when it is already there), checks its SHA-256 against the repository list, unpacks it there and
+# evaluates release-criteria.conf against the files. Nothing is installed, pacman's own database
+# and cache are not written, and nothing from the package is executed. It needs no root (it then
+# uses fakeroot for the private list refresh, as checkupdates does); as root it works the same.
+#
+# Output: a summary on stdout, and in the cache folder
+#   verdict.tsv   NAME CLASS VERDICT INSTALLED CHANNEL REPO SHA256 FILE   (tab-separated, one per package)
+#   checks.tsv    NAME LABEL TYPE RESULT DETAIL
+#   verdict.json  both, for other tools
+# VERDICT: fixed | not-fixed | absent (the channel has no package of that name) |
+#          no-criteria (held, but release-criteria.conf does not describe it) | error
+#   exit 0 ran, nothing to release; 10 ran, at least one package is fixed; 2 could not run
+set -euo pipefail
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=k114s-lib.sh
+. "${K114S_LIB_SH:-$HERE/k114s-lib.sh}"
+
+only= cache= refresh=1 full=0 keep=0 quiet=0 accept_manual=0
+while (($#)); do
+  case $1 in
+    --packages) only=${2?}; shift 2 ;;
+    --cache) cache=${2:?}; shift 2 ;;
+    --no-refresh) refresh=0; shift ;;
+    --full) full=1; shift ;;
+    --accept-manual) accept_manual=1; shift ;;
+    --keep-unpacked) keep=1; shift ;;
+    --quiet) quiet=1; shift ;;
+    *) warn "unknown argument $1"; exit 2 ;;
+  esac
+done
+if [[ -z $cache ]]; then
+  if [[ $(id -u) == 0 || -n ${K114S_ROOT:-} ]]; then cache=$VAR/check; else cache=${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-k114s/check; fi
+fi
+criteria=${K114S_CRITERIA:-$(data_file release-criteria.conf)}
+[[ -f $criteria ]] || { warn "$criteria is missing"; exit 2; }
+out() { ((quiet)) || echo "$*"; }
+
+mkdir -p "$cache/db" "$cache/pkg" "$cache/x"
+chmod 700 "$cache" 2>/dev/null || true
+ln -sfn "$DBPATH/local" "$cache/db/local"
+private=(--config "$PACCONF" --dbpath "$cache/db" --cachedir "$cache/pkg" --logfile /dev/null)
+if ((refresh)); then
+  if [[ $(id -u) == 0 ]]; then
+    "$PACMAN" -Syy "${private[@]}" > "$cache/refresh.log" 2>&1 || { warn "could not refresh the repository lists (network?): $(tail -n 2 "$cache/refresh.log" | tr '\n' ' ')"; exit 2; }
+  else
+    command -v fakeroot >/dev/null || { warn "fakeroot is needed to refresh the repository lists without root; run with sudo instead"; exit 2; }
+    fakeroot -- "$PACMAN" -Syy --disable-sandbox "${private[@]}" > "$cache/refresh.log" 2>&1 || { warn "could not refresh the repository lists (network?): $(tail -n 2 "$cache/refresh.log" | tr '\n' ' ')"; exit 2; }
+  fi
+fi
+
+class_of() { awk -v p="$1" '$1 == "package" && $2 == p { print $3; exit }' "$criteria"; }
+held=$(held_names)
+if [[ -n $only ]]; then wanted=$(printf '%s\n' $only | LC_ALL=C sort -u); else wanted=$held; fi
+
+: > "$cache/verdict.tsv.new"; : > "$cache/checks.tsv.new"
+record() { printf '%s\t%s\t%s\t%s\t%s\n' "$package" "$1" "$2" "$3" "$4" >> "$cache/checks.tsv.new"; }   # LABEL TYPE RESULT DETAIL
+unpacked=            # the folder the current package is unpacked in, once needed
+fetch_error=
+fetch() { # make the channel's package available unpacked; sets $unpacked, or $fetch_error
+  [[ -z $unpacked && -z $fetch_error ]] || return 0
+  local want file url=$location
+  want=$(bsdtar -xOf "$cache/db/sync/$repo.db" "$package-$channel/desc" 2>/dev/null | awk '/^%SHA256SUM%$/ { getline; print; exit }')
+  [[ $want =~ ^[0-9a-f]{64}$ ]] || { fetch_error="the repository list has no SHA-256 for $package $channel"; return 0; }
+  sha=$want
+  if [[ $url == file://* ]]; then
+    file=${url#file://}
+  else
+    file=$cache/pkg/${url##*/}
+    if [[ ! -f $file || $(sum "$file") != "$want" ]]; then
+      curl -fsSL --proto '=https,http' --retry 2 --max-time 900 -o "$file.part" "$url" 2> "$cache/download.log" ||
+        { fetch_error="download failed: ${url##*/}"; rm -f "$file.part"; return 0; }
+      mv -f "$file.part" "$file"
+    fi
+  fi
+  [[ -f $file && $(sum "$file") == "$want" ]] || { fetch_error="${file##*/} does not match the repository list's SHA-256"; return 0; }
+  package_file=$file
+  rm -rf "${cache:?}/x/$package"; mkdir -p "$cache/x/$package"
+  # Unpack only: no scriptlet runs, no ownership or special permissions are taken from the archive.
+  bsdtar -xf "$file" -C "$cache/x/$package" --no-same-owner --no-same-permissions 2>/dev/null ||
+    { fetch_error="could not unpack ${file##*/}"; return 0; }
+  chmod -R u+rwX "$cache/x/$package" 2>/dev/null || true
+  unpacked=$cache/x/$package
+}
+first_match() { # the first file in the unpacked package matching GLOB (plain name: decompressed if needed)
+  local match matches
+  set +f                      # the caller runs with globbing off; this is the one place a glob is meant
+  # shellcheck disable=SC2206
+  matches=("$unpacked"/$1)
+  set -f
+  for match in "${matches[@]}"; do
+    [[ -e $match ]] || continue
+    case $match in
+      *.zst) zstd -dqf "$match" -o "$cache/x/$package.plain" && echo "$cache/x/$package.plain" ;;
+      *.xz) xz -dc "$match" > "$cache/x/$package.plain" && echo "$cache/x/$package.plain" ;;
+      *.gz) gzip -dc "$match" > "$cache/x/$package.plain" && echo "$cache/x/$package.plain" ;;
+      *) echo "$match" ;;
+    esac
+    return 0
+  done
+  return 1
+}
+image_config() { # the configuration built into a kernel image, on stdout
+  local image=$1 raw=$cache/x/$package.image offset
+  if [[ $(od -An -c -j4 -N4 "$image" | tr -d ' ') == zimg ]]; then
+    # EFI zboot: payload offset and size at 8 and 12, compression name at 24
+    local start length kind
+    start=$(od -An -tu4 -j8 -N4 "$image" | tr -d ' '); length=$(od -An -tu4 -j12 -N4 "$image" | tr -d ' ')
+    kind=$(dd if="$image" bs=1 skip=24 count=8 status=none | tr -d '\0')
+    case $kind in
+      gzip) tail -c +$((start + 1)) "$image" | head -c "$length" | gzip -dc > "$raw" 2>/dev/null || true ;;
+      zstd*) tail -c +$((start + 1)) "$image" | head -c "$length" | zstd -dc > "$raw" 2>/dev/null || true ;;
+      *) return 1 ;;
+    esac
+  elif [[ $(od -An -tx1 -N2 "$image" | tr -d ' ') == 1f8b ]]; then
+    gzip -dc "$image" > "$raw" 2>/dev/null || true
+  else
+    raw=$image
+  fi
+  offset=$(LC_ALL=C grep -a -b -o -m 1 'IKCFG_ST' "$raw" | head -n 1 | cut -d: -f1)
+  [[ $offset =~ ^[0-9]+$ ]] || return 1
+  tail -c +$((offset + 9)) "$raw" | gzip -dc 2>/dev/null || true
+}
+
+run_check() { # run_check TYPE ARG...: sets $detail; returns 0 pass, 1 fail, 2 could not evaluate
+  local type=$1 file value fragment option missing count
+  shift
+  detail=
+  case $type in
+    version-newer | not-installed | manual | depends-on | file-exists | file-contains | file-matches | dtb-root-compatible | \
+      dtb-node | dtb-okay | dtb-prop | module-parm | code-imm16 | kconfig) ;;
+    *) detail="unknown check type $type"; return 2 ;;
+  esac
+  case $type in
+    version-newer)
+      # Newer by pacman's own ordering passes. An optional regex names OUR build tag in the
+      # installed version (".v272", ".j714s3", an epoch). pacman sorts a tagged build above the
+      # channel's build of the same upstream version for ever, so with the tag taken out the
+      # channel's build of the same or a later upstream version passes too; the package release
+      # numbers of the two lines of builds are not compared. The identical version never passes.
+      # What this check decides is only "not older"; the other criteria decide "fit".
+      local order mine theirs
+      order=$(vercmp "$channel" "$installed")
+      if ((order == 0)); then detail="the channel has the installed version, $installed"; return 1; fi
+      if ((order > 0)); then detail="$channel is newer than $installed"; return 0; fi
+      if [[ -n ${1:-} ]]; then
+        mine=$(K114S_TAG=$1 awk '{ gsub(ENVIRON["K114S_TAG"], ""); print }' <<<"$installed")
+        theirs=$(K114S_TAG=$1 awk '{ gsub(ENVIRON["K114S_TAG"], ""); print }' <<<"$channel")
+        if [[ -n $mine && $mine != "$installed" ]] && (($(vercmp "${theirs%-*}" "${mine%-*}") >= 0)); then
+          detail="$channel is the channel's build of ${mine%-*} or later; the installed $installed carries our build tag"; return 0
+        fi
+      fi
+      detail="channel $channel is not newer than installed $installed"; return 1 ;;
+    not-installed)
+      if installed_version "$1" >/dev/null; then detail="$1 is installed"; return 1; fi
+      detail="$1 is not installed"; return 0 ;;
+    manual)
+      if ((accept_manual)); then detail="accepted by hand: $*"; return 0; fi
+      detail="a person decides: $*"; return 1 ;;
+  esac
+  fetch
+  [[ -z $fetch_error ]] || { detail=$fetch_error; return 2; }
+  case $type in
+    depends-on)
+      if sed -n 's/^depend = //p' "$unpacked/.PKGINFO" 2>/dev/null | grep -Eq -- "$1"; then detail="depends on $(sed -n 's/^depend = //p' "$unpacked/.PKGINFO" | grep -E -- "$1" | head -n 1)"; return 0; fi
+      detail="no dependency matches $1"; return 1 ;;
+    file-exists)
+      if file=$(first_match "$1"); then detail="${file#"$unpacked"/}"; [[ $file == "$unpacked"/* ]] || detail=$1; return 0; fi
+      detail="no file matches $1"; return 1 ;;
+  esac
+  file=$(first_match "$1") || { detail="no file matches $1"; return 1; }
+  shift
+  case $type in
+    file-contains)
+      if LC_ALL=C grep -a -F -q -- "$*" "$file"; then detail="has \"$*\""; return 0; fi
+      detail="does not contain \"$*\""; return 1 ;;
+    file-matches)
+      if grep -E -q -- "$1" "$file"; then detail="matches $1"; return 0; fi
+      detail="no line matches $1"; return 1 ;;
+    dtb-root-compatible)
+      value=$("$(tool k114s-fdt)" "$file" root-compatible 2>/dev/null | tr '\n' ' ') || { detail="not a readable device tree"; return 1; }
+      if [[ " $value" == *" $1 "* ]]; then detail="root compatible: ${value% }"; return 0; fi
+      detail="root compatible is \"${value% }\", not $1"; return 1 ;;
+    dtb-node)
+      if value=$("$(tool k114s-fdt)" "$file" find "$1" 2>/dev/null | head -n 1); then detail=$value; return 0; fi
+      detail="no node $1"; return 1 ;;
+    dtb-okay)
+      count=$("$(tool k114s-fdt)" "$file" count-okay "$1" 2>/dev/null || true)
+      if [[ $count =~ ^[0-9]+$ ]] && ((count >= $2)); then detail="$count enabled"; return 0; fi
+      detail="${count:-0} enabled node(s) $1, need $2"; return 1 ;;
+    dtb-prop)
+      value=$("$(tool k114s-fdt)" "$file" get "$1" "$2" 2>/dev/null | tr '\n' ' ' || true); value=${value% }
+      if [[ -n $value && $value == "$3" ]]; then detail="$2 = $value"; return 0; fi
+      detail="$2 is \"${value:-absent}\", not $3"; return 1 ;;
+    module-parm)
+      if modinfo -F parm "$file" 2>/dev/null | grep -q "^$1:"; then detail="parameter $1"; return 0; fi
+      detail="no parameter $1"; return 1 ;;
+    code-imm16)
+      if value=$("$(tool k114s-binscan)" "$file" imm16 "$1" 2>/dev/null); then detail=$value; return 0; fi
+      detail=${value:-"could not scan"}; return 1 ;;
+    kconfig)
+      fragment=$(data_file "$1")
+      [[ -f $fragment ]] || { detail="$fragment is missing"; return 2; }
+      image_config "$file" > "$cache/x/$package.config" || true
+      [[ -s $cache/x/$package.config ]] || { detail="the kernel image carries no built-in configuration (CONFIG_IKCONFIG)"; return 1; }
+      # The fragment language of build/validate-config.py: CONFIG_X=y built in; CONFIG_X=m module or
+      # built in; CONFIG_X="text" or =123 exactly that; "# CONFIG_X is not set" off or absent.
+      # A bare CONFIG_X means y or m.
+      missing=
+      while IFS= read -r option; do
+        option=${option%"${option##*[![:space:]]}"}
+        case $option in
+          '# CONFIG_'*' is not set')
+            option=${option#\# }; option=${option%% *}
+            ! grep -Eq -- "^$option=" "$cache/x/$package.config" || missing+=" $option(must be off)" ;;
+          '' | '#'*) ;;
+          CONFIG_*=m) grep -Eq -- "^${option%=m}=(y|m)\$" "$cache/x/$package.config" || missing+=" ${option%=m}" ;;
+          CONFIG_*=*) grep -Fxq -- "$option" "$cache/x/$package.config" || missing+=" $option" ;;
+          CONFIG_*) grep -Eq -- "^$option=(y|m)\$" "$cache/x/$package.config" || missing+=" $option" ;;
+          *) detail="${fragment##*/} has a line that is not a requirement: $option"; return 2 ;;
+        esac
+      done < "$fragment"
+      if [[ -z $missing ]]; then detail="every option of ${fragment##*/} is set"; return 0; fi
+      detail="not set:$missing"; return 1 ;;
+  esac
+}
+
+fixed=0
+for package in $wanted; do
+  valid_name "$package" || continue
+  class=$(class_of "$package")
+  installed=$(installed_version "$package" || true)
+  channel= repo= location= sha= package_file= unpacked= fetch_error=
+  if [[ -z $installed ]]; then
+    printf '%s\t%s\tnot-installed\t\t\t\t\t\n' "$package" "${class:-none}" >> "$cache/verdict.tsv.new"; continue
+  fi
+  line=$("$PACMAN" -Sp -dd --print-format '%r %n %v %l' "${private[@]}" "$package" 2>/dev/null | awk -v p="$package" '$2 == p' | head -n 1 || true)
+  if [[ -z $line ]]; then
+    printf '%s\t%s\tabsent\t%s\t\t\t\t\n' "$package" "${class:-none}" "$installed" >> "$cache/verdict.tsv.new"; continue
+  fi
+  read -r repo _ channel location <<<"$line"
+  if [[ -z $class ]]; then
+    printf '%s\tnone\tno-criteria\t%s\t%s\t%s\t\t\n' "$package" "$installed" "$channel" "$repo" >> "$cache/verdict.tsv.new"; continue
+  fi
+  verdict=fixed
+  declare -A group_pass=() group_seen=()
+  skip=0
+  while read -r kind name label type rest; do
+    [[ $kind == check || $kind == any ]] && [[ $name == "$package" ]] || continue
+    if ((skip)); then record "$label" "$type" skipped "not evaluated: the channel's version is not newer (--full evaluates anyway)"; [[ $kind == any ]] && group_seen[$label]=1; continue; fi
+    status=0
+    set -f                    # the arguments are data: globs in them are for the unpacked package only
+    # shellcheck disable=SC2086
+    run_check "$type" $rest || status=$?
+    set +f
+    case $status in 0) result=pass ;; 1) result=fail ;; *) result=error ;; esac
+    record "$label" "$type" "$result" "$detail"
+    if [[ $kind == check ]]; then
+      [[ $result == pass ]] || { [[ $result == error ]] && verdict=error || { [[ $verdict == error ]] || verdict=not-fixed; }; }
+      if [[ $type == version-newer && $result != pass ]] && ((!full)); then skip=1; fi
+    else
+      group_seen[$label]=1
+      [[ $result != pass ]] || group_pass[$label]=1
+    fi
+  done < "$criteria"
+  for label in "${!group_seen[@]}"; do
+    [[ -n ${group_pass[$label]:-} ]] || { [[ $verdict == error ]] || verdict=not-fixed; }
+  done
+  unset group_pass group_seen
+  [[ $verdict != fixed ]] || fixed=$((fixed + 1))
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$package" "$class" "$verdict" "$installed" "$channel" "$repo" "$sha" "$package_file" >> "$cache/verdict.tsv.new"
+  ((keep)) || rm -rf "${cache:?}/x/$package" "$cache/x/$package.plain" "$cache/x/$package.image" "$cache/x/$package.config"
+done
+mv -f "$cache/verdict.tsv.new" "$cache/verdict.tsv"
+mv -f "$cache/checks.tsv.new" "$cache/checks.tsv"
+
+# verdict.json
+{
+  printf '{\n  "generated": %s,\n  "criteria": %s,\n  "packages": [' "$(json_string "$(now)")" "$(json_string "${criteria##*/} $(sum "$criteria" | cut -c1-16)")"
+  first=1
+  while IFS=$'\t' read -r name class verdict installed channel repo sha file; do
+    ((first)) || printf ','
+    first=0
+    printf '\n    {"name": %s, "class": %s, "verdict": %s, "installed": %s, "channel": %s, "repo": %s, "sha256": %s, "checks": [' \
+      "$(json_string "$name")" "$(json_string "$class")" "$(json_string "$verdict")" "$(json_string "$installed")" "$(json_string "$channel")" "$(json_string "$repo")" "$(json_string "$sha")"
+    inner=1
+    while IFS=$'\t' read -r cname label type result detail; do
+      [[ $cname == "$name" ]] || continue
+      ((inner)) || printf ','
+      inner=0
+      printf '\n      {"label": %s, "type": %s, "result": %s, "detail": %s}' "$(json_string "$label")" "$(json_string "$type")" "$(json_string "$result")" "$(json_string "$detail")"
+    done < "$cache/checks.tsv"
+    printf ']}'
+  done < "$cache/verdict.tsv"
+  printf '\n  ]\n}\n'
+} > "$cache/verdict.json.new"
+mv -f "$cache/verdict.json.new" "$cache/verdict.json"
+
+# The summary
+out "K114s release check, $(date '+%Y-%m-%d %H:%M'): channel builds of the held packages"
+while IFS=$'\t' read -r name class verdict installed channel repo sha file; do
+  case $verdict in
+    fixed) out "  FIXED       $name  $installed -> $channel ($class): every criterion passes" ;;
+    not-fixed) out "  held        $name  installed $installed, channel $channel:"
+      awk -F'\t' -v n="$name" '$1 == n && ($4 == "fail" || $4 == "error") { printf "                %s: %s\n", $2, $5 }' "$cache/checks.tsv" | { ((quiet)) && cat >/dev/null || cat; } ;;
+    absent) out "  held        $name  $installed: the channel has no package of this name" ;;
+    no-criteria) out "  held        $name  $installed (channel $channel): no release criteria written for it" ;;
+    not-installed) out "  -           $name  is not installed" ;;
+    error) out "  held        $name  could not be checked:"
+      awk -F'\t' -v n="$name" '$1 == n && $4 == "error" { printf "                %s: %s\n", $2, $5 }' "$cache/checks.tsv" | { ((quiet)) && cat >/dev/null || cat; } ;;
+  esac
+done < "$cache/verdict.tsv"
+out "  details: $cache/verdict.json"
+((fixed == 0)) || exit 10
+exit 0

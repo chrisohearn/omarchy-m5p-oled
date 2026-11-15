@@ -1,0 +1,164 @@
+#!/usr/bin/python3 -I
+# K114s (omarchy-m5p-oled): read questions out of a flattened device tree (.dtb). Read-only.
+#
+# The release check uses it to decide whether a packaged K114s tree describes what this Mac
+# relies on. The image has no dtc, so this is a small reader of its own: header, structure
+# block, strings block; nothing is written and nothing is executed from the file.
+#
+#   k114s-fdt FILE root-compatible              the root node's compatible strings, one per line
+#   k114s-fdt FILE nodes                        every node: PATH <tab> okay|disabled <tab> compatible,...
+#   k114s-fdt FILE find SELECTOR                paths of the nodes SELECTOR matches, one per line
+#   k114s-fdt FILE count-okay SELECTOR          how many matching nodes are enabled, ancestors included
+#   k114s-fdt FILE get SELECTOR PROPERTY        the property of the first match: strings one per
+#                                               line, else 32-bit cells as 0x%08x, else hex bytes
+#
+# SELECTOR is  compatible:STRING  (a node whose compatible list contains STRING),
+#              path:/soc/node@1   (that node), or  name:PREFIX  (node name before any @unit).
+# exit 0 found / answered, 1 no match, 2 the file is not a device tree this reads
+import struct
+import sys
+
+FDT_MAGIC = 0xD00DFEED
+BEGIN_NODE, END_NODE, PROP, NOP, END = 1, 2, 3, 4, 9
+
+
+class Bad(Exception):
+    pass
+
+
+def parse(blob):
+    """-> list of nodes: {"path", "name", "props": {name: bytes}, "parent": index or None}"""
+    if len(blob) < 40:
+        raise Bad("too short")
+    magic, total, off_struct, off_strings, _rsv, version, _last, _cpu, size_strings, size_struct = \
+        struct.unpack(">10I", blob[:40])
+    if magic != FDT_MAGIC:
+        raise Bad("no device tree magic")
+    if version < 16 or total > len(blob) or off_struct + size_struct > total or off_strings + size_strings > total:
+        raise Bad("header does not fit the file")
+    strings = blob[off_strings:off_strings + size_strings]
+    pos, end = off_struct, off_struct + size_struct
+    nodes, stack = [], []
+
+    def cell():
+        nonlocal pos
+        if pos + 4 > end:
+            raise Bad("structure block ends early")
+        (value,) = struct.unpack(">I", blob[pos:pos + 4])
+        pos += 4
+        return value
+
+    while True:
+        token = cell()
+        if token == BEGIN_NODE:
+            stop = blob.index(b"\0", pos, end)
+            name = blob[pos:stop].decode("utf-8", "replace")
+            pos = (stop + 4) & ~3
+            parent = stack[-1] if stack else None
+            path = "/" if parent is None else (nodes[parent]["path"].rstrip("/") + "/" + name)
+            nodes.append({"path": path, "name": name, "props": {}, "parent": parent})
+            stack.append(len(nodes) - 1)
+            if len(nodes) > 200000:
+                raise Bad("too many nodes")
+        elif token == END_NODE:
+            if not stack:
+                raise Bad("unbalanced node end")
+            stack.pop()
+        elif token == PROP:
+            length, name_off = cell(), cell()
+            if not stack or pos + length > end or name_off >= len(strings):
+                raise Bad("bad property")
+            name = strings[name_off:strings.index(b"\0", name_off)].decode("utf-8", "replace")
+            nodes[stack[-1]]["props"][name] = blob[pos:pos + length]
+            pos = (pos + length + 3) & ~3
+        elif token == NOP:
+            continue
+        elif token == END:
+            break
+        else:
+            raise Bad("unknown token %#x" % token)
+    if stack or not nodes:
+        raise Bad("unbalanced tree")
+    return nodes
+
+
+def strings_of(value):
+    return [s.decode("utf-8", "replace") for s in value.split(b"\0")[:-1]] if value.endswith(b"\0") else []
+
+
+def own_okay(node):
+    status = node["props"].get("status")
+    return status is None or strings_of(status)[:1] in (["okay"], ["ok"])
+
+
+def okay(nodes, node):
+    while True:
+        if not own_okay(node):
+            return False
+        if node["parent"] is None:
+            return True
+        node = nodes[node["parent"]]
+
+
+def select(nodes, selector):
+    kind, _, want = selector.partition(":")
+    if not want or kind not in ("compatible", "path", "name"):
+        raise SystemExit("k114s-fdt: selector must be compatible:STR, path:/PATH or name:PREFIX")
+    for node in nodes:
+        if kind == "compatible" and want in strings_of(node["props"].get("compatible", b"")):
+            yield node
+        elif kind == "path" and node["path"] == want:
+            yield node
+        elif kind == "name" and node["name"].split("@")[0] == want:
+            yield node
+
+
+def show(value):
+    texts = strings_of(value)
+    if texts and all(t and t.isprintable() for t in texts):
+        return "\n".join(texts)
+    if value and len(value) % 4 == 0:
+        return " ".join("0x%08x" % c for c in struct.unpack(">%dI" % (len(value) // 4), value))
+    return value.hex()
+
+
+def main(argv):
+    if len(argv) < 3:
+        sys.stderr.write(__doc__ or "usage: k114s-fdt FILE COMMAND [ARG...]\n")
+        return 2
+    try:
+        with open(argv[1], "rb") as handle:
+            nodes = parse(handle.read(64 << 20))
+    except (OSError, Bad, ValueError, struct.error) as error:
+        sys.stderr.write("k114s-fdt: %s: %s\n" % (argv[1], error))
+        return 2
+    command, args = argv[2], argv[3:]
+    if command == "root-compatible" and not args:
+        found = strings_of(nodes[0]["props"].get("compatible", b""))
+        print("\n".join(found))
+        return 0 if found else 1
+    if command == "nodes" and not args:
+        for node in nodes:
+            print("%s\t%s\t%s" % (node["path"], "okay" if okay(nodes, node) else "disabled",
+                                  ",".join(strings_of(node["props"].get("compatible", b"")))))
+        return 0
+    if command == "find" and len(args) == 1:
+        found = [n["path"] for n in select(nodes, args[0])]
+        print("\n".join(found))
+        return 0 if found else 1
+    if command == "count-okay" and len(args) == 1:
+        count = sum(1 for n in select(nodes, args[0]) if okay(nodes, n))
+        print(count)
+        return 0 if count else 1
+    if command == "get" and len(args) == 2:
+        for node in select(nodes, args[0]):
+            if args[1] in node["props"]:
+                print(show(node["props"][args[1]]))
+                return 0
+        return 1
+    sys.stderr.write("k114s-fdt: unknown command\n")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

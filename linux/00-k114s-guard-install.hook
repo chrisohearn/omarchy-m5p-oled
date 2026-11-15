@@ -1,0 +1,16 @@
+# K114s (omarchy-m5p-oled) r3: no held package is installed, upgraded, downgraded or replaced by
+# accident, and the package channel stays the one this install follows.
+# In /etc/pacman.d/hooks/, which Omarchy's pacman.conf template does not touch. What is held is
+# data (holds.list, rivals.list beside k114s-guard), so this file names no package.
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Target = *
+
+[Action]
+Description = K114s: checking the held packages and the channel...
+When = PreTransaction
+Exec = /usr/local/lib/omarchy-k114s/k114s-guard install
+AbortOnFail
+NeedsTargets

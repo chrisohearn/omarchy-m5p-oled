@@ -1,0 +1,96 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled) r3: record what this boot came up with, once it has come up.
+#
+# Started by k114s-boot-success.timer a minute after boot, and again every ten minutes until this
+# boot is recorded as ok (a desktop that waits for a login is not a failed boot). It waits (BOOT_WAIT_SECONDS) for
+# the three things a usable K114s boot shows, then writes one record for this boot:
+#   desktop    a graphical session is active (a Hyprland process, or a wayland/x11 login session)
+#   network    the Wi-Fi interface exists (BOOT_NET_INTERFACE, wlan0)
+#   trackpad   the input device exists (BOOT_TRACKPAD_NAME, "Apple MTP multi-touch")
+# together with WHAT booted: the boot image the EFI stub was started from and its SHA-256, the
+# kernel banner, and the SHA-256 of m1n1/boot-ctxr.bin (Stage 2) as it is on the ESP now.
+#
+# k114s-release reads these records: a boot image or Stage 2 on trial is "proven" only by a
+# record with result ok for exactly those hashes, and nothing old is retired without one.
+# The record states what was observed by this script; it is not the owner's own observation.
+# It changes nothing but its record (and re-runs the hold and space-guard self-checks).
+set -euo pipefail
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=k114s-lib.sh
+. "${K114S_LIB_SH:-$HERE/k114s-lib.sh}"
+need_root
+boots=$VAR/release/boots
+mkdir -p "$boots"
+boot_id=$(boot_id)
+[[ $boot_id =~ ^[0-9a-f]+$ ]] || die "no boot id"
+record=$boots/$(now)-$boot_id
+first_run=1     # the timer comes back every ten minutes until this boot is recorded as ok
+if ls "$boots"/*-"$boot_id" >/dev/null 2>&1; then
+  first_run=0
+  if grep -q '^result ok$' "$boots"/*-"$boot_id"; then say "this boot is already recorded as ok"; exit 0; fi
+fi
+
+interface=$(setting BOOT_NET_INTERFACE wlan0)
+trackpad=$(setting BOOT_TRACKPAD_NAME "Apple MTP multi-touch")
+wait_seconds=${K114S_BOOT_WAIT:-$(setting BOOT_WAIT_SECONDS 300)}
+sys=${K114S_SYS:-/sys}; proc=${K114S_PROC:-/proc}
+
+has_desktop() {
+  if [[ -n ${K114S_DESKTOP:-} ]]; then [[ $K114S_DESKTOP == yes ]]; return; fi
+  pgrep -x Hyprland >/dev/null 2>&1 && return 0
+  loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}' | while read -r session; do
+    [[ $(loginctl show-session "$session" -p Type --value 2>/dev/null) =~ ^(wayland|x11)$ ]] &&
+      [[ $(loginctl show-session "$session" -p Active --value 2>/dev/null) == yes ]] && echo yes
+  done | grep -q yes
+}
+has_network() { [[ -e $sys/class/net/$interface ]]; }
+has_trackpad() { grep -q -F "N: Name=\"$trackpad\"" "$proc/bus/input/devices" 2>/dev/null; }
+
+deadline=$((SECONDS + wait_seconds))
+while :; do
+  desktop=no network=no pad=no
+  has_desktop && desktop=yes
+  has_network && network=yes
+  has_trackpad && pad=yes
+  [[ $desktop$network$pad == yesyesyes ]] && break
+  ((SECONDS < deadline)) || break
+  sleep "${K114S_BOOT_POLL:-10}"
+done
+result=incomplete
+[[ $desktop$network$pad == yesyesyes ]] && result=ok
+
+uki=$(booted_uki)
+{
+  echo "time $(now)"
+  echo "boot_id $boot_id"
+  echo "uki $uki"
+  if [[ -n $uki && -f $ESP/$uki ]]; then echo "uki_sha256 $(sum "$ESP/$uki")"; else echo "uki_sha256 unknown"; fi
+  echo "kernel $(running_version)"
+  echo "kernel_release $(running_release)"
+  if [[ -f $ESP/$STAGE2_REL ]]; then echo "stage2_sha256 $(sum "$ESP/$STAGE2_REL")"; else echo "stage2_sha256 unknown"; fi
+  echo "desktop $desktop"
+  echo "network $network ($interface)"
+  echo "trackpad $pad ($trackpad)"
+  echo "result $result"
+} > "$record.new"
+rm -f "$boots"/*-"$boot_id"
+mv -f "$record.new" "$record"
+say "boot recorded as $result: image ${uki:-unknown}, desktop $desktop, $interface $network, trackpad $pad"
+
+# Self-checks that belong to every boot: the holds are in pacman.conf, the guard hooks are in
+# place, and the space guard still knows every boot-file hook.
+problems=
+if [[ -x $LIB/k114s-holds ]]; then "$LIB/k114s-holds" apply >/dev/null 2>&1 || problems+="the holds could not be written to pacman.conf; "; fi
+for hook in 00-k114s-guard-install.hook 00-k114s-guard-remove.hook 01-k114s-guard-esp.hook; do
+  [[ -f $ROOT/etc/pacman.d/hooks/$hook ]] || problems+="$hook is missing; "
+done
+if [[ -x $LIB/k114s-guard ]]; then "$LIB/k114s-guard" audit >/dev/null 2>&1 || problems+="the space guard does not know every boot-file hook (every install is checked for space until it does); "; fi
+if [[ -n $problems ]]; then
+  warn "self-check: $problems"
+  # said once per boot, on the first run or on the run that completes the record
+  if ((first_run)) || [[ $result == ok ]]; then
+    notify critical "K114s update guards need attention" "${problems%; }. See: sudo /usr/local/lib/omarchy-k114s/k114s-release status"
+  fi
+fi
+[[ $result == ok ]] || ((!first_run)) || notify normal "K114s boot check incomplete" "desktop $desktop, $interface $network, trackpad $pad"
+exit 0

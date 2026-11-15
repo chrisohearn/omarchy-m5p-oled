@@ -1,0 +1,26 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled) r3: Omarchy user hook, ~/.config/omarchy/hooks/post-update.d/k114s-release-check
+#
+# After "omarchy update" has upgraded the packages: does the channel now carry a K114s-fit build
+# of a held package? With sudo still authorised by the update (it keeps the timestamp fresh),
+# k114s-release auto checks and acts as release.conf allows: userland packages switch, a fixed
+# kernel is staged as an additional boot entry, a proven trial is retired. Without sudo it only
+# checks and tells. It never restarts anything and never fails the update.
+root=${K114S_ROOT:-}                       # tests only; empty on the Mac
+lib=$root/usr/local/lib/omarchy-k114s
+sudo=${K114S_SUDO:-sudo}
+[[ -x $lib/k114s-release && -x $lib/k114s-release-check ]] || exit 0
+echo -e "\e[32m\nK114s: held packages against the channel\e[0m"
+if $sudo -n true 2>/dev/null; then
+  $sudo -n "$lib/k114s-release" auto || echo "K114s: the release step reported a problem (see above); the update itself is not affected."
+  exit 0
+fi
+status=0
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-k114s/check
+"$lib/k114s-release-check" --cache "$cache" || status=$?
+if [[ $status == 10 ]]; then
+  ready=$(awk -F'\t' '$3 == "fixed" { printf "%s ", $1 }' "$cache/verdict.tsv" 2>/dev/null)
+  echo "K114s: ready for release: $ready. Run: sudo $lib/k114s-release auto"
+  [[ -n $root ]] || notify-send -a "K114s updates" "K114s: packages ready for release" "${ready}Run: sudo $lib/k114s-release auto" 2>/dev/null || true
+fi
+exit 0

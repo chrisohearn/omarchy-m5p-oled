@@ -1,0 +1,212 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled) r3: install the r3 update tooling over bundle r2c's persistence.
+#
+#     sudo bash k114s-tooling-install                install, from the folder this script is in
+#     sudo bash k114s-tooling-install --refresh      copy the scripts and data again (after a repository update); state is kept
+#     sudo bash k114s-tooling-install --undo         back to exactly what r2c's linux-persist.sh left
+#     ... --no-recovery-set                          do not archive the held packages at the end
+#
+# What r2c's persistence installed and this keeps as it is: the repair kernel image and module,
+# the Wi-Fi firmware, the K114s Stage 2 hook, the boot-chain declaration, the install reasons.
+# What this replaces (saved under /usr/local/lib/omarchy-k114s/tooling-r3 for --undo):
+#   apply-holds, hold-guard, esp-space-guard   -> k114s-holds, k114s-guard (apply-holds stays as a forwarder)
+#   00-k114s-hold-guard.hook, 01-k114s-esp-space.hook -> 00-k114s-guard-install.hook,
+#                                                 00-k114s-guard-remove.hook, 01-k114s-guard-esp.hook
+#   update-boot-ctxr                           -> the same hook with the Stage 2 freeze
+#   the user hook pre-refresh-pacman.d/k114s-holds -> the one that waits, asks sudo, and fails loudly
+# What it adds: k114s-repackage, k114s-recovery-set, k114s-release-check, k114s-release,
+# k114s-boot-success (+ timer), k114s-holds.path, the keep list for linux-modules-cleanup, the
+# user hook post-update.d/k114s-release-check, /etc/omarchy-k114s/release.conf, and data files.
+# It installs no package, changes no boot file on the ESP, does not touch the channel, and does
+# not reboot. The first thing it does after copying is record the running boot chain as proven
+# and (unless told not to) write a recovery set of every held package.
+set -Eeuo pipefail     # -E: the "stopped part-way" trap also fires inside functions
+ROOT=${K114S_ROOT:-}
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+LIB=$ROOT/usr/local/lib/omarchy-k114s
+ETC=$ROOT/etc/omarchy-k114s
+SAVED=$LIB/tooling-r3
+HOOKS=$ROOT/etc/pacman.d/hooks
+UNITS=$ROOT/etc/systemd/system
+SYSTEMCTL=${K114S_SYSTEMCTL:-systemctl}
+USER_HOME=${K114S_USER_HOME:-}
+if [[ -z $USER_HOME && -n ${SUDO_USER:-} ]]; then USER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6); fi
+say() { echo "k114s-tooling-install: $*"; }
+die() { echo "k114s-tooling-install: $*" >&2; exit 1; }
+
+TOOLS=(k114s-lib.sh k114s-guard k114s-holds k114s-repackage k114s-recovery-set k114s-release-check k114s-release
+  k114s-boot-success k114s-modules-cleanup k114s-fdt k114s-binscan k114s-booted-esp k114s-edge-check)
+DATA=(release-criteria.conf kernel-config.required rivals.list protected.list noextract.list extras.list
+  esp-audit-ignore.list holds.default)
+NEW_HOOKS=(00-k114s-guard-install.hook 00-k114s-guard-remove.hook 01-k114s-guard-esp.hook)
+OLD_HOOKS=(00-k114s-hold-guard.hook 01-k114s-esp-space.hook)
+OLD_TOOLS=(apply-holds hold-guard esp-space-guard update-boot-ctxr k114s-edge-check k114s-booted-esp holds.list)
+UNIT_FILES=(k114s-boot-success.service k114s-boot-success.timer k114s-holds.path k114s-holds.service)
+DROPIN=$UNITS/linux-modules-cleanup.service.d/k114s-keep.conf
+OTHER=(update-boot-ctxr-k114s linux-modules-cleanup-k114s-keep.conf release.conf
+  hooks/pre-refresh-pacman-k114s-holds hooks/post-update-k114s-release-check)
+
+mode=install recovery=1
+for argument in "$@"; do
+  case $argument in
+    --undo) mode=undo ;;
+    --refresh) mode=refresh ;;
+    --no-recovery-set) recovery=0 ;;
+    *) die "unknown argument $argument" ;;
+  esac
+done
+[[ $(id -u) == 0 || -n ${K114S_ROOT:-} ]] || die "run with sudo"
+
+save() { # save FILE under KEY, once
+  [[ -e $SAVED/$2.orig || -e $SAVED/$2.absent ]] && return 0
+  if [[ -e $1 ]]; then cp -a "$1" "$SAVED/$2.orig"; else : > "$SAVED/$2.absent"; fi
+}
+restore() {
+  if [[ -e $SAVED/$2.orig ]]; then mkdir -p "$(dirname "$1")"; cp -a "$SAVED/$2.orig" "$1"
+  elif [[ -e $SAVED/$2.absent ]]; then rm -f "$1"; fi
+}
+user_hook() { echo "$USER_HOME/.config/omarchy/hooks/$1"; }
+
+copy_files() {
+  local file
+  for file in "${TOOLS[@]}"; do install -m 755 "$HERE/$file" "$LIB/$file"; done
+  chmod 644 "$LIB/k114s-lib.sh"
+  for file in "${DATA[@]}"; do install -m 644 "$HERE/$file" "$LIB/$file"; done
+  install -m 755 "$HERE/update-boot-ctxr-k114s" "$LIB/update-boot-ctxr"
+  # r2c's name stays valid: its user hook, its notes and people's fingers call apply-holds
+  cat > "$LIB/apply-holds" <<'SHIM'
+#!/bin/bash
+# K114s r3: apply-holds is now k114s-holds. This forwards r2c's three forms.
+case ${1:-} in
+  --remove) exec /usr/local/lib/omarchy-k114s/k114s-holds remove ;;
+  --show) exec /usr/local/lib/omarchy-k114s/k114s-holds show ;;
+  "") exec /usr/local/lib/omarchy-k114s/k114s-holds apply ;;
+  *) echo "apply-holds: unknown argument $1 (see k114s-holds)" >&2; exit 1 ;;
+esac
+SHIM
+  chmod 755 "$LIB/apply-holds"
+  for file in "${NEW_HOOKS[@]}"; do install -m 644 "$HERE/$file" "$HOOKS/$file"; done
+  for file in "${UNIT_FILES[@]}"; do install -m 644 "$HERE/$file" "$UNITS/$file"; done
+  mkdir -p "$(dirname "$DROPIN")"
+  install -m 644 "$HERE/linux-modules-cleanup-k114s-keep.conf" "$DROPIN"
+  if [[ -n $USER_HOME ]]; then
+    mkdir -p "$(dirname "$(user_hook pre-refresh-pacman.d/x)")" "$(dirname "$(user_hook post-update.d/x)")"
+    install -m 755 "$HERE/hooks/pre-refresh-pacman-k114s-holds" "$(user_hook pre-refresh-pacman.d/k114s-holds)"
+    install -m 755 "$HERE/hooks/post-update-k114s-release-check" "$(user_hook post-update.d/k114s-release-check)"
+    [[ -z ${SUDO_UID:-} ]] || chown -R "$SUDO_UID:${SUDO_GID:-$SUDO_UID}" "$USER_HOME/.config/omarchy/hooks"
+  fi
+}
+units() { # units enable|disable
+  "$SYSTEMCTL" daemon-reload || true
+  if [[ $1 == enable ]]; then
+    "$SYSTEMCTL" enable --now k114s-holds.path k114s-boot-success.timer || say "note: could not enable the units; enable k114s-holds.path and k114s-boot-success.timer by hand"
+  else
+    "$SYSTEMCTL" disable --now k114s-holds.path k114s-boot-success.timer 2>/dev/null || true
+  fi
+}
+
+if [[ $mode == undo ]]; then
+  [[ -d $SAVED ]] || die "the r3 tooling is not installed; nothing to undo"
+  [[ ! -f $ROOT/var/lib/omarchy-k114s/release/trial ]] || die "a boot-chain trial is in progress: finish it (k114s-release retire) or give it up (k114s-release abandon) first"
+  if [[ -s $LIB/released.list ]]; then
+    say "note: these packages were released and now follow the channel; r2c's hold list would hold them again at their present version:"
+    sed 's/^/  /' "$LIB/released.list"
+  fi
+  units disable
+  for file in "${UNIT_FILES[@]}"; do rm -f "$UNITS/$file"; done
+  rm -f "$DROPIN"; rmdir "$(dirname "$DROPIN")" 2>/dev/null || true
+  "$SYSTEMCTL" daemon-reload || true
+  # pacman.conf: take the r3 block out, then let r2c's own apply-holds write its block back
+  if [[ -x $LIB/k114s-holds ]]; then K114S_ROOT=$ROOT bash "$LIB/k114s-holds" remove >/dev/null || true; fi
+  for file in "${NEW_HOOKS[@]}"; do rm -f "$HOOKS/$file"; done
+  for file in "${OLD_HOOKS[@]}"; do restore "$HOOKS/$file" "hook-$file"; done
+  for file in "${TOOLS[@]}" "${DATA[@]}" released.list; do rm -f "$LIB/$file"; done
+  for file in "${OLD_TOOLS[@]}"; do restore "$LIB/$file" "tool-$file"; done
+  rm -f "$LIB/use-packaged-dtb.r3"
+  if [[ -n $USER_HOME ]]; then
+    restore "$(user_hook pre-refresh-pacman.d/k114s-holds)" user-pre-refresh
+    restore "$(user_hook post-update.d/k114s-release-check)" user-post-update
+  fi
+  if [[ -e $SAVED/release.conf.created ]]; then rm -f "$ETC/release.conf"; fi
+  if [[ -e $SAVED/channel.created ]]; then rm -f "$ETC/channel"; fi
+  rm -f "$ETC/stage2-frozen" "$ETC/keep-modules"
+  if [[ -x $LIB/apply-holds ]]; then K114S_ROOT=$ROOT bash "$LIB/apply-holds" >/dev/null || say "note: r2c's apply-holds could not write its block; run it by hand"; fi
+  mv "$SAVED" "$SAVED.undone.$(date +%s)"
+  say "undone: r2c's guards, hooks and hold list are back. Recovery and rollback sets under /var/lib/omarchy-k114s are kept."
+  exit 0
+fi
+
+# --- install / refresh ---------------------------------------------------------------------------
+for file in "${TOOLS[@]}" "${DATA[@]}" "${NEW_HOOKS[@]}" "${UNIT_FILES[@]}" "${OTHER[@]}"; do
+  [[ -f $HERE/$file ]] || die "$file is missing beside this script; nothing changed"
+done
+if [[ -f $HERE/SHA256SUMS ]]; then (cd "$HERE" && sha256sum --quiet -c SHA256SUMS) || die "files beside this script do not match SHA256SUMS; nothing changed"; fi
+for file in k114s-guard k114s-holds k114s-repackage k114s-recovery-set k114s-release-check k114s-release k114s-boot-success k114s-lib.sh; do
+  bash -n "$HERE/$file" || die "$file does not parse; nothing changed"
+done
+compatible=${K114S_DT_COMPATIBLE:-/sys/firmware/devicetree/base/compatible}
+grep -zFxq 'apple,k114s' "$compatible" || die "this is not an apple,k114s Mac"
+[[ -f $ROOT/etc/pacman.conf ]] && grep -q '^\[options\]' "$ROOT/etc/pacman.conf" || die "no [options] section in /etc/pacman.conf; nothing changed"
+
+if [[ $mode == refresh ]]; then
+  [[ -d $SAVED ]] || die "the r3 tooling is not installed; install it first"
+  copy_files
+  units enable
+  K114S_ROOT=$ROOT bash "$LIB/k114s-holds" apply
+  K114S_ROOT=$ROOT bash "$LIB/k114s-guard" audit || true
+  say "refreshed the scripts, data, hooks and units. State, settings and holds.list were kept."
+  exit 0
+fi
+
+[[ -d $LIB/persist-r2c ]] || die "bundle r2c's persistence is not applied here ($LIB/persist-r2c is missing): run its linux-persist.sh first"
+[[ ! -d $SAVED ]] || die "already installed (see $SAVED); use --refresh to copy the files again, --undo to remove"
+for command in bsdtar zstd python3 vercmp sha256sum flock; do
+  command -v "$command" >/dev/null || die "$command is needed and not installed; nothing changed"
+done
+
+mkdir -p "$SAVED" "$LIB" "$ETC" "$HOOKS" "$UNITS"
+trap 'echo "k114s-tooling-install: stopped part-way. Put everything back with: sudo bash $HERE/k114s-tooling-install --undo" >&2' ERR
+cp -p "$ROOT/etc/pacman.conf" "$SAVED/pacman.conf.before"
+for file in "${OLD_HOOKS[@]}"; do save "$HOOKS/$file" "hook-$file"; done
+for file in "${OLD_TOOLS[@]}"; do save "$LIB/$file" "tool-$file"; done
+if [[ -n $USER_HOME ]]; then
+  save "$(user_hook pre-refresh-pacman.d/k114s-holds)" user-pre-refresh
+  save "$(user_hook post-update.d/k114s-release-check)" user-post-update
+fi
+
+copy_files
+for file in "${OLD_HOOKS[@]}"; do rm -f "$HOOKS/$file"; done
+rm -f "$LIB/hold-guard" "$LIB/esp-space-guard"
+
+# The hold list: what was held stays held; the default set is added; names that are not
+# installed go (the image pinned "omarchy" and "omarchy-settings", which Edge's omarchy-dev replaced).
+{
+  [[ ! -f $LIB/holds.list ]] || awk '!/^[[:space:]]*(#|$)/ { print $1 }' "$LIB/holds.list"
+  awk '!/^[[:space:]]*(#|$)/ { print $1 }' "$LIB/holds.default"
+} | grep -E '^[A-Za-z0-9@._+-]+$' | LC_ALL=C sort -u | while read -r package; do
+  for dir in "$ROOT/var/lib/pacman/local/$package"-*/; do
+    [[ -f $dir/desc ]] && [[ $(awk '/^%NAME%$/ { getline; print; exit }' "$dir/desc") == "$package" ]] && { echo "$package"; break; }
+  done
+done > "$LIB/holds.list.new"
+[[ -s $LIB/holds.list.new ]] || printf '%s\n' linux-aurora m1n1-aurora uboot-aurora > "$LIB/holds.list.new"
+mv -f "$LIB/holds.list.new" "$LIB/holds.list"
+
+if [[ ! -e $ETC/release.conf ]]; then install -m 644 "$HERE/release.conf" "$ETC/release.conf"; : > "$SAVED/release.conf.created"; fi
+if [[ ! -e $ETC/channel ]]; then echo edge > "$ETC/channel"; : > "$SAVED/channel.created"; fi
+
+K114S_ROOT=$ROOT bash "$LIB/k114s-holds" apply
+K114S_ROOT=$ROOT bash "$LIB/k114s-holds" check || die "the holds did not verify in /etc/pacman.conf"
+units enable
+K114S_ROOT=$ROOT bash "$LIB/k114s-guard" audit || say "note: until the space guard knows those triggers, every install is checked for space"
+trap - ERR
+
+say "installed. Held now: $(tr '\n' ' ' < "$LIB/holds.list")"
+K114S_ROOT=$ROOT bash "$LIB/k114s-release" mark-known-good ||
+  say "note: the running boot chain was not recorded as proven. From a boot that works: sudo $LIB/k114s-release mark-known-good"
+if ((recovery)); then
+  K114S_ROOT=$ROOT bash "$LIB/k114s-recovery-set" --label install ||
+    say "note: the recovery set was not written. Run: sudo $LIB/k114s-recovery-set"
+fi
+[[ -n $USER_HOME ]] || say "note: no invoking user found, so the two Omarchy user hooks were not installed"
+say "status:  sudo $LIB/k114s-release status"
+say "undo:    sudo bash $HERE/k114s-tooling-install --undo"

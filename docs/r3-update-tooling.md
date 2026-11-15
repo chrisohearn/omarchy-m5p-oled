@@ -1,0 +1,354 @@
+# r3: update handling on the Linux side
+
+Branch `r3/update-tooling`, written 2026-11-14. This replaces bundle r2c's guards
+([edge-update-path.md](edge-update-path.md)) and adds the part r2c did not have: letting a held
+package go, by itself, once Omarchy's channel carries a build that is fit for the K114s.
+
+The owner's goal, in his words: "be able to update from omarchy as new fixes take place and only
+overwrite our custom stuff when it's fixed".
+
+**Evidence.** Nothing here has been installed on the K114s. What ran, and where:
+
+| Label | What |
+| --- | --- |
+| agent-run, fake root | 491 tests as a normal user against throwaway folders (`tests/linux/test-r3-*.sh`) |
+| agent-run, replica | 150 tests in which a **real pacman** runs real transactions through the real hook files, inside a user namespace built with bubblewrap (`tests/linux/test-r3-pacman.sh`). The packages, the boot hooks and "a boot" are stand-ins; see the head of that file |
+| agent-run, on the K114s, read-only | the release check against the live Edge channel; the criteria evaluated against this Mac's own packages; the space guard's trigger list against the hooks installed here; the formats of the EFI variable and kernel banner the tools read |
+| owner-observed | nothing yet |
+
+Compiling, parsing and passing in a replica do not show that anything boots. The boot-chain steps
+are built so that the owner's own boot is the proof (below).
+
+## The pieces
+
+All under `linux/`, installed to `/usr/local/lib/omarchy-k114s` by `k114s-tooling-install`.
+
+| File | Role |
+| --- | --- |
+| `k114s-guard` + `00-k114s-guard-install.hook`, `00-k114s-guard-remove.hook`, `01-k114s-guard-esp.hook` | pacman pre-transaction guards: held packages, their rivals, removals, the channel, room on the EFI partition |
+| `k114s-holds` + `k114s-holds.path`, `k114s-holds.service` | the managed block in `/etc/pacman.conf` (`IgnorePkg`, `NoUpgrade`, `NoExtract`), written back whenever the file changes |
+| `k114s-repackage` | rebuild an installed package into a pacman archive from the files on disk and the local database |
+| `k114s-recovery-set` | archives of every held package, `/boot`, the ESP boot files, hashes, from one moment |
+| `k114s-release-check` + `release-criteria.conf`, `kernel-config.required` | is the channel's build of a held package fit for the K114s? |
+| `k114s-release` | release, adopt, trial, retire, Stage 2 switch, abandon, status |
+| `k114s-boot-success` + `.service`, `.timer` | records what each boot came up with |
+| `k114s-modules-cleanup` + `linux-modules-cleanup-k114s-keep.conf` | the stock module cleanup with a keep list |
+| `hooks/pre-refresh-pacman-k114s-holds`, `hooks/post-update-k114s-release-check` | Omarchy user hooks |
+| `k114s-fdt`, `k114s-binscan` | read-only readers of device tree blobs and AArch64 code (the image has no `dtc`) |
+| `holds.default`, `rivals.list`, `protected.list`, `noextract.list`, `extras.list`, `esp-audit-ignore.list`, `release.conf` | data |
+| `k114s-lib.sh` | shared functions; every path hangs off `K114S_ROOT`, which is how the tests run the same code as a normal user |
+| `update-boot-ctxr-k114s` | r2c's Stage 2 hook with one addition: it leaves `boot-ctxr.bin` alone while `/etc/omarchy-k114s/stage2-frozen` exists |
+
+r2c's own files (`apply-holds`, `hold-guard`, `esp-space-guard`, the two old hook files,
+`linux-persist.sh`) are unchanged in the repository; `--undo` puts them back.
+
+State lives in `/var/lib/omarchy-k114s` (release state, rollback sets, recovery sets, boot
+records), settings and deliberate-override markers in `/etc/omarchy-k114s`, the one-transaction
+permit in `/run/omarchy-k114s` (gone at every boot).
+
+## (a) `k114s-release-check`: is the channel's build fit?
+
+For each held package it refreshes the repository lists into a **private** copy of the package
+database, takes the channel's package from pacman's cache or downloads it into a **private** cache,
+checks its SHA-256 against the repository list, unpacks it there and evaluates
+`release-criteria.conf`. Nothing is installed, pacman's database and cache are not written, and
+nothing from the package is executed. It needs no root (it uses `fakeroot` for the private list
+refresh, as `checkupdates` does). On this Mac it takes about two seconds when nothing is newer.
+
+Output: a summary, and in the cache folder `verdict.tsv`, `checks.tsv` and `verdict.json`.
+Verdicts: `fixed`, `not-fixed`, `absent` (the channel has no such package), `no-criteria`,
+`not-installed`, `error`. Exit 0 ran, 10 at least one package is fixed, 2 could not run.
+A held package without a `package` line in the criteria is never released.
+
+The criteria are data. Check types: `version-newer`, `file-exists`, `file-contains`,
+`file-matches`, `dtb-root-compatible`, `dtb-node`, `dtb-okay`, `dtb-prop`, `kconfig`,
+`module-parm`, `code-imm16`, `depends-on`, `not-installed`, `manual`. `check` lines must all pass;
+`any` lines of one label need one pass. An unknown type or an unreadable package is `error`, never
+a pass.
+
+| Package | Class | Fit when |
+| --- | --- | --- |
+| `linux-aurora` | boot-uki | not older than ours; ships `t6050-k114s.dtb` whose root is `apple,k114s`; that tree has the N1 control function with platform id `0x00146050`, the Wi-Fi and Bluetooth functions, the PCIe controller enabled, two USB controllers and two port controllers enabled, the SMC sensors enabled, the keyboard/trackpad transport; the N1 and trackpad drivers are there; the trackpad fix is in (the report-size clamp of aurora-silicon/linux PR 1568 in the image, or product `0x0361` in `hid-magicmouse`); the built-in config meets `kernel-config.required` |
+| `m1n1-aurora` | boot-stage2 | not older; the loader binary knows the T6050 SoC, its PCIe and its USB PHY |
+| `uboot-aurora` | boot-stage2 | not older; U-Boot knows the T6050 NVMe and SART |
+| `omarchy-aurora-firmware` | boot-uki | not older; its initramfs script loads the N1 driver for `apple,k114s`; its install hook still adds `apple_centauri` |
+| `mesa-aurora`, `vulkan-aurora` | userland | newer; still carry the M5 Pro driver (`G17S`) |
+| `omarchy-hyprland-titlebars` | userland | not older; depends on `hyprland-m5` (built against its headers), or `hyprland-m5` is no longer installed |
+| `hyprland-m5` | userland | the channel has no such package; if one appears, a person decides (`manual`) |
+| `omarchy-mac-boot`, `limine-mkinitcpio-hook`, `limine`, `asahi-scripts`, `asahi-fwextract`, `omarchy-mac` | boot or userland | channel-built tooling whose scripts write the boot files. Nothing in such a package can be checked for "knows the K114s", so each has a `manual` line: `sudo k114s-release release --accept-manual NAME` |
+
+Three things about the criteria the lead should know:
+
+- **"Not older", and our build tags.** Our builds carry a tag in the version (`.v272`, `.j714s3`,
+  `.j714s9`, an epoch on the rebuilt plugin), and pacman sorts a tagged version above the
+  channel's build of the same upstream version for ever (`vercmp 2026.07.aurora6-2
+  2026.07.aurora6.j714s3-1` is -1). `version-newer REGEX` therefore also passes for the channel's
+  build of the same or a later upstream version, with the tag taken out and release numbers not
+  compared. The identical version never passes. The version check only says "not older"; the
+  content checks say "fit". Read today: Edge's `uboot-aurora 2026.07.aurora6-1` passes the version
+  check and fails both content checks, which is the right answer.
+- **`kernel-config.required`** holds the five options whose absence broke something on
+  2026-11-14, in the language `build/validate-config.py` reads (branch `r3/config`). To require
+  the whole r3 configuration of a channel kernel, replace the file with
+  `patches/linux/config/k114s-r3.config` at integration.
+- **The tree checks describe the r1 tree.** When the r3 device tree adds what the K114s relies on
+  (sound, display, more USB), add a line per node here, or a channel kernel without them would be
+  released.
+
+Agent-run on the K114s (read-only): the kernel criteria were evaluated against this Mac's own
+`linux-aurora`, rebuilt into a package by `k114s-repackage`. Every check type worked on the real
+files: the packaged K114s tree fails the six node checks (that is why r1 pins its own), the pinned
+r1 tree passes all of them, the repair kernel image has the PR 1568 clamp, and the config check
+names exactly the five missing options.
+
+## (b) `k114s-release`: letting a package go
+
+Rules it keeps, each with a test:
+
+1. Only a package whose channel build passed the check, run fresh as root, is released, at the
+   version pacman's own lists offer. If the two differ it waits for the next update.
+2. A **rollback set** is written first. No set, no release.
+3. The hold guard lets **exactly that transaction** through: a permit in `/run` names the
+   packages; anything else held in the same transaction still stops it. The permit is removed
+   right after and ignored when older than an hour.
+4. A failed transaction puts the package back on hold.
+
+**Rollback set** (`k114s-recovery-set --packages ...`, under `/var/lib/omarchy-k114s/rollback`):
+the installed package rebuilt into an archive by `k114s-repackage`, the files in `/boot`,
+`limine.conf`, `m1n1/boot.bin`, `m1n1/boot-ctxr.bin`, the boot images (boot classes only), a
+SHA-256 of every file on the ESP, files no package owns that the boot needs, `SHA256SUMS`.
+
+`k114s-repackage` is the lesson of the 2026-11-14 repair: the image's own archives are in no
+cache, and copying files by pacman's file lists copied far too much. It archives exactly the paths
+the local database lists, each as itself (a directory is one entry, never its contents), with
+`.PKGINFO` rebuilt from the database entry, the install scriptlet and a fresh `.MTREE`. Files are
+taken as they are now, and a report beside the archive names what differs from the package as
+installed (for `linux-aurora` here: the repair kernel image and the depmod files). The way back is
+one pacman transaction. Agent-run on the K114s as a normal user: `linux-aurora` rebuilt to 2,313
+entries, the same list `pacman -Ql` prints.
+
+**Userland** (`mesa-aurora`, `vulkan-aurora`, the plugin): switched directly. Afterwards the
+package follows the channel in ordinary updates.
+
+**Boot chain** (`linux-aurora`, `omarchy-aurora-firmware`, `m1n1-aurora`, `uboot-aurora`): never
+replaces the proven boot path in one step.
+
+| Step | What happens | What stays |
+| --- | --- | --- |
+| before | the proven chain must be recorded (`mark-known-good`: the image the EFI stub was started from, its hash, the Stage 2 hash), intact and the one running; the ESP must be the booted one; space is computed | nothing changes if any of this fails; the run says what it waits for |
+| stage | Stage 2 is frozen, the running kernel's release goes on the module keep list, the fixed packages are installed in one transaction. The system's own hooks build the new kernel's boot image as `omarchy_linux-aurora.efi` | the proven image byte for byte; `m1n1/boot-ctxr.bin` byte for byte; the default menu entry (put back if a hook moved it); the proven kernel's modules. When the proven image **is** `omarchy_linux-aurora.efi`, it is first copied to `omarchy_linux-aurora-known-good.efi` with a first, default menu entry |
+| prove | `k114s-boot-success` must record a boot with result ok for exactly the trial's image hash and Stage 2 hash, from a **different boot** than the one that staged it | everything; the run that proves retires nothing |
+| retire | on a later run, with `RETIRE_AFTER_BOOTS` (2) recorded boots and the trial chain running: the old image and its menu entry go, the default moves, the keep list empties | the old image stays in the rollback set; the menu as it was is kept beside it |
+
+`k114s-release abandon` gives a trial up: the old packages come back from the rollback set's
+archives as a pacman transaction (the saved module folder is handed back to its package with
+`--overwrite`), they are held again and the trial's markers go.
+
+**Stage 2** (m1n1, U-Boot, the device tree) is one file for every menu entry. It cannot be tried
+beside the old one, and the way back when Linux does not start is from macOS. So loader packages
+are installed with Stage 2 frozen, and the switch is its own step, by the owner unless
+`AUTO_STAGE2_SWITCH=yes`: `sudo k114s-release stage2 [--dtb packaged|pinned]`. It keeps the proven
+file on the ESP as `k114s-repair/known-good/boot-ctxr.bin` with its hash, prints how to put it back
+from macOS, and is proven and confirmed by the same boot records. `--dtb packaged` is how the pinned
+K114s tree is given up for the released kernel's own.
+
+**Locally built packages** take the same roads and stay held: `sudo k114s-release adopt FILE...`.
+A userland package (the plugin rebuilt against `hyprland-m5`, branch `r3/titlebars`) switches
+directly, with its `NoExtract` lifted for that one transaction. A boot-chain package (the next
+K114s kernel as a real package) goes through stage, prove and retire.
+
+**The EFI partition** (499 MB, one boot image is 80 to 112 MB). Before staging, the sum is: the new
+image (the larger of the existing standard image and kernel + initramfs + 2 MiB), a copy of the
+proven image when it has to be kept under another name, `boot.bin` twice and `boot-ctxr.bin` once,
+and the margin (`ESP_MARGIN_MB`, 8, as the macOS tool keeps). If the standard image is not the
+proven one and is in the way, it is removed first (its copy is already in the rollback set).
+Otherwise the release waits and says so. `sudo k114s-release forget-image EFI/Linux/NAME.efi`
+makes room by hand: it takes an image that is neither proven, running nor on trial off the ESP
+with its menu entry, after a verified copy.
+
+The assumption behind "the new image is written while the old one is still there" was not
+confirmed: `limine-entry-tool` is a compiled program. Unsure means block.
+
+## (c) Hooks into Omarchy
+
+Read on the machine: `omarchy update` runs `omarchy-hook post-update` after the package upgrade,
+migrations and service restarts, while its sudo authorisation is still kept alive, and before its
+own boot check and reboot prompt.
+
+- `~/.config/omarchy/hooks/post-update.d/k114s-release-check`: with sudo still authorised it runs
+  `k114s-release auto` (move a trial forward, check, release what `release.conf` allows) and
+  reports through `notify-send`. Without sudo it runs the check as the user and says what is
+  ready. It never fails the update.
+- `/etc/omarchy-k114s/release.conf`: `AUTO_RELEASE=yes` (the owner's choice), `AUTO_RELEASE_BOOT=yes`
+  (stage a fixed kernel as an additional entry), `AUTO_RETIRE=yes`, `RETIRE_AFTER_BOOTS=2`,
+  `AUTO_STAGE2_SWITCH=no`. It is read as data, never sourced.
+- Nothing in the tooling restarts the machine; a test greps every script, hook and unit for it.
+
+## (d) The gaps the review found
+
+| Gap | Now |
+| --- | --- |
+| guard named six packages | what is held is data: `holds.list` (the image's pinned set plus `holds.default`: boot chain, `limine`, `asahi-fwextract`, `asahi-scripts`, `omarchy-mac`, `hyprland-m5`, `mesa-aurora`, `vulkan-aurora`, the plugin). The install hook triggers on every package and compares with the list |
+| a rival replaces a held package (`hyprland` for `hyprland-m5`, `mesa`, `vulkan-asahi`, `m1n1`, ...) | `rivals.list`: a rival is stopped while its partner is held |
+| removals; `omarchy reinstall`; channel switch | the remove hook stops the removal or replacement of anything held or in `protected.list` (including `omarchy-dev` and `omarchy-settings-dev`, which a switch to stable or rc removes). `omarchy-pkg-defaults` names `hyprland` on this Mac, so `omarchy reinstall` stops at the rival guard |
+| stable or rc | the install hook reads the `[omarchy]` server in `pacman.conf` and stops any transaction while it is not the channel in `/etc/omarchy-k114s/channel` (edge). The marker `allow-channel-change` lifts that; removing the Edge desktop still needs its own decision |
+| the title-bar plugin | `noextract.list`: `NoExtract = usr/lib/omarchy-hyprland-titlebars/titlebars.so` until the installed build has `+m5` in its version or the package is released. With it, even a forced install of the channel's package leaves the stock-ABI plugin file out |
+| pre-refresh hook ignores a failed sudo | it waits for the path unit, then asks sudo, then fails loudly (red banner, critical notification). `omarchy-hook` only prints "Hook failed", so the pacman guards are what stops the upgrade; if they are missing as well, the hook ends the refresh that called it |
+| the image's "Test image only" lines | they go at the first refresh; our block is written back by `k114s-holds.path` (root, no prompt) within the same second, by the user hook, and at every boot |
+| space guard stops every transaction | `01-k114s-guard-esp.hook` has no catch-all trigger. Its triggers are every trigger of every hook on this system that can rewrite a boot file, so pacman runs it only for transactions that can reach the ESP, and its needs are summed per class (boot image, loader files, Limine). `k114s-guard audit` compares the list with the hooks present, at install, at every boot and in the tests; an unknown boot hook makes every install count as able to write the ESP until it is reviewed |
+| no archives of the held packages | `sudo k114s-recovery-set` (the installer runs it once) |
+
+Owner overrides, all deliberate files in `/etc/omarchy-k114s`: `allow-coupled-update`,
+`allow-channel-change`, `allow-low-esp`, `esp-guard-conservative`.
+
+## (e) Guards before the first boot: a proposal
+
+r2c left the guards as an optional later step, and one menu choice in that window downgraded the
+boot chain. From macOS the Linux root is closed, so apply cannot install anything there. The
+repair boot image is ours, though, and its initramfs is systemd-based
+(`HOOKS=(base systemd ...)`, read on the machine).
+
+1. The bundle's boot image carries the guard files (about 100 kB of text) in its initramfs,
+   beside the Wi-Fi firmware that already rides there.
+2. An initramfs unit copies them to `/run/omarchy-k114s/firstboot/` and drops
+   `k114s-firstboot.service` into `/run/systemd/system` with a `sysinit.target.wants` link.
+   `/run` survives the switch to the real root, so the real system's systemd runs the unit.
+   The initramfs writes nothing to the root filesystem.
+3. The unit has `DefaultDependencies=no`, `After=systemd-remount-fs.service local-fs.target`,
+   `Before=basic.target`: the root is writable, and no login, timer or update has started. It is
+   idempotent. It installs the three hook files, `k114s-guard`,
+   `k114s-holds` and their data; writes the hold list (what `pacman.conf` pins now plus
+   `holds.default`); applies the block; enables `k114s-holds.path`. If anything fails it writes
+   `/etc/omarchy-k114s/esp-guard-conservative` and a hook that stops every transaction with the
+   reason, so the failure is closed, not open.
+4. It writes a small record with hashes to `k114s-repair/guards.json` on the ESP, so the macOS
+   tool's `status` can say "guards installed at first boot" or "pending".
+5. The rest (boot-success timer, recovery set, user hooks) stays in the installer, which then
+   finds the guards in place. Until it has run, updates are stopped, not unguarded.
+
+Not tried: that systemd in the real root picks up a unit the initramfs left in
+`/run/systemd/system`. It is how initramfs-made units are documented to carry over, and
+`build/qemu-test-init` is the place to show it before a bundle relies on it.
+
+What this does not cover: a first boot of the image's original entry, which has no such
+initramfs. Apply makes the repair entry the default, and the unit installs persistently, so every
+later boot of any entry has the guards. The macOS tool should say so when the default is changed
+before the first boot.
+
+## Installing over r2c, and going back
+
+As root, from a checkout of this branch (the lead runs this; no agent has root):
+
+```sh
+sudo bash linux/k114s-tooling-install
+sudo /usr/local/lib/omarchy-k114s/k114s-release status
+```
+
+It needs r2c's persistence (`persist-r2c`), checks that every file is beside it and parses, saves
+what it replaces under `/usr/local/lib/omarchy-k114s/tooling-r3`, and then: installs the tools and
+data; swaps r2c's two pacman hooks for the three new ones; merges the hold list (what was held
+and is installed, plus the defaults that are installed; `omarchy` and `omarchy-settings` drop out
+because Edge's `omarchy-dev` replaced them); writes the block; installs and enables the units and
+the module-cleanup drop-in; installs both user hooks; records the running boot chain as proven;
+writes a recovery set. It installs no package, changes no file on the ESP and does not reboot.
+
+- `--refresh` copies scripts and data again after a repository update; settings, the hold list
+  and state are kept.
+- `--undo` puts back exactly what r2c left (the test compares every file by content and mode).
+  It is refused while a trial is in progress, and it says which packages were released meanwhile.
+- `--no-recovery-set` skips the archive step (about 350 MB with both boot images).
+
+Two things to settle on the machine first, both read on 2026-11-14:
+
+- **Which image is proven.** The EFI variable says the running system was started from
+  `EFI/Linux/omarchy_linux-aurora.efi`, the standard image, not the repair image. The installer
+  records the running one. If the repair entry should be the proven one, boot it and run
+  `sudo k114s-release mark-known-good`.
+- **Room.** The ESP has 87.7 MB free with two images on it. An update that rebuilds the boot
+  image is counted at about 90 MB (kernel 54.1 + initramfs 25.0 + 2.1, plus the 8 MiB margin) and
+  is stopped until one image goes; a kernel release needs more. r2c's guard stops every
+  transaction below 100 MB, so this is no step back, and ordinary updates now pass. With the
+  standard image proven: `sudo k114s-release forget-image EFI/Linux/omarchy_linux-aurora-k114s.efi`
+  frees 112 MB after a verified copy.
+
+## For the next kernel
+
+- Give the r3 kernel a **release string of its own** (`uname -r`). A kernel package with the
+  running kernel's release string would replace the proven kernel's modules in place, and
+  `k114s-release` refuses to stage it unless `K114S_ACCEPT_SHARED_MODULES=1`.
+- Do not name its package `linux-aurora-k114s` while `omarchy_linux-aurora-k114s.efi` is the
+  repair image: the system's hook names boot images after the package and would overwrite it.
+- As package `linux-aurora` with a version above the installed one, it goes in with
+  `sudo k114s-release adopt FILE` and stays held; the channel's kernel then has to pass the
+  criteria and be at least that upstream version to replace it.
+
+## Tests
+
+`bash tests/linux/run-r3.sh`, as a normal user, no fixtures, on 2026-11-14 on the K114s:
+
+```
+r3 syntax and data checks: 80 passed, 0 failed
+r3 guard tests: 156 passed, 0 failed
+r3 recovery tests: 58 passed, 0 failed
+r3 release-check tests: 73 passed, 0 failed
+r3 release tests: 78 passed, 0 failed
+r3 install tests: 46 passed, 0 failed
+r3 pacman tests (replica: real pacman in a user namespace): 150 passed, 0 failed
+r3 update tooling: 641 passed, 0 failed, 0 test file(s) skipped
+```
+
+`R3_DEBUG=1` prints the output of a failing test, `R3_KEEP=1` keeps the temp folder. A test file
+that lacks a tool on the host says SKIPPED. r2c's own tests (`test-persist.sh`, `test-hook.sh`)
+need the build fixtures and were not rerun here; the one r2c file changed,
+`update-boot-ctxr-k114s`, has its addition tested in `test-r3-release.sh` and in the replica.
+
+What the replica run shows, in order: the installer over r2c's state; an ordinary update with a
+full ESP goes through and the space guard does not even run; an update that rebuilds the boot
+image is stopped by the sum and goes through with room; the 2026-11-14 refresh replayed (stopped
+with no holds, harmless with them); named installs and removals; a switch to stable; `omarchy
+reinstall`; `NoExtract`; adopting the rebuilt plugin; a userland release through the post-update
+hook, its rollback from the archive; a refused kernel transaction; a kernel, firmware and loader
+release staged, abandoned, staged again, booted from the old entry, booted incomplete, proven,
+retired on the second boot; the Stage 2 switch, its abandon, its proof; the steady state where
+the proven image is the standard one; a locally built kernel through the same road; undo.
+
+Bugs these tests found in the first draft, all fixed: a check that always passed because a glob
+ran with globbing off; a trial that a record from the staging boot could have "proven"; a retire
+that looked for the old image under its new name; an abandon that pacman refused over the saved
+module folder; three silent exits under `set -e`.
+
+## What is not shown, and what can go wrong
+
+- **No boot.** Whether a channel kernel that passes the criteria starts this Mac is shown only by
+  the owner booting the additional entry. The criteria are evidence, not proof; `code-imm16` in
+  particular looks for a constant in machine code.
+- **The boot-success record** is written a minute after boot and retried every ten minutes until
+  the boot is ok. It says what a script observed (a Hyprland process, `wlan0`, the
+  input device `Apple MTP multi-touch`); all three names were read on this Mac. It does not know
+  whether the pointer moves.
+- **Stage 2** has no additional-entry safety. The switch is the owner's command, and the way back
+  is from macOS.
+- **The real boot hooks** (`limine-mkinitcpio`, `update-m1n1`, `kernel-modules-hook`) were stood
+  in for. Their triggers were read from this machine; that Limine keeps the K114s menu block and
+  `default_entry` is taken from the 2026-11-14 pacman log, and `k114s-release` checks both after
+  the transaction and says so loudly when they are gone.
+- **`omarchy update`'s own boot check** runs after the post-update hook. With a kernel staged in
+  that hook it judges the new boot files; r2c's `owner-boot-chain` declaration turns its failure
+  into a warning. Not run here.
+- **Holding channel tooling for long** (`limine`, `omarchy-mac-boot`, `asahi-scripts`, ...) will
+  one day stop `omarchy update` on a dependency. Each has a `manual` line for that day.
+- **`hyprland-m5` provides `hyprland=0.57.2`.** When the channel's desktop needs a newer
+  Hyprland, updates stop on that dependency until a newer `hyprland-m5` exists.
+- **Free space as pacman sees it** uses `df` on `/boot/efi`; a transaction on another mounted ESP
+  is refused by `k114s-booted-esp` as in r2c.
+
+## Provenance
+
+This repository's own work (MIT). One row for `NOTICE.md`, which this branch does not edit:
+
+| Path | Origin | Author | License |
+| --- | --- | --- | --- |
+| `linux/k114s-modules-cleanup` | the `ExecStart` line of `linux-modules-cleanup.service` in kernel-modules-hook 0.1.7, written out, with a keep list | saber-nyan (kernel-modules-hook); keep list here | The Unlicense |
+
+Methods taken, not code: `checkupdates` (pacman-contrib) for the private list refresh under
+`fakeroot`; makepkg's `.MTREE` options for the rebuilt archives.
