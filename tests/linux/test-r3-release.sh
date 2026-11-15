@@ -409,6 +409,9 @@ if have gpg; then
   ok "signature: a valid signature by a key in the keyring that is not trusted is refused (pacman-key --verify would pass it)" "$(signed_ok "$a"; status)" 1
   G --local-user signer@example.invalid --detach-sign -o "$a.sig.new" "$a"; mv -f "$a.sig.new" "$a.sig"; echo changed >> "$a"
   ok "signature: an archive changed after signing is refused" "$(signed_ok "$a"; status)" 1
+  sed -i '$d' "$a"; ok "signature: back to the signed bytes, it passes again" "$(signed_ok "$a"; status)" 0
+  printf 'disable\nsave\n' | G --command-fd 0 --edit-key "$(fpr signer@example.invalid)"
+  ok "signature: a disabled key (as pacman-key --populate leaves a revoked one) is refused" "$(signed_ok "$a"; status)" 1
   K114S_SIGCHECK=true; ok "signature: K114S_SIGCHECK is ignored outside the test sandboxes" "$(signed_ok "$a"; status)" 1
   unset K114S_SIGCHECK; ROOT=
 else

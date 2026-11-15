@@ -89,7 +89,14 @@ signed_ok() {
   fi
   status=$(LC_ALL=C gpg --homedir "$ROOT/etc/pacman.d/gnupg" --no-permission-warning --batch --no-tty --no-auto-key-retrieve \
     --status-fd 1 --verify "$1.sig" "$1" 2>/dev/null) || return 1
-  grep -q '^\[GNUPG:\] VALIDSIG ' <<< "$status" && grep -qE '^\[GNUPG:\] TRUST_(FULLY|ULTIMATE)' <<< "$status"
+  # GOODSIG: not expired, key not expired or revoked; a revoked signing subkey still gets VALIDSIG and a trust line
+  grep -q '^\[GNUPG:\] GOODSIG ' <<< "$status" && grep -q '^\[GNUPG:\] VALIDSIG ' <<< "$status" &&
+    grep -qE '^\[GNUPG:\] TRUST_(FULLY|ULTIMATE)' <<< "$status" &&
+    ! grep -qE '^\[GNUPG:\] (BADSIG|ERRSIG|EXPSIG|EXPKEYSIG|REVKEYSIG|KEYREVOKED|KEYEXPIRED)' <<< "$status" || return 1
+  # a key pacman-key --populate disabled (archlinux-revoked) still verifies: refuse it (field 12 of its pub line holds D)
+  local primary; primary=$(awk '$1 == "[GNUPG:]" && $2 == "VALIDSIG" { print $NF; exit }' <<< "$status")
+  ! LC_ALL=C gpg --homedir "$ROOT/etc/pacman.d/gnupg" --no-permission-warning --batch --no-tty --with-colons --list-keys "$primary" 2>/dev/null |
+    awk -F: '$1 == "pub" && $12 ~ /D/ { found=1 } END { exit !found }'
 }
 note() { summary+=("$*"); log "$*"; }
 run_pacman() { # a transaction runs its boot hooks (limine-entry-tool takes the boot-partition lock itself), so this process lets go of the lock meanwhile
