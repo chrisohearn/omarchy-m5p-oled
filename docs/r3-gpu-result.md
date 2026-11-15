@@ -136,7 +136,7 @@ rm -f /etc/omarchy-k114s/stage2-trial /boot/efi/aura-try && sync -f /boot/efi   
 systemctl disable k114s-stage2-rearm.service
 rm -f /etc/systemd/user-environment-generators/70-k114s-gpu-desktop /etc/sddm.conf.d/70-k114s-greeter-software.conf
 systemctl unmask suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
-rm -f ~cohearn/.config/k114s-gpu-desktop   # as the user: rm ~/.config/k114s-gpu-desktop
+rm -f ~<user>/.config/k114s-gpu-desktop   # or, as that user: rm ~/.config/k114s-gpu-desktop
 ```
 
 ## Still to do
