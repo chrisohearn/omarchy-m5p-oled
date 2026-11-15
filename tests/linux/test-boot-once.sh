@@ -114,5 +114,18 @@ reboot cl boot2; out=$(run cl status); ok "a cleared request never gives PASSED"
 EXP="has not been measured"; refuse "cleared: a real target still refuses" cl arm Omarchy/linux-k114s
 mk t; rm $W/t/state/boot-once-selftest-ok; run t arm "$REPAIR" >/dev/null; reboot t boot2; echo 0 > $W/t/epoch
 out=$(run t status); has "NOT MEASURED prints the mtime and the boot start" "$out" "mtime [0-9]*, boot start 0"
+# store_has checks the value of LoaderEntryOneShot, not the id anywhere in the file
+mk v; printf '#!/bin/sh\nf=$K114S_ESP/ubootefi.var; : > "$f"; { printf "LoaderEntries" | iconv -t UTF-16LE; printf "\\0\\0Omarchy.linux-k114s\\0\\0"; } >> "$f"\nexit 0\n' > $W/v/save
+out=$(run v arm Omarchy/linux-k114s); has "an id held by another variable does not satisfy the post-save check" "$out" "not hang-safe; taken back"
+# mark-not-durable is sticky: arm refuses real targets, status never re-passes, clear keeps it
+mk nd; run nd arm "$REPAIR" >/dev/null; out=$(run nd mark-not-durable); has "mark-not-durable writes the marker" "$out" "marked:"
+ok "mark-not-durable removes the self-test marker and the arming record" "$(ls $W/nd/state | sort | tr '\n' ' ')" "boot-once-not-durable "
+run nd clear >/dev/null
+EXP="durability check failed"; refuse "real target after mark-not-durable" nd arm Omarchy/linux-k114s
+out=$(run nd arm "$REPAIR"); has "the repair entry itself can still be armed" "$out" "armed: the next boot starts"
+reboot nd boot2; out=$(run nd status); ok "status never gives PASSED after mark-not-durable" "$(printf '%s' "$out" | grep -c 'self-test: PASSED')" 0; has "status says why" "$out" "self-test: not run"
+ok "no self-test marker is written" "$(ls $W/nd/state | grep -c selftest-ok)" 0
+run nd clear >/dev/null; ok "clear leaves the marker" "$(ls $W/nd/state | grep -c boot-once-not-durable)" 1
+EXP="durability check failed"; refuse "real target still refused after clear" nd arm Omarchy/linux-k114s
 echo "k114s-boot-once tests: $pass passed, $fail failed"
 [ "$fail" = 0 ]

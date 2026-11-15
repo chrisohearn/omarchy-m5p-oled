@@ -83,7 +83,7 @@ sudo ./k114s-repair rollback all      # limine.conf and device tree as before; r
 `EFI/Linux/omarchy_linux-aurora.efi` is off the ESP on purpose. Then `rollback all` would leave no Linux entry that
 starts: with the tool from this branch it stops and writes nothing. Use `rollback stage2`, `stage2 r1` and `default repair`, and run `status`
 afterwards. **The earlier delivered tool cannot be used in that state at all**: it finds the ESP by that image, so every command, including `status`, stops with
-"is not an Omarchy ESP" and writes nothing. The fixed tool therefore has to be in the bundle on the Mac, and `status` confirmed there, before the image is removed.
+"expected exactly one Omarchy ESP, found 0" and writes nothing. (The text "is not an Omarchy ESP" appears only in `--esp-dir` test mode.) The fixed tool therefore has to be in the bundle on the Mac, and `status` confirmed there, before the image is removed.
 
 macOS is not touched by any of this.
 

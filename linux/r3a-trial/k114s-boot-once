@@ -6,7 +6,8 @@
 #   k114s-boot-once arm ENTRY [--with-stage2-trial]
 #                                      next boot starts ENTRY (a path such as  Omarchy/linux-k114s ) once
 #   k114s-boot-once status             the one-shot variable in efivarfs and in U-Boot's variable file
-#   k114s-boot-once clear              take the request back
+#   k114s-boot-once clear              take the request back (does not touch the not-durable marker)
+#   k114s-boot-once mark-not-durable   record that the durability check failed: arm then refuses every real target for good
 #
 # How it works, read from Limine 12.9.6 (common/lib/bli.c, common/menu.c): Limine reads the Boot Loader
 # Interface variable LoaderEntryOneShot and ERASES it in the same call, before it boots anything. The value
@@ -28,6 +29,9 @@
 # repair entry itself, a request that changes nothing) until `status`, run in the boot right after such a request,
 # has measured that the request is gone from U-Boot's file before any shutdown save, and wrote
 # $STATE/boot-once-selftest-ok. A failed measurement removes that marker.
+# $STATE/boot-once-not-durable (written by mark-not-durable, after a failed power-cut check) is sticky: arm refuses every
+# real target while it exists, status never measures or writes the self-test marker, and clear leaves it alone. Only the
+# lead removing the file by hand (after a new decision) lifts it.
 #
 # Test hooks (environment): K114S_EFIVARS K114S_ESP K114S_ETC K114S_SAVE K114S_SYSTEMCTL K114S_REPAIR_UKI
 # K114S_STATE K114S_BOOTID K114S_PREVBOOT K114S_BOOT_EPOCH.
@@ -109,7 +113,8 @@ store_file() {
   n=$(tail -c +5 "$r" | tr -d '\0'); n=${n#/}; [ -n "$n" ] && printf '%s/%s' "$ESP" "$n"
 }
 # Does U-Boot's file hold this id as a UTF-16 string?  (strings -e l = little-endian 16-bit)
-store_has() { f=$(store_file) || return 2; [ -r "$f" ] || return 2; strings -a -e l "$f" | grep -qxF -- "$1"; }
+# The id must be the value of LoaderEntryOneShot: the line straight after the name, not the id anywhere in the file.
+store_has() { f=$(store_file) || return 2; [ -r "$f" ] || return 2; strings -a -e l "$f" | grep -A1 -xF LoaderEntryOneShot | grep -qxF -- "$1"; }
 
 cmd_status() {
   if [ -e "$VAR" ]; then printf 'efivarfs: LoaderEntryOneShot = %s\n' "$(tail -c +5 "$VAR" | iconv -f UTF-16LE -t UTF-8 2>/dev/null | tr -d '\0')"; else echo "efivarfs: no LoaderEntryOneShot (none requested, or Limine consumed it)"; fi
@@ -123,7 +128,9 @@ cmd_status() {
 # is the arming boot), when this boot started the repair entry, the variable is gone from efivarfs AND from U-Boot's file,
 # and the file was not written during this boot (so no save could have hidden a missing boot-time write).
 selftest_eval() {
-  a=$STATE/boot-once-armed; m=$STATE/boot-once-selftest-ok; [ -r "$a" ] || return 0
+  a=$STATE/boot-once-armed; m=$STATE/boot-once-selftest-ok
+  [ -e "$STATE/boot-once-not-durable" ] && { echo "self-test: not run: $STATE/boot-once-not-durable exists (the durability check failed); real targets stay refused"; return 0; }
+  [ -r "$a" ] || return 0
   read -r ab aid < "$a"; [ "$ab" != "$BOOTID" ] || return 0
   first=$(entry_id "$(list_entries | head -1 | cut -f2)"); [ "$aid" = "$first" ] || return 0
   rm -f "$a"
@@ -150,6 +157,14 @@ cmd_clear() {
   echo "cleared"
 }
 
+# the durability check showed the erase does not survive a power cut: sticky, so no later status can re-pass the gate
+cmd_mark_not_durable() {
+  mkdir -p "$STATE" || die "cannot create $STATE"
+  printf 'not-durable boot=%s\n' "$BOOTID" > "$STATE/boot-once-not-durable" || die "cannot write the marker"
+  rm -f "$STATE/boot-once-selftest-ok" "$STATE/boot-once-armed"
+  echo "marked: real targets are refused from now on; run 'clear' if a request is still armed"
+}
+
 cmd_arm() {
   target=${1:-}; [ $# -gt 0 ] && shift; with_s2=0
   for a in "$@"; do [ "$a" = --with-stage2-trial ] && with_s2=1; done
@@ -160,6 +175,9 @@ cmd_arm() {
   [ -n "$line" ] || die "no entry '$target' in limine.conf (see: entries)"
   bp=$(printf '%s' "$line" | cut -f3); [ -n "$bp" ] || die "'$target' is a directory, not an entry that boots"
   m=$(check_boot_file "$bp") || die "$m; nothing armed"
+  if [ "$(printf '%s' "$line" | cut -f1)" != 1 ] && [ -e "$STATE/boot-once-not-durable" ]; then
+    die "the durability check failed on this Mac ($STATE/boot-once-not-durable exists): only the repair entry (entry 1) can be armed; nothing armed"
+  fi
   if [ "$(printf '%s' "$line" | cut -f1)" != 1 ] && ! grep -q '^ok ' "$STATE/boot-once-selftest-ok" 2>/dev/null; then
     die "the one-shot mechanism has not been measured on this Mac ($STATE/boot-once-selftest-ok is missing). Arm the repair entry itself (entry 1), reboot, run 'status' first thing; nothing armed"
   fi
@@ -186,5 +204,6 @@ case ${1:-} in
   arm)     shift; cmd_arm "$@" ;;
   status)  cmd_status ;;
   clear)   cmd_clear ;;
+  mark-not-durable) cmd_mark_not_durable ;;
   *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
