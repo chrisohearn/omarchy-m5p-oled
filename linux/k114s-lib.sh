@@ -53,9 +53,13 @@ list_names() { # the valid package names in FILE (first word of each line), sort
   [[ -f $1 ]] || return 0
   awk '!/^[[:space:]]*(#|$)/ { print $1 }' "$1" | { grep -E '^[A-Za-z0-9@._+-]+$' || true; } | LC_ALL=C sort -u
 }
-held_names() { # what is held now: holds.list (or the boot stack when it is missing) minus what was released
+boot_class_names() { # packages whose change is a change of the boot chain: never released for good (they are re-checked at every version)
+  { printf '%s\n' linux-aurora m1n1-aurora uboot-aurora
+    awk '$1 == "package" && $3 ~ /^boot-/ { print $2 }' "$(data_file release-criteria.conf)" 2>/dev/null || true; } | LC_ALL=C sort -u
+}
+held_names() { # what is held now: holds.list (or the boot stack when it is missing) minus what was released (a boot-chain package is never "released")
   local released
-  released=$(list_names "$LIB/released.list")
+  released=$(list_names "$LIB/released.list" | { grep -Fxv -f <(boot_class_names) || true; })
   { if [[ -f $LIB/holds.list ]]; then list_names "$LIB/holds.list"; else printf '%s\n' linux-aurora m1n1-aurora uboot-aurora; fi; } |
     { if [[ -n $released ]]; then grep -Fxv -f <(printf '%s\n' "$released") || true; else cat; fi; } | LC_ALL=C sort -u
 }
@@ -84,6 +88,19 @@ esp_free() { # free bytes on the ESP; K114S_ESP_FREE overrides (tests)
 }
 esp_is_mounted() { [[ -n ${K114S_ROOT:-} ]] || findmnt -n "$ESP" >/dev/null 2>&1; }
 limine_conf() { echo "$ESP/limine.conf"; }
+# limine-snapper-sync (enabled on the Mac) writes snapshot boot files into <ESP>/<machine-id>/limine_history
+# and limine.conf whenever a snapshot is made, under the mutex /run/lock/boot-partition.lock.
+snapper_sync_on() { [[ -e $ROOT/etc/limine-snapper-sync.conf ]]; }
+snapshot_bytes() { du -sb "$ESP"/*/limine_history 2>/dev/null | awk '{ n += $1 } END { print n + 0 }'; }
+boot_lock() { # take the mutex the Limine tools use before an edit of the ESP or limine.conf; held until the process ends or boot_unlock
+  # "boot_lock soft" returns 1 instead of dying, for the steps after a package transaction, which must not be cut short
+  mkdir -p "$ROOT/run/lock"
+  exec 8> "$ROOT/run/lock/boot-partition.lock"
+  flock -w "${K114S_LOCK_WAIT:-120}" 8 && return 0
+  [[ ${1:-} != soft ]] || return 1
+  die "limine-snapper-sync or limine-entry-tool holds the boot partition lock; nothing changed, try again in a moment"
+}
+boot_unlock() { flock -u 8 2>/dev/null || true; }
 uki_prefix() { # CUSTOM_UKI_NAME from /etc/default/limine, read not sourced
   local name
   name=$(sed -n 's/^[[:space:]]*CUSTOM_UKI_NAME[[:space:]]*=[[:space:]]*"\{0,1\}\([a-z0-9]*\)"\{0,1\}.*/\1/p' "$ROOT/etc/default/limine" 2>/dev/null | tail -n 1)

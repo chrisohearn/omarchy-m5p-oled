@@ -37,7 +37,7 @@ All under `linux/`, installed to `/usr/local/lib/omarchy-k114s` by `k114s-toolin
 | `k114s-fdt`, `k114s-binscan` | read-only readers of device tree blobs and AArch64 code (the image has no `dtc`) |
 | `holds.default`, `rivals.list`, `protected.list`, `noextract.list`, `extras.list`, `esp-audit-ignore.list`, `release.conf` | data |
 | `k114s-lib.sh` | shared functions; every path hangs off `K114S_ROOT`, which is how the tests run the same code as a normal user |
-| `update-boot-ctxr-k114s` | r2c's Stage 2 hook with two additions: it leaves `boot-ctxr.bin` alone while `/etc/omarchy-k114s/stage2-frozen` exists, and with `K114S_STAGE2_OUT=boot-ctxr-NAME.bin` (and `K114S_STAGE2_DTB=packaged\|pinned`) it writes a candidate beside it instead. Its default behaviour is r2c's |
+| `update-boot-ctxr-k114s` | r2c's Stage 2 hook with two additions: once the tooling is installed (`/etc/omarchy-k114s/stage2-managed`, made by the installer) the pacman hook never rewrites `boot-ctxr.bin`: only `k114s-release` changes it, at the switch, after a candidate has booted. It also leaves it alone while `/etc/omarchy-k114s/stage2-frozen` exists (the "a switch is pending" marker), and with `K114S_STAGE2_OUT=boot-ctxr-NAME.bin` (and `K114S_STAGE2_DTB=packaged\|pinned`) it writes a candidate beside it instead. Its default behaviour is r2c's |
 
 r2c's own files (`apply-holds`, `hold-guard`, `esp-space-guard`, the two old hook files,
 `linux-persist.sh`) are unchanged in the repository; `--undo` puts them back.
@@ -62,17 +62,17 @@ A held package without a `package` line in the criteria is never released.
 
 The criteria are data. Check types: `version-newer`, `file-exists`, `file-contains`,
 `file-matches`, `dtb-root-compatible`, `dtb-node`, `dtb-okay`, `dtb-prop`, `kconfig`,
-`module-parm`, `code-imm16`, `depends-on`, `not-installed`, `manual`. `check` lines must all pass;
+`module-parm`, `code-imm16`, `tree-drivers`, `depends-on`, `not-installed`, `manual`. A `package` line may end in `keep-held` (see the userland rule below). `check` lines must all pass;
 `any` lines of one label need one pass. An unknown type or an unreadable package is `error`, never
 a pass.
 
 | Package | Class | Fit when |
 | --- | --- | --- |
-| `linux-aurora` | boot-uki | not older than ours; ships `t6050-k114s.dtb` whose root is `apple,k114s`; that tree has the N1 control function with platform id `0x00146050`, the Wi-Fi and Bluetooth functions, the PCIe controller enabled, two USB controllers and two port controllers enabled, the SMC sensors enabled, the keyboard/trackpad transport; the N1 and trackpad drivers are there; the trackpad fix is in (the report-size clamp of aurora-silicon/linux PR 1568 in the image, or product `0x0361` in `hid-magicmouse`); the built-in config meets `kernel-config.required` |
+| `linux-aurora` | boot-uki | not older than ours; ships `t6050-k114s.dtb` whose root is `apple,k114s`; that tree has the N1 control function with platform id `0x00146050`, the Wi-Fi and Bluetooth functions, the PCIe controller enabled, two USB controllers and two port controllers enabled, the SMC sensors enabled, the keyboard/trackpad transport; the N1 and trackpad drivers are there; the trackpad needs BOTH halves: the report-size clamp in the image (`report-clamp`) AND a `hid-magicmouse` module that parses the frames, checked in the module (`trackpad-module`: the PR 1568 raw-event path, or product `0x0361` admitted). The clamp string alone proves nothing (on this Mac it is in the running image and r2c still had to patch the module). `tree-drivers`: for every compatible of the tree this Mac boots (the running device tree, which is r1 or r3-gpu with the GPU, plus the Stage 2 tree: the pinned one, or the packaged one after `stage2 --dtb packaged`) that the running, proven kernel carries a driver for (an exact string in `vmlinuz`, or an `of:` alias in `modules.alias`), the channel's kernel must carry one too; `apple,t6050-nvme-ans2` is also checked by name. The packaged-tree checks above stay as additional gates (they can only over-block); the built-in config meets `kernel-config.required` |
 | `m1n1-aurora` | boot-stage2 | not older; the loader binary knows the T6050 SoC, its PCIe and its USB PHY |
 | `uboot-aurora` | boot-stage2 | not older; U-Boot knows the T6050 NVMe and SART |
 | `omarchy-aurora-firmware` | boot-uki | not older; its initramfs script loads the N1 driver for `apple,k114s`; its install hook still adds `apple_centauri` |
-| `mesa-aurora`, `vulkan-aurora` | userland | newer; still carry the M5 Pro driver (`G17S`) |
+| `mesa-aurora`, `vulkan-aurora` | userland, `keep-held` | newer; carry the M5 Pro device (`G17S`) AND the bringup gate (`ASAHI_M5_BRINGUP`, without which Mesa refuses the device and the greeter does not start); Mesa also carries `llvmpipe`, because the desktop guard (`70-k114s-gpu-desktop`) falls back to the CPU with `LIBGL_ALWAYS_SOFTWARE` and the greeter always runs on it. Read from this Mac's installed libraries on 2026-11-14 (all three strings are in `libgallium`, the first two in `libvulkan_asahi`). A string check is still not a boot of the GPU: after a release the next desktop session is the test, and `rm ~/.config/k114s-gpu-desktop` (CPU) is the way out |
 | `omarchy-hyprland-titlebars` | userland | not older; depends on `hyprland-m5` (built against its headers), or `hyprland-m5` is no longer installed |
 | `hyprland-m5` | userland | the channel has no such package; if one appears, a person decides (`manual`) |
 | `omarchy-mac-boot`, `limine-mkinitcpio-hook`, `limine`, `asahi-scripts`, `asahi-fwextract`, `omarchy-mac` | boot or userland | channel-built tooling whose scripts write the boot files. Nothing in such a package can be checked for "knows the K114s", so each has a `manual` line: `sudo k114s-release release --accept-manual NAME` |
@@ -111,7 +111,13 @@ Rules it keeps, each with a test:
 3. The hold guard lets **exactly that transaction** through: a permit in `/run` names the
    packages; anything else held in the same transaction still stops it. The permit is removed
    right after and ignored when older than an hour.
-4. A failed transaction puts the package back on hold.
+4. A failed transaction leaves the package held.
+5. **A boot-chain package is never released**, not even for the transaction: the permit lets exactly
+   that transaction through the guard and pacman installs the named, ignored package, so the
+   package is held before, during and after. The next channel build, kernel or loader, has to pass
+   the check and the trial again. (`k114s-holds release` refuses them, and the guard and the holds
+   block ignore a `released.list` line for one. Before this, a released kernel or loader followed
+   the channel in ordinary updates and replaced the proven boot path in one step.)
 
 **Rollback set** (`k114s-recovery-set --packages ...`, under `/var/lib/omarchy-k114s/rollback`):
 the installed package rebuilt into an archive by `k114s-repackage`, the files in `/boot`,
@@ -127,8 +133,13 @@ installed (for `linux-aurora` here: the repair kernel image and the depmod files
 one pacman transaction. Agent-run on the K114s as a normal user: `linux-aurora` rebuilt to 2,313
 entries, the same list `pacman -Ql` prints.
 
-**Userland** (`mesa-aurora`, `vulkan-aurora`, the plugin): switched directly. Afterwards the
-package follows the channel in ordinary updates.
+**Userland** (the plugin): switched directly; afterwards the package follows the channel in
+ordinary updates. The GPU stack (`mesa-aurora`, `vulkan-aurora`) and the boot-time tooling a person
+decides on (`omarchy-mac`, `asahi-fwextract`), `keep-held` in the criteria, are switched directly
+too, but stay held: each later channel build is
+checked again and installed by `auto`, never by an ordinary update. Its rollback is
+`sudo k114s-release adopt <rollback set>/packages/NAME-*.pkg.tar.zst` (a bare `pacman -U` of a held
+package is stopped by the guard).
 
 **Boot chain** (`linux-aurora`, `omarchy-aurora-firmware`, `m1n1-aurora`, `uboot-aurora`): never
 replaces the proven boot path in one step.
@@ -136,7 +147,7 @@ replaces the proven boot path in one step.
 | Step | What happens | What stays |
 | --- | --- | --- |
 | before | the proven chain must be recorded (`mark-known-good`: the image the EFI stub was started from, its hash, the Stage 2 this boot came through and its hash, and the hash of the configured `m1n1/boot-ctxr.bin` the loader falls back to), intact and the one running; no boot-menu trial of someone else may be under way; the ESP must be the booted one; space is computed | nothing changes if any of this fails; the run says what it waits for |
-| stage | Stage 2 is frozen, the running kernel's release goes on the module keep list, the fixed packages are installed in one transaction. The system's own hooks build the new kernel's boot image as `omarchy_linux-aurora.efi` | the proven image byte for byte; `m1n1/boot-ctxr.bin` byte for byte, and the Stage 2 file a standing trial boots (both put back from the rollback set if anything changed them); the default menu entry (put back if a hook moved it); the proven kernel's modules. When the proven image **is** `omarchy_linux-aurora.efi`, it is first copied to `omarchy_linux-aurora-known-good.efi` with a first, default menu entry |
+| stage | Stage 2 is frozen, the running kernel's release goes on the module keep list, the fixed packages are installed in one transaction (under the permit; they stay held). Omarchy's `11-omarchy-mac-saved-modules.hook` moves the running kernel's modules to `/usr/lib/modules/.old` in that transaction when the new kernel's release string sorts below the running one (the channel's `7.3.0-17-ARCH` against our `7.3.0-17.v272-4-ARCH`); the tool checks afterwards and moves them back (never into an existing folder: that is a PROBLEM note) before anything is recorded, or says PROBLEM. While it works on the ESP or `limine.conf` it holds `/run/lock/boot-partition.lock`, the mutex `limine-entry-tool` and `limine-snapper-sync` use, and lets it go while pacman runs. After the transaction it waits for the lock only after the module restore, and a timeout is a log line, not a stop: the Stage 2 put-back, the default entry and the trial record are always written. The system's own hooks build the new kernel's boot image as `omarchy_linux-aurora.efi` | the proven image byte for byte; `m1n1/boot-ctxr.bin` byte for byte, and the Stage 2 file a standing trial boots (both put back from the rollback set if anything changed them); the default menu entry (put back if a hook moved it); the proven kernel's modules. When the proven image **is** `omarchy_linux-aurora.efi`, it is first copied to `omarchy_linux-aurora-known-good.efi` with a first, default menu entry |
 | prove | `k114s-boot-success` must record a boot with result ok for exactly the trial's image hash and Stage 2 hash, from a **different boot** than the one that staged it | everything; the run that proves retires nothing |
 | retire | on a later run, with `RETIRE_AFTER_BOOTS` (2) recorded boots and the trial chain running: the old image and its menu entry go, the default moves, the keep list empties | the old image stays in the rollback set; the menu as it was is kept beside it |
 
@@ -227,6 +238,30 @@ own boot check and reboot prompt.
 
 Owner overrides, all deliberate files in `/etc/omarchy-k114s`: `allow-coupled-update`,
 `allow-channel-change`, `allow-low-esp`, `esp-guard-conservative`.
+
+## (d2) The second review (blocker, highs, mediums, lows) and what changed
+
+| Finding | Now |
+| --- | --- |
+| a released kernel or loader followed the channel and replaced the proven boot path in one step; the hook rewrote `boot-ctxr.bin` once the freeze was gone | boot-chain packages are never released (rule 5 in section (b)); the hook never writes `boot-ctxr.bin` once the tooling is installed (`stage2-managed`), only `k114s-release` does, at the switch. Tested in the replica: after a retire the next kernel is stopped by an ordinary update and by a named install; after a Stage 2 switch the next loader is stopped, and even with the owner's blanket override its hooks leave `boot-ctxr.bin` alone |
+| Omarchy's `11-omarchy-mac-saved-modules.hook` deleted the proven kernel's modules | the replica carries a stand-in of that hook (same decision, `uname -r` replaced by `K114S_UNAME_R`) and a channel kernel `7.3.0-17-ARCH` that sorts below the running `7.3.0-17.v272-4-ARCH`; the tool puts the modules back from `/usr/lib/modules/.old` before it records the trial (or says PROBLEM). Not run with the real script: that one reads the real `uname -r` |
+| trackpad accepted the clamp string alone | `trackpad-module` (module symbol or product `0x0361`) and `report-clamp` (image) are separate required groups; `k114s-boot-success` also requires a HID device bound to `magicmouse` |
+| GPU stack released on a version string | content checks (device, M5 gate, CPU renderer) and `keep-held`; see the table in (a) |
+| ESP model left out limine-snapper-sync | superseded by (d3): the guard takes the boot partition lock itself and reserves nothing for the sync; `status` shows `limine_history`; `k114s-release` holds `/run/lock/boot-partition.lock` for its ESP and `limine.conf` edits (not across a pacman transaction, where `limine-entry-tool` takes it) |
+| device-tree criteria read only the packaged tree | `tree-drivers` and `nvme-ans` (see (a)) |
+| `--undo` and the `use-packaged-dtb` marker, `stage2-frozen` | the marker is saved at install and restored; undo is refused while Stage 2 is frozen and the loader packages differ from the install's; the saved originals' folder is named in the output |
+| installer died when the last hold name was not installed | the loop is an `if`; the holds are written and applied before r2c's hooks are removed |
+| test overrides reached production; concurrent `k114s-holds` | `k114s-guard` honours `K114S_ROOT` and `K114S_ESP_FREE` only under `K114S_TEST`; `k114s-holds` takes a lock and writes through `mktemp` |
+
+## (d3) The second repair round
+
+| Finding | Now |
+| --- | --- |
+| the snapper reservation made every boot-file update and every automatic release wait for room on this ESP | dropped in `k114s-guard` and in `stage_boot`. `limine-snapper-sync` limits itself (`LIMIT_USAGE_PERCENT`) and checks the usage before it writes, and `limine_history` holds a few hundred bytes. This Mac's real sizes (vmlinuz 54,086,144, initramfs 25,023,354, standard image 79,253,504) with the snapper config present pass at 166 MB free in the guard and in the release tests |
+| a lock timeout after the transaction killed `k114s-release` before the restores and the trial record | the module restore runs first, then `boot_lock soft` (a timeout is logged), then the Stage 2, image and default-entry put-backs and the trial record. Replica test: a hook leaves the lock held for 4 s after the transaction, `K114S_LOCK_WAIT=1`; it fails against the old `die` |
+| `keep-held` stops every update when a channel LLVM soname bumps | the pre-refresh hook runs `k114s-release preflight` (sudo, when it is authorised): the check's private lists give the upgrade pacman would try (`-Sup`); a failure that names a held package is reported with the exact command (`k114s-release release NAME`, `--accept-manual` where the criteria say a person decides), as a message and a notification, before the update fails. The update after the failure has refreshed pacman's lists, so `release NAME` finds the build. Not done: releasing a `keep-held` package after N good sessions (the GPU stack's M5 gate is the reason for the hold; the owner decides if that should lapse). The adopt hint now names `k114s-release adopt` |
+| hook `11` ran after Omarchy's `10-omarchy-hyprland-reload-pause.hook`, so a stop left Hyprland's reload paused | the guard is `01-k114s-guard-esp.hook` again (before every hook) and takes `/run/lock/boot-partition.lock` with `flock -w` (`ESP_LOCK_WAIT_SECONDS`, 120) while it measures; the installer removes an `11-` copy |
+| the module restore could nest a directory; `update-m1n1` could cut a later `boot.bin` from the restored proven kernel's tree | the restore refuses an existing destination (PROBLEM note). `stage2 --dtb packaged` now verifies the candidate carries the tree of the installed linux-aurora (read from `pacman -Ql`) and refuses, writing nothing, when `boot.bin` was cut from another kernel directory. The one-boot trial still guards the boot |
 
 ## (e) Guards before the first boot: a proposal
 
@@ -319,13 +354,13 @@ Two things to settle on the machine first, both read on 2026-11-14:
 
 ```
 r3 syntax and data checks: 80 passed, 0 failed
-r3 guard tests: 156 passed, 0 failed
+r3 guard tests: 178 passed, 0 failed
 r3 recovery tests: 58 passed, 0 failed
-r3 release-check tests: 73 passed, 0 failed
-r3 release tests: 120 passed, 0 failed
-r3 install tests: 50 passed, 0 failed
-r3 pacman tests (replica: real pacman in a user namespace): 156 passed, 0 failed
-r3 update tooling: 693 passed, 0 failed, 0 test file(s) skipped
+r3 release-check tests: 87 passed, 0 failed
+r3 release tests: 125 passed, 0 failed
+r3 install tests: 58 passed, 0 failed
+r3 pacman tests (replica: real pacman in a user namespace): 171 passed, 0 failed
+r3 update tooling: 757 passed, 0 failed, 0 test file(s) skipped
 ```
 
 `R3_DEBUG=1` prints the output of a failing test, `R3_KEEP=1` keeps the temp folder. A test file
@@ -343,7 +378,14 @@ release staged, abandoned, staged again, booted from the old entry, booted incom
 retired on the second boot; a Stage 2 trial refused beside a standing trial of someone else, then
 armed beside the proven file, a trial start that hangs and falls back, `--rearm`, two good trial
 starts that arm it again, the switch on a later run, the candidate cleaned up; the steady state where
-the proven image is the standard one; a locally built kernel through the same road; undo.
+the proven image is the standard one; a locally built kernel through the same road; undo. Since
+the second review it also shows: a released kernel and a released loader staying held (an ordinary
+update and a named install both stopped; the owner's blanket override leaves `boot-ctxr.bin` alone);
+a channel kernel whose release string sorts below the running one, with a stand-in of Omarchy's
+saved-modules hook (the modules are put back; the test fails when that step is switched off); the
+stand-in `limine-entry-tool` taking the boot-partition lock inside the transaction (it times out
+if `k114s-release` keeps holding it); Mesa installed under the permit and still held, the next
+build released by `auto`, the rollback through `adopt`.
 
 Read on the live Mac as a normal user (agent-run, read-only, 2026-11-14 17:57): `k114s-release
 status` from this branch reports `booted: Stage 2 m1n1/boot-ctxr-r3-gpu.bin (a one-boot trial)` and

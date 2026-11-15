@@ -6,7 +6,8 @@
 # the three things a usable K114s boot shows, then writes one record for this boot:
 #   desktop    a graphical session is active (a Hyprland process, or a wayland/x11 login session)
 #   network    the Wi-Fi interface exists (BOOT_NET_INTERFACE, wlan0)
-#   trackpad   the input device exists (BOOT_TRACKPAD_NAME, "Apple MTP multi-touch")
+#   trackpad   the input device exists (BOOT_TRACKPAD_NAME, "Apple MTP multi-touch") and a HID device is
+#              bound to the magicmouse driver
 # together with WHAT booted: the boot image the EFI stub was started from and its SHA-256, the
 # kernel banner, and the Stage 2 image this boot came through with its SHA-256 as it is on the
 # ESP now. That is m1n1/boot-ctxr.bin, unless the loader says it booted a one-boot trial image
@@ -46,7 +47,12 @@ has_desktop() {
   done | grep -q yes
 }
 has_network() { [[ -e $sys/class/net/$interface ]]; }
-has_trackpad() { grep -q -F "N: Name=\"$trackpad\"" "$proc/bus/input/devices" 2>/dev/null; }
+# The transport registers the input device name even when no multi-touch driver binds (r2c's
+# patched hid-magicmouse was needed for exactly that), so the device must also be bound to hid-magicmouse.
+has_trackpad() {
+  grep -q -F "N: Name=\"$trackpad\"" "$proc/bus/input/devices" 2>/dev/null &&
+    compgen -G "$sys/bus/hid/drivers/magicmouse/*:*" >/dev/null
+}
 
 deadline=$((SECONDS + wait_seconds))
 while :; do

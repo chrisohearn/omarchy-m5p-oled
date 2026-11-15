@@ -9,7 +9,8 @@ set -u
 have pacman repo-add fakeroot vercmp bsdtar zstd python3 || { echo "r3 check tests: SKIPPED (pacman, repo-add, fakeroot, vercmp, bsdtar, zstd and python3 are needed)"; exit 0; }
 status() { echo $?; }
 P=$BASE/pkgs; mkdir -p "$P"
-check() { local r=$1; shift; K114S_ROOT=$r bash "$(lib "$r")/k114s-release-check" "$@" 2>&1; }
+export MKROOT_KERNEL=1     # every fake root has the proven kernel (7.3.0-17.v272-4-ARCH, running) and the pinned Stage 2 tree
+check() { local r=$1; shift; K114S_UNAME_R=7.3.0-17.v272-4-ARCH K114S_ROOT=$r bash "$(lib "$r")/k114s-release-check" "$@" 2>&1; }
 verdict() { awk -F'\t' -v p="$2" '$1 == p { print $3 }' "$1/var/lib/omarchy-k114s/check/verdict.tsv"; }
 result() { awk -F'\t' -v p="$2" -v l="$3" '$1 == p && $2 == l { print $4 }' "$1/var/lib/omarchy-k114s/check/checks.tsv"; }
 detail() { awk -F'\t' -v p="$2" -v l="$3" '$1 == p && $2 == l { print $5 }' "$1/var/lib/omarchy-k114s/check/checks.tsv"; }
@@ -21,7 +22,14 @@ t=$(tree); kernel_tree "$t" 7.4.0-1-ARCH none "$GOOD_CONFIG" "clamping Report Si
 t=$(tree); kernel_tree "$t" 7.4.1-1-ARCH k114s-bare "$GOOD_CONFIG" "clamping Report Size"; k_bare=$(mkpkg "$t" linux-aurora 7.4.1.aurora18-1 "$P")
 t=$(tree); kernel_tree "$t" 7.4.2-1-ARCH k114s-full "CONFIG_IKCONFIG=y
 CONFIG_BT_RFCOMM=m" "clamping Report Size"; k_noconfig=$(mkpkg "$t" linux-aurora 7.4.2.aurora18-1 "$P")
-t=$(tree); kernel_tree "$t" 7.4.3-1-ARCH k114s-full "$GOOD_CONFIG"; k_notrackpad=$(mkpkg "$t" linux-aurora 7.4.3.aurora18-1 "$P")
+t=$(tree); KIMG_MODULE= kernel_tree "$t" 7.4.3-1-ARCH k114s-full "$GOOD_CONFIG"; k_notrackpad=$(mkpkg "$t" linux-aurora 7.4.3.aurora18-1 "$P")
+# the clamp in vmlinuz alone (what the old criteria accepted), and the module's frame parser alone
+t=$(tree); KIMG_MODULE= kernel_tree "$t" 7.4.5-1-ARCH k114s-full "$GOOD_CONFIG" "clamping Report Size"; k_clamponly=$(mkpkg "$t" linux-aurora 7.4.5.aurora18-1 "$P")
+t=$(tree); kernel_tree "$t" 7.4.6-1-ARCH k114s-full "$GOOD_CONFIG"; k_moduleonly=$(mkpkg "$t" linux-aurora 7.4.6.aurora18-1 "$P")
+# a kernel that lost the driver of a node of the tree this Mac boots (PCIe built in, the USB controller as a module)
+t=$(tree); KIMG_COMPAT="apple,t6050-nvme-ans2 apple,dockchannel-hid apple,smc-hwmon apple,t6050-sart" kernel_tree "$t" 7.4.7-1-ARCH k114s-full "$GOOD_CONFIG" "clamping Report Size"; k_nopcie=$(mkpkg "$t" linux-aurora 7.4.7.aurora18-1 "$P")
+t=$(tree); KIMG_NOALIAS=1 kernel_tree "$t" 7.4.8-1-ARCH k114s-full "$GOOD_CONFIG" "clamping Report Size"; k_noalias=$(mkpkg "$t" linux-aurora 7.4.8.aurora18-1 "$P")
+t=$(tree); KIMG_COMPAT="apple,t6050-pcie apple,dockchannel-hid apple,smc-hwmon apple,t6050-sart" kernel_tree "$t" 7.4.9-1-ARCH k114s-full "$GOOD_CONFIG" "clamping Report Size"; k_nonvme=$(mkpkg "$t" linux-aurora 7.4.9.aurora18-1 "$P")
 t=$(tree); kernel_tree "$t" 7.4.4-1-ARCH k114s-full "$GOOD_CONFIG" "clamping Report Size"; k_good=$(mkpkg "$t" linux-aurora 7.4.4.aurora18-1 "$P")
 t=$(tree); mkdir -p "$t/usr/lib/asahi-boot"; echo "m1n1 apple,t6040 apple,t8140" > "$t/usr/lib/asahi-boot/m1n1.bin"; m_old=$(mkpkg "$t" m1n1-aurora 1.6.1.aurora23-2 "$P")
 t=$(tree); mkdir -p "$t/usr/lib/asahi-boot"; printf 'm1n1\0apple,t6050\0apcie,t6050\0atc-phy,t6050\0' > "$t/usr/lib/asahi-boot/m1n1.bin"; m_good=$(mkpkg "$t" m1n1-aurora 1.7.0.aurora25-1 "$P")
@@ -33,7 +41,11 @@ fw_tree() { local t; t=$(tree); mkdir -p "$t/usr/lib/omarchy/initcpio" "$t/usr/l
 f_old=$(mkpkg "$(fw_tree 'apple,j714s')" omarchy-aurora-firmware 20261014-7 "$P")
 f_j=$(mkpkg "$(fw_tree 'apple,j714s')" omarchy-aurora-firmware 20261120-1 "$P")
 f_good=$(mkpkg "$(fw_tree 'apple,j714s|apple,k114s|apple,k116s')" omarchy-aurora-firmware 20261201-1 "$P")
-t=$(tree); mkdir -p "$t/usr/lib"; printf 'gallium\0G14S\0G17S\0' > "$t/usr/lib/libgallium-26.3.0-devel.so"; g_good=$(mkpkg "$t" mesa-aurora 1:26.3.0_devel.20261201.aaa-1 "$P")
+t=$(tree); mkdir -p "$t/usr/lib"; printf 'gallium\0G14S\0G17S\0ASAHI_M5_BRINGUP\0llvmpipe\0' > "$t/usr/lib/libgallium-26.3.0-devel.so"; g_good=$(mkpkg "$t" mesa-aurora 1:26.3.0_devel.20261201.aaa-1 "$P")
+t=$(tree); mkdir -p "$t/usr/lib"; printf 'gallium\0G14S\0G17S\0' > "$t/usr/lib/libgallium-26.3.0-devel.so"; g_nogate=$(mkpkg "$t" mesa-aurora 1:26.3.0_devel.20261203.ccc-1 "$P")
+t=$(tree); mkdir -p "$t/usr/lib"; printf 'gallium\0G17S\0ASAHI_M5_BRINGUP\0' > "$t/usr/lib/libgallium-26.3.0-devel.so"; g_nocpu=$(mkpkg "$t" mesa-aurora 1:26.3.0_devel.20261204.ddd-1 "$P")
+t=$(tree); mkdir -p "$t/usr/lib"; printf 'vulkan\0G17S\0' > "$t/usr/lib/libvulkan_asahi.so"; v_nogate=$(mkpkg "$t" vulkan-aurora 1:26.3.0_devel.20261202.aaa-1 "$P")
+t=$(tree); mkdir -p "$t/usr/lib"; printf 'vulkan\0G17S\0ASAHI_M5_BRINGUP\0' > "$t/usr/lib/libvulkan_asahi.so"; v_good=$(mkpkg "$t" vulkan-aurora 1:26.3.0_devel.20261201.aaa-1 "$P")
 t=$(tree); mkdir -p "$t/usr/lib"; printf 'gallium\0G14S\0' > "$t/usr/lib/libgallium-26.3.0-devel.so"; g_nodriver=$(mkpkg "$t" mesa-aurora 1:26.3.0_devel.20261202.bbb-1 "$P")
 t=$(tree); mkdir -p "$t/usr/lib"; printf 'gallium\0G17S\0' > "$t/usr/lib/libgallium-26.3.0-devel.so"; g_older=$(mkpkg "$t" mesa-aurora 1:26.3.0_devel.20261107.231485.b7b03c5b3b8-2 "$P")
 t=$(tree); mkdir -p "$t/usr/lib/omarchy-hyprland-titlebars"; echo stock > "$t/usr/lib/omarchy-hyprland-titlebars/titlebars.so"; tb_stock=$(mkpkg "$t" omarchy-hyprland-titlebars 0.4.1-1 "$P" "hyprland>=0.57")
@@ -72,14 +84,26 @@ ok "bare tree: sensors disabled" "$(result "$r" linux-aurora sensors)" fail
 ok "bare tree: keyboard transport passes" "$(result "$r" linux-aurora input-transport)" pass
 kcase "$k_noconfig"; ok "full tree, config without our options: not-fixed" "$code $(verdict "$r" linux-aurora)" "0 not-fixed"
 ok "config: names what is not set" "$(detail "$r" linux-aurora config)" "not set: CONFIG_NETFILTER_XT_MATCH_HL CONFIG_IP6_NF_MATCH_HL CONFIG_IP6_NF_MATCH_RT CONFIG_PKCS8_PRIVATE_KEY_PARSER"
-ok "config: everything else passes" "$(awk -F'\t' '$4 != "pass" && $2 != "trackpad" && $2 != "report-clamp" { print $2 }' "$r/var/lib/omarchy-k114s/check/checks.tsv" | tr '\n' ' ')" "config "
+ok "config: everything else passes" "$(awk -F'\t' '$4 != "pass" && $2 != "trackpad-module" && $2 != "report-clamp" { print $2 }' "$r/var/lib/omarchy-k114s/check/checks.tsv" | tr '\n' ' ')" "config "
 kcase "$k_notrackpad"; ok "full tree and config, no trackpad fix: not-fixed" "$code $(verdict "$r" linux-aurora)" "0 not-fixed"
-ok "trackpad: neither fix B's clamp nor product 0x0361" "$(awk -F'\t' '$2 == "trackpad" { print $4 }' "$r/var/lib/omarchy-k114s/check/checks.tsv" | tr '\n' ' ')" "fail fail "
+ok "trackpad: neither the module's raw-event path nor product 0x0361, and no clamp" "$(awk -F'\t' '$2 == "trackpad-module" || $2 == "report-clamp" { print $2 ":" $4 }' "$r/var/lib/omarchy-k114s/check/checks.tsv" | tr '\n' ' ')" "trackpad-module:fail trackpad-module:fail report-clamp:fail report-clamp:fail "
+kcase "$k_clamponly"; ok "the clamp in vmlinuz alone is NOT enough: the hid-magicmouse module must carry the frame parser (r2c had to patch it)" "$code $(verdict "$r" linux-aurora) $(awk -F'\t' '$2 == "report-clamp" { print $4 }' "$r/var/lib/omarchy-k114s/check/checks.tsv" | sort | tr '\n' ' ') $(awk -F'\t' '$2 == "trackpad-module" { print $4 }' "$r/var/lib/omarchy-k114s/check/checks.tsv" | tr '\n' ' ')" "0 not-fixed fail pass  fail fail "
+kcase "$k_moduleonly"; ok "the module's parser alone is not enough either: the clamp must be in the image" "$code $(verdict "$r" linux-aurora) $(awk -F'\t' '$2 == "report-clamp" { print $4 }' "$r/var/lib/omarchy-k114s/check/checks.tsv" | sort | tr '\n' ' ')" "0 not-fixed fail fail "
+kcase "$k_nopcie"; ok "a kernel that lost the PCIe driver of the tree this Mac boots: not-fixed, naming it" "$code $(verdict "$r" linux-aurora) $(detail "$r" linux-aurora tree-drivers)" "0 not-fixed the channel's kernel lost the driver for: apple,t6050-pcie"
+kcase "$k_noalias"; ok "a kernel whose modules no longer carry the USB controller's alias: not-fixed, naming both" "$code $(verdict "$r" linux-aurora) $(detail "$r" linux-aurora tree-drivers)" "0 not-fixed the channel's kernel lost the driver for: apple,sn201202x apple,t6050-dwc3"
+kcase "$k_nonvme"; ok "NVMe/ANS is checked by name" "$code $(verdict "$r" linux-aurora) $(result "$r" linux-aurora nvme-ans)" "0 not-fixed fail"
+# the tree Stage 2 really boots: the live device tree (r3-gpu adds the GPU) counts, and the packaged tree only after --dtb packaged
+kcase "$k_good"; mkdir -p "$r/proc/device-tree/gpu"; printf 'apple,agx-g17s\0' > "$r/proc/device-tree/gpu/compatible"; printf 'okay\0' > "$r/proc/device-tree/gpu/status"
+{ printf '\0apple,agx-g17s\0'; } >> "$r/usr/lib/modules/7.3.0-17.v272-4-ARCH/vmlinuz"
+out=$(check "$r" --packages linux-aurora); ok "the running tree has a GPU node and the proven kernel has its driver: a channel kernel without it is not fixed" "$(verdict "$r" linux-aurora) $(detail "$r" linux-aurora tree-drivers)" "not-fixed the channel's kernel lost the driver for: apple,agx-g17s"
+printf 'disabled\0' > "$r/proc/device-tree/gpu/status"; out=$(check "$r" --packages linux-aurora); ok "a disabled node is not wanted" "$(verdict "$r" linux-aurora)" fixed
+kcase "$k_good"; rm -f "$(lib "$r")/k114s.dtb"; rm -rf "$r/proc"; out=$(check "$r" --packages linux-aurora); ok "no tree of the Mac to read at all: an error, never a pass" "$(verdict "$r" linux-aurora) $(result "$r" linux-aurora tree-drivers)" "error error"
+kcase "$k_good"; rm -f "$r/usr/lib/modules/7.3.0-17.v272-4-ARCH/vmlinuz"; out=$(check "$r" --packages linux-aurora); ok "no proven kernel to compare with: an error, never a pass" "$(verdict "$r" linux-aurora) $(result "$r" linux-aurora tree-drivers)" "error error"
 kcase "$k_good"; ok "a kernel with everything: FIXED (exit 10)" "$code $(verdict "$r" linux-aurora)" "10 fixed"
 ok "fixed: the N1 platform id reads 0x00146050" "$(detail "$r" linux-aurora n1-platform-id)" "apple,centauri-platform-id = 0x00146050"
 ok "fixed: two USB controllers and two port controllers enabled" "$(detail "$r" linux-aurora usb-controllers) / $(detail "$r" linux-aurora usb-port-control)" "2 enabled / 2 enabled"
-ok "fixed: one of the two trackpad proofs is enough" "$(awk -F'\t' '$2 == "trackpad" { print $4 }' "$r/var/lib/omarchy-k114s/check/checks.tsv" | LC_ALL=C sort | tr '\n' ' ')" "fail pass "
-ok "fixed: no check failed outside an any-group" "$(awk -F'\t' '$4 != "pass" && $2 != "trackpad" && $2 != "report-clamp"' "$r/var/lib/omarchy-k114s/check/checks.tsv" | wc -l | tr -d ' ')" 0
+ok "fixed: one of the two module proofs is enough" "$(awk -F'\t' '$2 == "trackpad-module" { print $4 }' "$r/var/lib/omarchy-k114s/check/checks.tsv" | LC_ALL=C sort | tr '\n' ' ')" "fail pass "
+ok "fixed: no check failed outside an any-group" "$(awk -F'\t' '$4 != "pass" && $2 != "trackpad-module" && $2 != "report-clamp"' "$r/var/lib/omarchy-k114s/check/checks.tsv" | wc -l | tr -d ' ')" 0
 ok "fixed: the verdict carries the SHA-256 that was checked" "$(awk -F'\t' '{ print $7 }' "$r/var/lib/omarchy-k114s/check/verdict.tsv")" "$(sum "$k_good")"
 ok "fixed: and the file" "$(sum "$(awk -F'\t' '{ print $8 }' "$r/var/lib/omarchy-k114s/check/verdict.tsv")")" "$(sum "$k_good")"
 ok "fixed: summary" "$(echo "$out" | grep -c 'FIXED       linux-aurora  7.3.0.aurora17.v272-4 -> 7.4.4.aurora18-1 (boot-uki)')" 1
@@ -108,6 +132,13 @@ r=$(mkroot); out=$(check "$r"); code=$?
 ok "loader that knows the SoC but not its PCIe and PHY: not-fixed" "$(verdict "$r" m1n1-aurora) $(result "$r" m1n1-aurora t6050) $(result "$r" m1n1-aurora t6050-pcie)" "not-fixed pass fail"
 ok "firmware that still loads the N1 for apple,j714s only: not-fixed" "$(verdict "$r" omarchy-aurora-firmware) $(result "$r" omarchy-aurora-firmware n1-for-k114s)" "not-fixed fail"
 ok "Mesa without the M5 Pro driver: not-fixed" "$(verdict "$r" mesa-aurora)" not-fixed
+mkrepo edge "$g_nogate" "$v_nogate"; r=$(mkroot); out=$(check "$r" --packages "mesa-aurora vulkan-aurora")
+ok "Mesa and Vulkan with the device but without the M5 bringup gate: not-fixed (a version string and G17S are not enough)" "$(verdict "$r" mesa-aurora) $(result "$r" mesa-aurora g17s) $(result "$r" mesa-aurora m5-bringup) $(verdict "$r" vulkan-aurora) $(result "$r" vulkan-aurora m5-bringup)" "not-fixed pass fail not-fixed fail"
+mkrepo edge "$g_nocpu"; r=$(mkroot); out=$(check "$r" --packages mesa-aurora)
+ok "Mesa without the software renderer: not-fixed (the desktop guard falls back to the CPU with it)" "$(verdict "$r" mesa-aurora) $(result "$r" mesa-aurora m5-bringup) $(result "$r" mesa-aurora cpu-fallback)" "not-fixed pass fail"
+mkrepo edge "$g_good" "$v_good"; r=$(mkroot); out=$(check "$r" --packages "mesa-aurora vulkan-aurora")
+ok "Mesa and Vulkan with the device, the gate and the CPU renderer: fixed" "$(verdict "$r" mesa-aurora) $(verdict "$r" vulkan-aurora)" "fixed fixed"
+mkrepo edge "$m_half" "$f_j" "$g_nodriver" "$tb_m5"; r=$(mkroot); out=$(check "$r"); code=$?
 ok "title-bar plugin that depends on hyprland-m5: fixed" "$code $(verdict "$r" omarchy-hyprland-titlebars)" "10 fixed"
 r=$(mkroot); rm -rf "$r/var/lib/pacman/local/hyprland-m5-0.57.2-2"; mkrepo edge "$tb_stock"; out=$(check "$r" --packages omarchy-hyprland-titlebars)
 ok "stock plugin is fine once hyprland-m5 is not installed" "$(verdict "$r" omarchy-hyprland-titlebars)" fixed
@@ -152,7 +183,9 @@ out=$(check "$r" --bogus); ok "unknown argument" "$?" 2
 # the criteria name a class for every package they describe, and only known check types
 ok "criteria: every described package has a class" "$(awk '$1 == "package" && $3 !~ /^(boot-uki|boot-stage2|userland)$/' "$L/release-criteria.conf" | wc -l | tr -d ' ')" 0
 ok "criteria: every check line belongs to a described package" "$(awk '$1 == "package" { known[$2] = 1 } ($1 == "check" || $1 == "any") && !($2 in known)' "$L/release-criteria.conf" | wc -l | tr -d ' ')" 0
-ok "criteria: only known check types" "$(awk '($1 == "check" || $1 == "any") { print $4 }' "$L/release-criteria.conf" | grep -c -v -x -E 'version-newer|file-exists|file-contains|file-matches|dtb-root-compatible|dtb-node|dtb-okay|dtb-prop|kconfig|module-parm|code-imm16|depends-on|not-installed|manual')" 0
+ok "criteria: only known check types" "$(awk '($1 == "check" || $1 == "any") { print $4 }' "$L/release-criteria.conf" | grep -c -v -x -E 'version-newer|file-exists|file-contains|file-matches|dtb-root-compatible|dtb-node|dtb-okay|dtb-prop|kconfig|module-parm|code-imm16|tree-drivers|depends-on|not-installed|manual')" 0
+ok "criteria: the optional fourth word of a package line is only ever keep-held" "$(awk '$1 == "package" && $4 != "" && $4 != "keep-held"' "$L/release-criteria.conf" | wc -l | tr -d ' ')" 0
+ok "criteria: the GPU stack and the boot-time tooling a person decides on are keep-held" "$(awk '$1 == "package" && $4 == "keep-held" { print $2 }' "$L/release-criteria.conf" | LC_ALL=C sort | tr '\n' ' ')" "asahi-fwextract mesa-aurora omarchy-mac vulkan-aurora "
 ok "criteria: every package starts with the version check" "$(awk '$1 == "package" { want[$2] = 1 } ($1 == "check" || $1 == "any") && ($2 in want) { if ($4 != "version-newer") bad++; delete want[$2] } END { print bad + 0 }' "$L/release-criteria.conf")" 0
 
 finish "r3 release-check tests"

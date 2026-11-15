@@ -6,6 +6,11 @@
 # every package in the transaction, so a transaction that cannot reach the EFI partition does not
 # run this hook at all and is never stopped for space. "k114s-guard audit" compares this list with
 # the hooks present; if a hook appears with a trigger not named here, every install is checked.
+#
+# The name starts with 01 on purpose: this hook runs before every other, so a stop leaves no other
+# PreTransaction hook half done (Omarchy's 10-omarchy-hyprland-reload-pause.hook has paused Hyprland's
+# reload by then, and a transaction stopped after it never runs the resume hook). limine-snapper-sync
+# writes to this partition, so the guard takes /run/lock/boot-partition.lock itself while it measures.
 [Trigger]
 Type = Path
 Operation = Install

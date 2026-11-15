@@ -40,7 +40,7 @@ mkdir -p "$S/usr/lib/initcpio/install" "$S/usr/lib/omarchy/initcpio"
 printf 'root:x:0:0:root:/root:/bin/bash\n' > "$S/etc/passwd"; printf 'root:x:0:\n' > "$S/etc/group"
 echo 'CUSTOM_UKI_NAME="omarchy"' > "$S/etc/default/limine"
 printf 'apple,k114s\0apple,t6050\0' > "$S/etc/k114s-test/compatible"
-trackpad() { if [ "$1" = present ]; then printf 'I: Bus=0000\nN: Name="Apple MTP multi-touch"\n\n' > "$S/etc/k114s-test/proc/bus/input/devices"; else printf 'I: Bus=0000\nN: Name="Apple MTP keyboard"\n\n' > "$S/etc/k114s-test/proc/bus/input/devices"; fi; }
+trackpad() { if [ "$1" = present ]; then mkdir -p "$S/etc/k114s-test/sys/bus/hid/drivers/magicmouse/0019:05AC:0361.0002"; printf 'I: Bus=0000\nN: Name="Apple MTP multi-touch"\n\n' > "$S/etc/k114s-test/proc/bus/input/devices"; else printf 'I: Bus=0000\nN: Name="Apple MTP keyboard"\n\n' > "$S/etc/k114s-test/proc/bus/input/devices"; fi; }
 trackpad present
 printf '#!/bin/bash\n# stands for sudo while "omarchy update" keeps its authorisation alive\n[[ ${1:-} != -n ]] || shift\nexec "$@"\n' > "$S/usr/local/lib/test-sudo"; chmod 755 "$S/usr/local/lib/test-sudo"
 sb() { # run a command inside the throwaway system as its root
@@ -52,11 +52,11 @@ sb() { # run a command inside the throwaway system as its root
     --bind "$S/etc" /etc --bind "$S/var" /var --bind "$S/run" /run --bind "$S/boot" /boot --bind "$ESPD" /boot/efi \
     --bind "$S/opt" /opt --bind "$S/people" /people --bind "$S/root" /root --ro-bind "$L" "$L" --ro-bind "$T" "$T" \
     --setenv PATH /usr/bin --setenv HOME /root --setenv LC_ALL C --unsetenv K114S_ROOT \
-    --setenv K114S_UNAME_R "$UNAME_R" --setenv K114S_PROC_VERSION "$(banner "$UNAME_R")" --setenv K114S_ESP_FREE "$ESP_FREE" \
+    --setenv K114S_TEST 1 --setenv K114S_UNAME_R "$UNAME_R" --setenv K114S_PROC_VERSION "$(banner "$UNAME_R")" --setenv K114S_ESP_FREE "$ESP_FREE" \
     --setenv K114S_EFI_STUB_ID /etc/k114s-test/stub-id --setenv K114S_ESP_DT /nonexistent --setenv K114S_NOTIFY_LOG /var/log/notify.log \
     --setenv K114S_BOOT_ID "$BOOT_ID" --setenv K114S_AURA_TRIAL "$AURA_TRIAL" --setenv K114S_DESKTOP yes --setenv K114S_SYS /etc/k114s-test/sys --setenv K114S_PROC /etc/k114s-test/proc \
     --setenv K114S_BOOT_WAIT 0 --setenv K114S_DT_COMPATIBLE /etc/k114s-test/compatible --setenv K114S_SYSTEMCTL /usr/bin/true \
-    --setenv K114S_USER_HOME /people/owner --setenv K114S_HOLDS_WAIT 1 --setenv K114S_SUDO "${SUDO_STUB:-/usr/local/lib/test-sudo}" --chdir / "$@" 2>&1
+    --setenv K114S_USER_HOME /people/owner --setenv K114S_HOLDS_WAIT 1 --setenv K114S_LOCK_WAIT "${LOCK_WAIT:-120}" --setenv K114S_SUDO "${SUDO_STUB:-/usr/local/lib/test-sudo}" --chdir / "$@" 2>&1
 }
 Q() { sb sh -c 'pacman -Q "$1" 2>/dev/null' _ "$1" | cut -d' ' -f2; }      # the installed version, or nothing
 installed() { sb sh -c 'pacman -Qq 2>/dev/null' | grep -c -x "$1"; }      # by name only: pacman -Q also answers for a "provides"
@@ -84,6 +84,9 @@ default_title() { awk -v n="$(sed -n 's/^default_entry: //p' "$ESPD/limine.conf"
 cat > "$S/usr/share/libalpm/scripts/test-build-uki" <<'SCRIPT'
 #!/bin/bash
 # stand-in for limine-mkinitcpio-install: one boot image and one menu entry per package-owned kernel
+# limine-entry-tool takes /run/lock/boot-partition.lock (the mutex limine-snapper-sync shares) around its writes; k114s-release must not hold it meanwhile
+mkdir -p /run/lock; exec 200>/run/lock/boot-partition.lock
+flock -w 5 200 || { echo "test-build-uki: Mutex lock timeout (somebody holds the boot partition lock through the transaction)" >&2; exit 1; }
 for dir in /usr/lib/modules/*/; do
   dir=${dir%/}
   [[ -f $dir/modules.builtin ]] || continue
@@ -113,6 +116,22 @@ printf '#!/bin/sh\nif test -e "/usr/lib/modules/backup/$K114S_UNAME_R"; then rsy
 chmod 755 "$S"/usr/share/libalpm/scripts/test-modules-*
 hook "$S/usr/share/libalpm/hooks/10-linux-modules-pre.hook" PreTransaction /usr/share/libalpm/scripts/test-modules-save 'usr/lib/modules/*/vmlinuz'
 hook "$S/usr/share/libalpm/hooks/10-linux-modules-post.hook" PostTransaction /usr/share/libalpm/scripts/test-modules-restore 'usr/lib/modules/*/vmlinuz'
+# Omarchy's 11-omarchy-mac-saved-modules.hook (omarchy-mac-retire-saved-modules): the same downgrade decision as the real script, which then
+# moves the running kernel's modules to /usr/lib/modules/.old. (The real one reads uname -r; here K114S_UNAME_R.)
+cat > "$S/usr/share/libalpm/scripts/test-saved-modules" <<'SCRIPT'
+#!/bin/bash
+installed=()
+while IFS= read -r target; do [[ ! $target =~ ^usr/lib/modules/([^/]+)/vmlinuz$ ]] || installed+=("${BASH_REMATCH[1]}"); done
+running=$K114S_UNAME_R
+[[ -d /usr/lib/modules/$running ]] || exit 0
+downgrade=0
+for kver in "${installed[@]}"; do [[ $kver == "$running" || $(printf '%s\n' "$kver" "$running" | sort -V | head -n 1) != "$kver" ]] || downgrade=1; done
+((downgrade)) || exit 0
+echo "Moving the running kernel's saved modules ($running) to /usr/lib/modules/.old"
+mkdir -p /usr/lib/modules/.old && cp -a "/usr/lib/modules/$running" /usr/lib/modules/.old/ && rm -rf "/usr/lib/modules/$running"
+SCRIPT
+chmod 755 "$S/usr/share/libalpm/scripts/test-saved-modules"
+printf '[Trigger]\nType = Path\nOperation = Install\nOperation = Upgrade\nTarget = usr/lib/modules/*/vmlinuz\n\n[Action]\nWhen = PostTransaction\nExec = /usr/share/libalpm/scripts/test-saved-modules\nNeedsTargets\n' > "$S/usr/share/libalpm/hooks/11-omarchy-mac-saved-modules.hook"
 hook "$S/usr/share/libalpm/hooks/90-mkinitcpio-install.hook" PostTransaction /usr/share/libalpm/scripts/test-build-uki 'usr/lib/modules/*/vmlinuz' 'usr/lib/firmware/*' 'usr/lib/initcpio/*'
 hook "$S/usr/share/libalpm/hooks/95-m1n1-install.hook" PostTransaction /usr/share/libalpm/scripts/test-update-m1n1 'usr/lib/modules/*/dtbs/*' 'usr/lib/asahi-boot/*'
 hook "$S/etc/pacman.d/hooks/96-omarchy-j714s-boot-ctxr.hook" PostTransaction /usr/local/lib/omarchy-j714s/update-boot-ctxr 'usr/lib/modules/*/dtbs/*' 'usr/lib/asahi-boot/*'
@@ -178,7 +197,7 @@ ok "replica: r2c's Stage 2 carries exactly one device tree, the pinned one" "$(g
 
 # --- the installer, over r2c's persistence -------------------------------------------------------------------
 out=$(sb bash "$L/k114s-tooling-install"); ok "installer runs over r2c's persistence" "$? $(echo "$out" | grep -c 'k114s-tooling-install: installed')" "0 1"
-ok "the three r3 hooks are in, r2c's two are out" "$(ls "$S/etc/pacman.d/hooks" | grep -c -E '^0[01]-k114s-guard-(install|remove|esp)\.hook$') $(ls "$S/etc/pacman.d/hooks" | grep -c -E 'k114s-hold-guard|k114s-esp-space')" "3 0"
+ok "the three r3 hooks are in, r2c's two are out" "$(ls "$S/etc/pacman.d/hooks" | grep -c -E '^(00-k114s-guard-(install|remove)|01-k114s-guard-esp)\.hook$') $(ls "$S/etc/pacman.d/hooks" | grep -c -E 'k114s-hold-guard|k114s-esp-space')" "3 0"
 ok "holds: the installed ones of what was held, plus the default set" "$(tr '\n' ' ' < "$KLIB/holds.list")" "hyprland-m5 linux-aurora m1n1-aurora mesa-aurora omarchy-aurora-firmware omarchy-hyprland-titlebars uboot-aurora vulkan-aurora "
 ok "pacman reads the holds" "$(sb pacman-conf IgnorePkg | tr '\n' ' ')" "hyprland-m5 linux-aurora m1n1-aurora mesa-aurora omarchy-aurora-firmware omarchy-hyprland-titlebars uboot-aurora vulkan-aurora "
 ok "the running boot chain is recorded as proven" "$(awk '$1 == "uki" || $1 == "stage2_sha256" { print $2 }' "$STATE/release/known-good" | tr '\n' ' ')" "EFI/Linux/omarchy_linux-aurora-k114s.efi $STAGE2_R2C "
@@ -265,7 +284,7 @@ out=$(rel adopt "$c_app2"); ok "adopt refuses a package that is not held" "$? $(
 # --- release: a userland package ------------------------------------------------------------------------------------
 held_before=$(state)
 out=$(rel auto); ok "auto with today's channel: nothing released" "$? $(state)" "0 $held_before"
-c_mesa_good=$(gfx libgallium-99.0.0-test.so mesa-aurora "gallium-channel G14S G17S" 1:26.3.0_devel.20261201.aaaaaaa-1)
+c_mesa_good=$(gfx libgallium-99.0.0-test.so mesa-aurora "gallium-channel G14S G17S ASAHI_M5_BRINGUP llvmpipe" 1:26.3.0_devel.20261201.aaaaaaa-1)
 c_vulkan_bad=$(gfx libvulkan_asahi.so vulkan-aurora "vulkan-channel G14S" 1:26.3.0_devel.20261201.aaaaaaa-1)
 mkrepo edge "$c_kernel_old" "$c_m1n1_old" "$c_fw_old" "$c_app2" "$c_lfw2" "$c_mesa_good" "$c_vulkan_bad"
 update >/dev/null; ok "the fixed Mesa is in the channel but held: an update leaves it" "$(Q mesa-aurora)" "1:26.3.0_devel.20261109.j714s2.043a4c5-1"
@@ -276,23 +295,26 @@ sed -i 's/^AUTO_RELEASE=.*/AUTO_RELEASE=yes/' "$S/etc/omarchy-k114s/release.conf
 out=$(SUDO_STUB=/usr/bin/false sb env HOME=/people/owner bash /people/owner/.config/omarchy/hooks/post-update.d/k114s-release-check)
 ok "post-update hook without sudo: checks as the user, tells, changes nothing" "$? $(Q mesa-aurora) $(echo "$out" | grep -c 'ready for release: mesa-aurora')" "0 1:26.3.0_devel.20261109.j714s2.043a4c5-1 1"
 out=$(sb env HOME=/people/owner bash /people/owner/.config/omarchy/hooks/post-update.d/k114s-release-check)
-ok "post-update hook: the fixed Mesa is released and installed" "$? $(Q mesa-aurora)" "0 1:26.3.0_devel.20261201.aaaaaaa-1"
-ok "the files are the channel's" "$(tr '\0' ' ' < "$S/usr/lib/libgallium-99.0.0-test.so")" "gallium-channel G14S G17S "
+ok "post-update hook: the fixed Mesa is installed" "$? $(Q mesa-aurora)" "0 1:26.3.0_devel.20261201.aaaaaaa-1"
+ok "the files are the channel's" "$(tr '\0' ' ' < "$S/usr/lib/libgallium-99.0.0-test.so")" "gallium-channel G14S G17S ASAHI_M5_BRINGUP llvmpipe "
 ok "Vulkan without the M5 Pro driver stays held at our build" "$(Q vulkan-aurora) $(sb pacman-conf IgnorePkg | grep -c -x vulkan-aurora)" "1:26.3.0_devel.20261109.j714s2.043a4c5-1 1"
-ok "Mesa left the holds for good" "$(sb pacman-conf IgnorePkg | grep -c -x mesa-aurora) $(cut -d' ' -f1,2 "$KLIB/released.list")" "0 mesa-aurora 1:26.3.0_devel.20261201.aaaaaaa-1"
-ok "a desktop notification says so" "$(notes | grep -c 'mesa-aurora released: now 1:26.3.0_devel.20261201.aaaaaaa-1')" 1
+ok "Mesa is installed but STAYS held (keep-held): the next channel build is checked again, nothing is released for good" "$(sb pacman-conf IgnorePkg | grep -c -x mesa-aurora) $(cat "$KLIB/released.list" 2>/dev/null | grep -c mesa-aurora)" "1 0"
+ok "a desktop notification says so" "$(notes | grep -c 'mesa-aurora installed (it stays held: the next channel build is checked again): now 1:26.3.0_devel.20261201.aaaaaaa-1')" 1
 ok "the permit is gone" "$(test -e "$S/run/omarchy-k114s/permit"; status)" 1
 roll=$(ls -d "$STATE"/rollback/*-mesa-aurora); archive=$(ls "$roll"/packages/mesa-aurora-*.pkg.tar.zst)
 ok "the rollback set holds our Mesa as a package" "$(sb pacman -Qp "$archive")" "mesa-aurora 1:26.3.0_devel.20261109.j714s2.043a4c5-1"
 ok "no boot image in a userland rollback set, but the hashes of the whole EFI partition" "$(ls "$roll/esp" | tr '\n' ' ') $(grep -c 'omarchy_linux-aurora-k114s.efi' "$roll/esp-files.sha256")" "k114s-repair limine.conf m1n1  1"
-c_mesa_next=$(gfx libgallium-99.0.0-test.so mesa-aurora "gallium-channel-next G17S" 1:26.3.0_devel.20261210.bbbbbbb-1)
+c_mesa_next=$(gfx libgallium-99.0.0-test.so mesa-aurora "gallium-channel-next G17S ASAHI_M5_BRINGUP llvmpipe" 1:26.3.0_devel.20261210.bbbbbbb-1)
 mkrepo edge "$c_kernel_old" "$c_m1n1_old" "$c_fw_old" "$c_app2" "$c_lfw2" "$c_mesa_next" "$c_vulkan_bad"
-out=$(update); ok "from now on Mesa follows the channel in ordinary updates" "$? $(Q mesa-aurora)" "0 1:26.3.0_devel.20261210.bbbbbbb-1"
-# the way back: one pacman transaction from the archive
-out=$(sb pacman -U --noconfirm "$archive"); ok "rollback: the archive installs (a released package is not guarded)" "$? $(Q mesa-aurora)" "0 1:26.3.0_devel.20261109.j714s2.043a4c5-1"
+out=$(update); ok "an ordinary update does not move Mesa to the next channel build: it is held, and the check decides" "$? $(Q mesa-aurora)" "0 1:26.3.0_devel.20261201.aaaaaaa-1"
+out=$(rel auto); ok "the next auto run checks that build again and installs it (it carries the gate)" "$? $(Q mesa-aurora) $(sb pacman-conf IgnorePkg | grep -c -x mesa-aurora)" "0 1:26.3.0_devel.20261210.bbbbbbb-1 1"
+# the way back: the archive, through adopt (a held package; pacman -U by hand is stopped by the guard)
+out=$(sb pacman -U --noconfirm "$archive"); ok "rollback by a bare pacman -U is stopped by the guard: the package is held" "$? $(Q mesa-aurora)" "1 1:26.3.0_devel.20261210.bbbbbbb-1"
+ok "the notification names the way back that works" "$(notes | grep -c 'Rollback: sudo k114s-release adopt .*/packages/mesa-aurora-')" 2
+out=$(rel adopt "$archive"); ok "rollback: k114s-release adopt installs the archive, and the package stays held" "$? $(Q mesa-aurora) $(sb pacman-conf IgnorePkg | grep -c -x mesa-aurora)" "0 1:26.3.0_devel.20261109.j714s2.043a4c5-1 1"
 ok "rollback: the file is ours again, byte for byte" "$(tr '\0' ' ' < "$S/usr/lib/libgallium-99.0.0-test.so")" "gallium-j714s2 G17S "
 ok "rollback: pacman finds nothing wrong with the reinstalled package" "$(sb pacman -Qkk mesa-aurora | grep -c ' 0 altered files')" 1
-sb /usr/local/lib/omarchy-k114s/k114s-holds hold mesa-aurora >/dev/null; ok "and it can be held again" "$(sb pacman-conf IgnorePkg | grep -c -x mesa-aurora)" 1
+sb /usr/local/lib/omarchy-k114s/k114s-holds hold mesa-aurora >/dev/null; ok "and it is held (still)" "$(sb pacman-conf IgnorePkg | grep -c -x mesa-aurora)" 1
 held_before=$(state)
 
 # --- release: the boot chain, never in one step -----------------------------------------------------------------------
@@ -314,13 +336,13 @@ out=$(rel auto); ok "auto: the fixed boot packages are installed" "$? $(Q linux-
 ok "U-Boot is not in the channel and stays as it is" "$(Q uboot-aurora)" "2026.07.aurora6.j714s3-1"
 ok "the proven boot image is byte for byte what it was" "$(sum "$ESPD/EFI/Linux/omarchy_linux-aurora-k114s.efi")" "$REPAIR"
 ok "Stage 2 is byte for byte what it was (frozen)" "$(sum "$ESPD/m1n1/boot-ctxr.bin") $(test -s "$S/etc/omarchy-k114s/stage2-frozen"; status)" "$STAGE2_R2C 0"
-ok "although the loader package's hook ran (m1n1/boot.bin is new)" "$(test "$(sum "$ESPD/m1n1/boot.bin")" != "$bootbin_before"; status) $(grep -c 'Stage 2 is frozen' "$STATE"/rollback/*-boot/pacman.log)" "0 1"
+ok "although the loader package's hook ran (m1n1/boot.bin is new)" "$(test "$(sum "$ESPD/m1n1/boot.bin")" != "$bootbin_before"; status) $(grep -c 'Stage 2 is managed by k114s-release' "$STATE"/rollback/*-boot/pacman.log)" "0 1"
 ok "the new kernel came up as an additional boot image" "$(grep -a -o -m1 'Linux version [0-9][^ ]*' "$ESPD/EFI/Linux/omarchy_linux-aurora.efi")" "Linux version $KNEW"
 ok "the default menu entry is still the proven one" "$(default_title)" "Omarchy K114s repair r1 (trackpad fix B)"
 ok "both entries are in the menu" "$(grep -c -E 'path: boot\(\):/EFI/Linux/omarchy_linux-aurora(-k114s)?\.efi' "$ESPD/limine.conf")" 2
 ok "a trial is recorded" "$(awk '$1 == "kind" || $1 == "uki" || $1 == "old_release" { print $2 }' "$STATE/release/trial" | tr '\n' ' ')" "uki EFI/Linux/omarchy_linux-aurora.efi $KOLD "
 ok "the proven kernel's modules are still there (put back by the system's hook), and on the keep list" "$(test -s "$S/usr/lib/modules/$KOLD/updates/hid-magicmouse.ko" && test -s "$S/usr/lib/modules/$KOLD/kernel/drivers/hid/hid-magicmouse.ko.zst"; status) $(cat "$S/etc/omarchy-k114s/keep-modules")" "0 $KOLD"
-ok "the three left the holds; the rest stay" "$(sb pacman-conf IgnorePkg | tr '\n' ' ')" "hyprland-m5 mesa-aurora omarchy-hyprland-titlebars uboot-aurora vulkan-aurora "
+ok "all stay held: the three were installed under the permit, none was released" "$(sb pacman-conf IgnorePkg | tr '\n' ' ') $(cat "$KLIB/released.list" 2>/dev/null | wc -l | tr -d ' ')" "hyprland-m5 linux-aurora m1n1-aurora mesa-aurora omarchy-aurora-firmware omarchy-hyprland-titlebars uboot-aurora vulkan-aurora  0"
 ok "the notification says how to try it and that nothing old is removed" "$(notes | grep -c -E 'ADDITIONAL boot entry.*The proven entry is still the default.*Nothing old is removed until it has booted')" 1
 boot_roll=$(ls -d "$STATE"/rollback/*-boot)
 ok "rollback set: the three old packages, the proven image, Stage 2" "$(ls "$boot_roll/packages" | grep -c 'pkg.tar.zst$') $(sum "$boot_roll/esp/EFI/Linux/omarchy_linux-aurora-k114s.efi") $(sum "$boot_roll/esp/m1n1/boot-ctxr.bin")" "3 $REPAIR $STAGE2_R2C"
@@ -336,6 +358,32 @@ ok "abandon: they are held again, the markers are gone" "$(state) $(ls "$S/etc/o
 ok "abandon: proven image and Stage 2 untouched throughout" "$(sum "$ESPD/EFI/Linux/omarchy_linux-aurora-k114s.efi") $(sum "$ESPD/m1n1/boot-ctxr.bin")" "$REPAIR $STAGE2_R2C"
 ok "abandon: the trial is closed" "$(test -e "$STATE/release/trial"; status) $(ls "$STATE/release/history" | grep -c 'abandoned$')" "1 1"
 ok "abandon: pacman finds the restored kernel package whole" "$(sb pacman -Qkk linux-aurora | grep -c ' 0 altered files')" 1
+
+# Omarchy's 11-omarchy-mac-saved-modules.hook: a channel kernel whose release string sorts BELOW the running one (the same aurora build
+# without our .v272-4 tag) makes it move the running kernel's modules away in the same transaction. The proven entry must keep them.
+KBELOW=7.3.0-17-ARCH
+ok "the release string of the channel's own build sorts below the running one" "$(printf '%s\n%s\n' "$KBELOW" "$KOLD" | sort -V | head -n 1)" "$KBELOW"
+t=$(tree); kernel_tree "$t" "$KBELOW" k114s-full "$GOOD_CONFIG" "clamping Report Size"; c_below=$(mkpkg "$t" linux-aurora 7.3.0.aurora17-1 "$P")
+mkrepo edge "$c_below" "$c_fw" "$c_m1n1" "$c_app2" "$c_lfw2" "$c_vulkan_bad"
+sb pacman -Syy >/dev/null     # what "omarchy update" leaves: pacman's own lists carry the channel's build
+out=$(rel auto); ok "a same-version channel kernel is staged" "$? $(Q linux-aurora) $(test -s "$STATE/release/trial"; status)" "0 7.3.0.aurora17-1 0"
+ok "Omarchy's hook did move the proven kernel's modules during that transaction" "$(grep -c "Moving the running kernel's saved modules ($KOLD)" "$(ls -d "$STATE"/rollback/*-boot | tail -n 1)/pacman.log")" 1
+ok "and the tool put them back before recording the trial: kernel, Wi-Fi module and the repair module are all there" "$(test -s "$S/usr/lib/modules/$KOLD/kernel/drivers/hid/hid-magicmouse.ko.zst" && test -s "$S/usr/lib/modules/$KOLD/updates/hid-magicmouse.ko" && test -s "$S/usr/lib/modules/$KOLD/vmlinuz"; status) $(test -e "$S/usr/lib/modules/.old/$KOLD"; status)" "0 1"
+ok "it says so, and raises no PROBLEM" "$(grep -c "modules ($KOLD) had been moved to .*/.old during the transaction; they were put back" "$STATE/release/log") $(notes | grep -c 'PROBLEM')" "1 0"
+out=$(rel abandon); ok "abandon after it: the old kernel package is whole again" "$? $(Q linux-aurora) $(sb pacman -Qkk linux-aurora | grep -c ' 0 altered files')" "0 7.3.0.aurora17.v272-4 1"
+# A transaction that leaves the boot partition's lock held (limine-snapper-sync starts right after it) must not cut the tool short: the proven
+# kernel's modules, the default entry and the trial record are all still written.
+printf '#!/bin/sh\n[ -e /etc/k114s-test/hold-lock ] || exit 0\nexec 7>/run/lock/boot-partition.lock\nflock 7\nsetsid sleep 4 </dev/null >/dev/null 2>&1 &\nexit 0\n' > "$S/usr/share/libalpm/scripts/test-hold-lock"; chmod 755 "$S/usr/share/libalpm/scripts/test-hold-lock"
+hook "$S/usr/share/libalpm/hooks/99-test-hold-lock.hook" PostTransaction /usr/share/libalpm/scripts/test-hold-lock 'usr/lib/modules/*/vmlinuz'
+mkrepo edge "$c_below" "$c_fw" "$c_m1n1" "$c_app2" "$c_lfw2" "$c_vulkan_bad"; sb pacman -Syy >/dev/null
+: > "$S/etc/k114s-test/hold-lock"; : > "$S/var/log/notify.log"
+out=$(LOCK_WAIT=1 rel auto); rm -f "$S/etc/k114s-test/hold-lock"
+ok "the lock is held when the transaction returns: the tool goes on, the trial is recorded" "$? $(Q linux-aurora) $(test -s "$STATE/release/trial"; status) $(echo "$out" | grep -c 'nothing changed, try again')" "0 7.3.0.aurora17-1 0 0"
+ok "the proven kernel's modules are back, the proven entry is the default, and it says the lock was not got" "$(test -s "$S/usr/lib/modules/$KOLD/updates/hid-magicmouse.ko"; status) $(default_title) $(grep -c 'lock was still held' "$STATE/release/log")" "0 Omarchy K114s repair r1 (trackpad fix B) 1"
+sleep 4
+out=$(rel abandon); ok "abandon after it: the old kernel package is whole again" "$? $(Q linux-aurora)" "0 7.3.0.aurora17.v272-4"
+rm -f "$S/usr/share/libalpm/hooks/99-test-hold-lock.hook"
+mkrepo edge "$c_kernel" "$c_fw" "$c_m1n1" "$c_app2" "$c_lfw2" "$c_vulkan_bad"; sb pacman -Syy >/dev/null
 
 # stage again, then the boots
 out=$(rel auto); ok "staged again" "$(Q linux-aurora) $(test -s "$STATE/release/trial"; status)" "7.4.4.aurora18-1 0"
@@ -372,6 +420,11 @@ ok "auto never starts a Stage 2 trial by itself (AUTO_STAGE2_SWITCH=no)" "$(sum 
 echo GPU-STAGE2 > "$ESPD/m1n1/boot-ctxr-r3-gpu.bin"; printf '%s\n%s\n' m1n1/boot-ctxr-r3-gpu.bin "$(sum "$ESPD/m1n1/boot-ctxr-r3-gpu.bin")" > "$S/etc/omarchy-k114s/stage2-trial"
 out=$(rel stage2 --dtb packaged); ok "refused while someone else's standing Stage 2 trial is under way; nothing written" "$? $(echo "$out" | grep -c 'a standing Stage 2 trial of m1n1/boot-ctxr-r3-gpu.bin') $(test -e "$TRY"; status) $(test -e "$ESPD/aura-try"; status)" "1 1 1 1"
 rm -f "$S/etc/omarchy-k114s/stage2-trial" "$ESPD/m1n1/boot-ctxr-r3-gpu.bin"
+# update-m1n1 cuts boot.bin from the newest -ARCH kernel directory; when that is not the installed linux-aurora's (the proven kernel's restored one),
+# the "packaged" tree is not the one the release check read: refused, nothing written
+PKGDTB=$S/usr/lib/modules/$KNEW/dtbs/t6050-k114s.dtb; cp "$PKGDTB" "$BASE/pkgdtb.keep"; printf 'X' | dd of="$PKGDTB" bs=1 seek=200 conv=notrunc 2>/dev/null
+out=$(rel stage2 --dtb packaged); ok "stage2 --dtb packaged: a tree in boot.bin that is not the installed package's is refused, nothing written" "$? $(echo "$out" | grep -c 'not the one the installed linux-aurora carries') $(test -e "$TRY"; status) $(test -e "$ESPD/aura-try"; status) $(test -e "$STATE/release/trial"; status)" "1 1 1 1 1"
+cp "$BASE/pkgdtb.keep" "$PKGDTB"
 out=$(rel stage2 --dtb packaged); ok "k114s-release stage2 --dtb packaged" "$?" 0
 CAND=$(sum "$TRY")
 ok "the candidate is built from the installed loader and the released kernel's own K114s tree" "$(test "$CAND" != "$STAGE2_R2C"; status) $(grep -c -a 'm1n1 channel' "$TRY") $(grep -c -a 'apple,j714s' "$TRY")" "0 1 0"
@@ -393,17 +446,28 @@ ok "it tells how to go back from macOS; the marker is gone" "$(echo "$out" | gre
 boot EFI/Linux/omarchy_linux-aurora.efi "$KNEW"; out=$(rel auto)
 ok "the next start comes through the configured file; the candidate leaves the ESP" "$(test -e "$TRY"; status) $(rel status | grep -c 'intact and running')" "1 1"
 STAGE2_NEW=$CAND
+# the loader after the switch: still held, and no pacman hook may rewrite the one Stage 2 that every entry shares
+t=$(tree); mkdir -p "$t/usr/lib/asahi-boot"; printf 'm1n1 channel next\0apple,t6050\0apcie,t6050\0atc-phy,t6050\0' > "$t/usr/lib/asahi-boot/m1n1.bin"; c_m1n1_next=$(mkpkg "$t" m1n1-aurora 1.8.0.aurora26-1 "$P")
+mkrepo edge "$c_kernel" "$c_fw" "$c_m1n1_next" "$c_app2" "$c_lfw2" "$c_vulkan_bad"
+out=$(update); ok "the loader after the Stage 2 switch: an ordinary update leaves m1n1-aurora at the released build" "$? $(Q m1n1-aurora) $(sb pacman-conf IgnorePkg | grep -c -x m1n1-aurora)" "0 1.7.0.aurora25-1 1"
+out=$(sb pacman -S --noconfirm m1n1-aurora); ok "a named install of the next loader build is stopped by the hold guard" "$? $(Q m1n1-aurora) $(echo "$out" | grep -c 'K114s hold guard: stopped')" "1 1.7.0.aurora25-1 1"
+: > "$S/etc/omarchy-k114s/allow-coupled-update"; out=$(sb pacman -S --noconfirm m1n1-aurora)
+ok "even with the owner's blanket override the install goes in, its hooks run (boot.bin is rebuilt), and boot-ctxr.bin is NOT touched: nobody writes it but k114s-release" "$? $(Q m1n1-aurora) $(sum "$ESPD/m1n1/boot-ctxr.bin") $(echo "$out" | grep -c 'Stage 2 is managed by k114s-release')" "0 1.8.0.aurora26-1 $STAGE2_NEW 1"
+out=$(sb pacman -U --noconfirm "$c_m1n1"); rm "$S/etc/omarchy-k114s/allow-coupled-update"
+ok "the released loader build is back; Stage 2 is still the switched one" "$(Q m1n1-aurora) $(sum "$ESPD/m1n1/boot-ctxr.bin")" "1.7.0.aurora25-1 $STAGE2_NEW"
 
 # --- the steady state: the proven image is the standard one, and the next kernel arrives ----------------------------------
 held_before=$(state)
 t=$(tree); kernel_tree "$t" "$KNEW" k114s-full "$GOOD_CONFIG" "clamping Report Size"; c_same=$(mkpkg "$t" linux-aurora 7.4.4.aurora18-2 "$P")
 mkrepo edge "$c_same" "$c_fw" "$c_m1n1" "$c_app2" "$c_lfw2" "$c_vulkan_bad"; update >/dev/null
-ok "a released kernel follows the channel like any package" "$(Q linux-aurora)" "7.4.4.aurora18-2"
-sb /usr/local/lib/omarchy-k114s/k114s-holds hold linux-aurora >/dev/null; rel mark-known-good >/dev/null       # the owner holds it again, at a boot that works
+ok "a released kernel STAYS held: an ordinary update does not move it to the channel's next build" "$(Q linux-aurora) $(sb pacman-conf IgnorePkg | grep -c -x linux-aurora)" "7.4.4.aurora18-1 1"
+out=$(sb pacman -S --noconfirm linux-aurora); ok "nor does a named install: the next kernel has to pass the check and the trial again" "$? $(Q linux-aurora) $(echo "$out" | grep -c 'K114s hold guard: stopped')" "1 7.4.4.aurora18-1 1"
+ok "and the boot image and Stage 2 are exactly the proven ones" "$(sum "$ESPD/EFI/Linux/omarchy_linux-aurora.efi") $(sum "$ESPD/m1n1/boot-ctxr.bin")" "$NEW_IMAGE $STAGE2_NEW"
+rel mark-known-good >/dev/null
 PROVEN2=$(sum "$ESPD/EFI/Linux/omarchy_linux-aurora.efi"); K3=7.5.0-1-ARCH
 t=$(tree); kernel_tree "$t" "$KNEW" k114s-full "$GOOD_CONFIG" "clamping Report Size"; c_shared=$(mkpkg "$t" linux-aurora 7.4.4.aurora19-1 "$P")
 mkrepo edge "$c_shared" "$c_fw" "$c_m1n1" "$c_app2" "$c_lfw2" "$c_vulkan_bad"; update >/dev/null
-out=$(rel auto); ok "a kernel with the running kernel's release string is not staged by itself (its modules would replace the proven ones)" "$(Q linux-aurora) $(echo "$out" | grep -c 'has the release string of the running kernel')" "7.4.4.aurora18-2 1"
+out=$(rel auto); ok "a kernel with the running kernel's release string is not staged by itself (its modules would replace the proven ones)" "$(Q linux-aurora) $(echo "$out" | grep -c 'has the release string of the running kernel')" "7.4.4.aurora18-1 1"
 t=$(tree); kernel_tree "$t" "$K3" k114s-full "$GOOD_CONFIG" "clamping Report Size"; c_k3=$(mkpkg "$t" linux-aurora 7.5.0.aurora20-1 "$P")
 mkrepo edge "$c_k3" "$c_fw" "$c_m1n1" "$c_app2" "$c_lfw2" "$c_vulkan_bad"; update >/dev/null
 out=$(rel auto); ok "the next kernel is staged" "$? $(Q linux-aurora)" "0 7.5.0.aurora20-1"
@@ -436,10 +500,10 @@ boot EFI/Linux/omarchy_linux-aurora.efi "$K4"; rel auto >/dev/null; boot EFI/Lin
 ok "after two recorded boots the old image is retired; one image again" "$(ls "$ESPD/EFI/Linux" | tr '\n' ' ') $(default_title) $(sb pacman-conf IgnorePkg | grep -c -x linux-aurora)" "omarchy_linux-aurora.efi  linux-aurora 1"
 
 # --- the installer's undo ---------------------------------------------------------------------------------------------------
-out=$(sb bash "$L/k114s-tooling-install" --undo); ok "installer --undo" "$? $(echo "$out" | grep -c 'undone')" "0 1"
+out=$(sb bash "$L/k114s-tooling-install" --undo); ok "installer --undo" "$? $(echo "$out" | grep -c 'k114s-tooling-install: undone')" "0 1"
 ok "undo: r2c's two hooks are back, r3's three are gone" "$(ls "$S/etc/pacman.d/hooks" | grep -c -E 'k114s-hold-guard|k114s-esp-space') $(ls "$S/etc/pacman.d/hooks" | grep -c 'k114s-guard-')" "2 0"
 ok "undo: r2c's tools are back" "$(cmp -s "$KLIB/apply-holds" "$L/apply-holds"; status) $(cmp -s "$KLIB/hold-guard" "$L/hold-guard"; status) $(test -e "$KLIB/k114s-release"; status)" "0 0 1"
-ok "undo: it says which packages now follow the channel" "$(echo "$out" | grep -c -E '^  (m1n1-aurora|omarchy-aurora-firmware|omarchy-hyprland-titlebars) ')" 3
+ok "undo: it says which packages now follow the channel (only the released userland package: boot-chain ones were never released)" "$(echo "$out" | grep -c -E '^  (m1n1-aurora|omarchy-aurora-firmware|linux-aurora|omarchy-hyprland-titlebars) ') $(echo "$out" | grep -c -E '^  omarchy-hyprland-titlebars ')" "1 1"
 out=$(sb pacman -Rdd --noconfirm uboot-aurora); ok "undo: r2c's guard is what stops a boot-chain change again" "$? $(echo "$out" | grep -c 'K114s hold guard: stopped')" "1 1"
 
 finish "r3 pacman tests (replica: real pacman in a user namespace)"

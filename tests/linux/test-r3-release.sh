@@ -8,6 +8,7 @@ set -u
 have flock iconv python3 || { echo "r3 release tests: SKIPPED (flock, iconv and python3 are needed)"; exit 0; }
 status() { echo $?; }
 MB=1048576
+export MKROOT_KERNEL=1     # a fake root has the proven kernel's files (the tree-drivers check compares with them)
 KOLD=7.3.0-17.v272-4-ARCH
 banner() { echo "Linux version $1 (test@build) #1 SMP PREEMPT"; }
 stub() { printf '\6\0\0\0' > "$1/stub-id"; printf '/%s' "$(printf '%s' "/$2" | tr / '\\')" | iconv -f ascii -t utf-16le >> "$1/stub-id"; }
@@ -38,7 +39,7 @@ quiet: no
   //Snapshots
     comment: none yet
 CONF
-  mkdir -p "$r/etc/default" "$r/sys/class/net/wlan0" "$r/proc/bus/input"; echo 'CUSTOM_UKI_NAME="omarchy"' > "$r/etc/default/limine"
+  mkdir -p "$r/etc/default" "$r/sys/class/net/wlan0" "$r/sys/bus/hid/drivers/magicmouse/0019:05AC:0361.0002" "$r/proc/bus/input"; echo 'CUSTOM_UKI_NAME="omarchy"' > "$r/etc/default/limine"
   printf 'N: Name="Apple MTP keyboard"\n\nN: Name="Apple MTP multi-touch"\n' > "$r/proc/bus/input/devices"
   stub "$r" EFI/Linux/omarchy_linux-aurora-k114s.efi
   K114S_ROOT=$r bash "$(lib "$r")/k114s-holds" apply >/dev/null
@@ -93,11 +94,48 @@ if have pacman repo-add fakeroot vercmp bsdtar zstd; then
   ok "the check passed a build pacman's own lists do not offer yet: waits for the next update" "$(waits "pacman's own lists offer nothing")" 1
   r=$(mk); sync_db "$r"; run "$r" k114s-release mark-known-good >/dev/null; out=$(ESP_FREE=$((5 * MB)) run "$r" k114s-release auto)
   ok "no room on the ESP: waits, with the sum" "$(waits 'waits for room on the ESP: linux-aurora needs')" 1
+  need_of() { echo "$out" | sed -n 's/.*linux-aurora needs \([0-9]*\) MB.*/\1/p'; }
+  n_plain=$(need_of)
+  r=$(mk); sync_db "$r"; run "$r" k114s-release mark-known-good >/dev/null; touch "$r/etc/limine-snapper-sync.conf"; out=$(ESP_FREE=$((5 * MB)) run "$r" k114s-release auto)
+  ok "limine-snapper-sync's config adds nothing to what a boot-chain release needs (it limits itself)" "$(need_of) $(waits snapshot) $([ -n "$n_plain" ] && echo sum)" "$n_plain 0 sum"
+  # this Mac's real sizes: 168 MB free after the standard image is forgotten, a kernel of 54,086,144 bytes, an initramfs of 25,023,354
+  r=$(mk); sync_db "$r"; run "$r" k114s-release mark-known-good >/dev/null; touch "$r/etc/limine-snapper-sync.conf"
+  truncate -s 25023354 "$r/boot/initramfs-linux-aurora.img"; truncate -s 10040000 "$r/boot/efi/m1n1/boot.bin"; truncate -s 4440000 "$r/boot/efi/m1n1/boot-ctxr.bin"; out=$(ESP_FREE=166000000 run "$r" k114s-release auto)
+  ok "real sizes with the snapper config: 166 MB is enough for the release (it was refused as needing 195 MB)" "$(waits 'waits for room')" 0
   r=$(mk); sync_db "$r"; run "$r" k114s-release mark-known-good >/dev/null; sed -i 's/^AUTO_RELEASE_BOOT=.*/AUTO_RELEASE_BOOT=no/' "$r/etc/omarchy-k114s/release.conf"; out=$(run "$r" k114s-release auto)
   ok "AUTO_RELEASE_BOOT=no: reports the kernel, stages nothing" "$(waits 'stage it with: sudo k114s-release release linux-aurora')" 1
   r=$(mk); rm -rf "$REPO/edge"; out=$(run "$r" k114s-release auto); ok "channel unreachable: nothing released, said so, exit 0" "$? $(waits 'the release check could not run')" "0 1"
   mkrepo edge "$good"; r=$(mk); out=$(run "$r" k114s-release release vulkan-aurora); ok "release of a named package that is not fixed: says why" "$(waits 'vulkan-aurora is not released: absent')" 1
 fi
+
+# --- preflight: a held package's dependency that stops the channel's upgrade is reported before the update --------------------
+cat > "$BASE/pacman-stub" <<'STUB'
+#!/bin/bash
+# stands for pacman: the lists refresh works; the dry-run upgrade fails the way a new LLVM soname against the held Mesa does
+case " $* " in
+  *" -Syy "*) exit 0 ;;
+  *" -Sup "*) [ -z "${STUB_OK:-}" ] || exit 0
+    echo "error: failed to prepare transaction (could not satisfy dependencies)"
+    echo ":: installing llvm-libs (23.1-2) breaks dependency 'libLLVM.so=23.1-64' required by mesa-aurora"; exit 1 ;;
+esac
+exit 0
+STUB
+chmod 755 "$BASE/pacman-stub"
+r=$(mk); out=$(PACMAN_STUB=$BASE/pacman-stub run "$r" k114s-release preflight)
+ok "preflight: names the held package whose dependency stops the upgrade, and says what to run" "$? $(echo "$out" | grep -c 'would FAIL on a dependency of held package(s): mesa-aurora') $(echo "$out" | grep -c 'mesa-aurora: the channel.s build is not fit yet')" "0 1 1"
+ok "preflight: and notifies" "$(notes "$r" | grep -c 'would fail on held mesa-aurora')" 1
+out=$(STUB_OK=1 PACMAN_STUB=$BASE/pacman-stub run "$r" k114s-release preflight); ok "preflight: an upgrade that works is not reported" "$? $(echo "$out" | grep -c 'no held package stands in the way')" "0 1"
+ok "preflight installs nothing and writes no trial or rollback set" "$(test -e "$r/var/lib/omarchy-k114s/release/trial"; status) $(ls "$r/var/lib/omarchy-k114s/rollback" | wc -l | tr -d ' ')" "1 0"
+ok "the adopt hint for a held package names k114s-release adopt, not a pacman -U the guard stops" "$(grep -c 'adopted from .*Rollback: sudo k114s-release adopt' "$L/k114s-release")" 1
+
+# --- the boot partition's lock (limine-snapper-sync and limine-entry-tool take it around their writes) -------------------
+r=$(mk); run "$r" k114s-release mark-known-good >/dev/null; kernel_image "$r/boot/efi/EFI/Linux/omarchy_linux-old.efi" "$KOLD" "CONFIG_IKCONFIG=y"; mkdir -p "$r/run/lock"
+(flock "$r/run/lock/boot-partition.lock" sleep 6) & sleep 1
+out=$(K114S_LOCK_WAIT=1 run "$r" k114s-release forget-image EFI/Linux/omarchy_linux-old.efi)
+ok "an edit of the ESP waits for the boot partition lock, then stops without changing anything when it is not given" "$? $(echo "$out" | grep -c 'holds the boot partition lock') $(test -e "$r/boot/efi/EFI/Linux/omarchy_linux-old.efi"; status) $(sum "$r/boot/efi/limine.conf")" "1 1 0 $(sum "$r/boot/efi/limine.conf")"
+wait
+out=$(K114S_LOCK_WAIT=1 run "$r" k114s-release forget-image EFI/Linux/omarchy_linux-old.efi)
+ok "with the lock free it goes ahead" "$? $(test -e "$r/boot/efi/EFI/Linux/omarchy_linux-old.efi"; status)" "0 1"
 
 # --- retire: only what can be taken out safely ---------------------------------------------------------
 trial() { # trial ROOT: a proven uki trial of the standard image by hand, old = repair image; two recorded boots
@@ -261,6 +299,10 @@ pinned=$(sum "$r/boot/efi/m1n1/boot-ctxr.bin"); echo "$pinned" > "$r/etc/omarchy
 printf 'NEW-M1N1-PREFIX' > "$r/usr/lib/asahi-boot/m1n1.bin"; { cat "$r/usr/lib/asahi-boot/m1n1.bin" "$r/j.dtb" "$r/packaged.dtb"; echo U-BOOT | gzip -c -n; } > "$r/boot/efi/m1n1/boot.bin"
 out=$(s2hook); ok "frozen: a new loader does not reach Stage 2, and the hook succeeds (the transaction goes on)" "$? $(sum "$r/boot/efi/m1n1/boot-ctxr.bin") $(echo "$out" | grep -c 'Stage 2 is frozen')" "0 $pinned 1"
 : > "$(lib "$r")/use-packaged-dtb"; out=$(s2hook); ok "frozen: not even the tree choice changes it" "$(sum "$r/boot/efi/m1n1/boot-ctxr.bin")" "$pinned"
+rm "$r/etc/omarchy-k114s/stage2-frozen"; : > "$r/etc/omarchy-k114s/stage2-managed"; out=$(s2hook)
+ok "managed (the tooling is installed): no freeze file, a new loader, the packaged-tree marker, and the hook still never rewrites boot-ctxr.bin" "$? $(sum "$r/boot/efi/m1n1/boot-ctxr.bin") $(echo "$out" | grep -c 'Stage 2 is managed by k114s-release')" "0 $pinned 1"
+out=$(K114S_STAGE2_OUT=boot-ctxr-m.bin K114S_STAGE2_DTB=packaged s2hook); ok "but k114s-release can still build a candidate beside it" "$? $(test -s "$r/boot/efi/m1n1/boot-ctxr-m.bin"; status)" "0 0"
+rm -f "$r/boot/efi/m1n1/boot-ctxr-m.bin" "$r/etc/omarchy-k114s/stage2-managed"
 rm "$r/etc/omarchy-k114s/stage2-frozen"; out=$(s2hook); ok "unfrozen with the packaged tree: the new loader and the kernel package's own K114s tree" "$? $(grep -c -a 'NEW-M1N1-PREFIX' "$r/boot/efi/m1n1/boot-ctxr.bin") $(grep -c -a 'apple,centauri-platform-id' "$r/boot/efi/m1n1/boot-ctxr.bin") $(grep -c -a 'apple,k114s' "$r/boot/efi/m1n1/boot-ctxr.bin")" "0 1 0 1"
 rm "$(lib "$r")/use-packaged-dtb" "$r/boot/efi/m1n1/boot-ctxr.bin"; echo x > "$r/etc/omarchy-k114s/stage2-frozen"
 out=$(s2hook); ok "a freeze never leaves the Mac WITHOUT a Stage 2: a missing file is built" "$? $(test -s "$r/boot/efi/m1n1/boot-ctxr.bin"; status)" "0 0"
@@ -281,6 +323,8 @@ ok "incomplete is notified" "$(notes "$r" | grep -c 'K114s boot check incomplete
 out=$(DESKTOP=no run "$r" k114s-boot-success); ok "the timer's later runs in the same boot do not notify again" "$(notes "$r" | grep -c 'K114s boot check incomplete') $(ls "$r/var/lib/omarchy-k114s/release/boots" | wc -l | tr -d ' ')" "1 1"
 out=$(run "$r" k114s-boot-success); ok "the same boot later, desktop up: the record becomes ok (one record per boot)" "$(rec "$r" aaaa0001 | grep -c '^result ok$') $(ls "$r/var/lib/omarchy-k114s/release/boots" | wc -l | tr -d ' ')" "1 1"
 r=$(mk); rmdir "$r/sys/class/net/wlan0"; out=$(run "$r" k114s-boot-success); ok "no Wi-Fi interface -> incomplete" "$(rec "$r" aaaa0001 | grep -c -E '^(network no \(wlan0\)|result incomplete)$')" 2
+r=$(mk); rmdir "$r/sys/bus/hid/drivers/magicmouse/0019:05AC:0361.0002"; out=$(run "$r" k114s-boot-success)
+ok "the trackpad device is there but no hid-magicmouse is bound to it (the transport registers the name alone) -> incomplete" "$(rec "$r" aaaa0001 | grep -c -E '^(trackpad no .*|result incomplete)$')" 2
 r=$(mk); printf 'N: Name="Apple MTP keyboard"\n' > "$r/proc/bus/input/devices"; out=$(run "$r" k114s-boot-success); ok "no trackpad device -> incomplete" "$(rec "$r" aaaa0001 | grep -c -E '^(trackpad no .*|result incomplete)$')" 2
 r=$(mk); mkdir "$r/sys/class/net/wlp1s0"; rmdir "$r/sys/class/net/wlan0"; sed -i 's/^BOOT_NET_INTERFACE=.*/BOOT_NET_INTERFACE=wlp1s0/' "$r/etc/omarchy-k114s/release.conf"
 out=$(run "$r" k114s-boot-success); ok "the interface and device names come from release.conf" "$(rec "$r" aaaa0001 | grep -c -E '^(network yes \(wlp1s0\)|result ok)$')" 2

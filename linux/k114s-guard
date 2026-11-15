@@ -9,7 +9,8 @@
 #                         system's boot hooks? Run at install, at boot and by the release check.
 #
 # pacman runs the three before it changes anything (When = PreTransaction, AbortOnFail), so a
-# stop leaves the system exactly as it was. What is held is DATA, not a list in a hook file:
+# stop leaves the system exactly as it was. The space guard is hook 01, ahead of every other hook,
+# and takes the boot partition's lock (limine-snapper-sync writes under it) while it measures. What is held is DATA, not a list in a hook file:
 #
 #   holds.list      packages that must not change (minus released.list)   -> install and remove
 #   rivals.list     "RIVAL HELD": installing RIVAL would replace HELD     -> install
@@ -23,6 +24,9 @@
 #   /etc/omarchy-k114s/allow-low-esp           skips the space check
 set -u
 mode=${1:-}
+# The test overrides (K114S_ROOT, K114S_ESP_FREE) count only under K114S_TEST. pacman hooks inherit
+# the environment of whoever ran pacman, so without this "sudo env K114S_ESP_FREE=... pacman" would skip the check.
+if [ -z "${K114S_TEST:-}" ]; then unset K114S_ROOT K114S_ESP_FREE; fi
 root=${K114S_ROOT:-}
 lib=$root/usr/local/lib/omarchy-k114s
 etc=$root/etc/omarchy-k114s
@@ -37,8 +41,10 @@ names() { # valid first words of FILE
   awk '!/^[[:space:]]*(#|$)/ { print $1 }' "$1" | grep -E '^[A-Za-z0-9@._+-]+$' || true
 }
 held() {
-  local released
-  released=$(names "$lib/released.list")
+  local released boot
+  # a boot-chain package is never "released" for good, whatever released.list says
+  boot=$( { printf '%s\n' linux-aurora m1n1-aurora uboot-aurora; awk '$1 == "package" && $3 ~ /^boot-/ { print $2 }' "$lib/release-criteria.conf" 2>/dev/null; } | sort -u)
+  released=$(names "$lib/released.list" | grep -Fxv -e "$boot" || true)
   { if [ -f "$lib/holds.list" ]; then names "$lib/holds.list"; else printf '%s\n' linux-aurora m1n1-aurora uboot-aurora; fi; } |
     { if [ -n "$released" ]; then grep -Fxv -e "$released" || true; else cat; fi; }
 }
@@ -77,6 +83,11 @@ EOF
 esp_check() { # esp_check CLASSES...: is there room for what this transaction can write?
   local free need=0 margin detail="" name file existing estimate uki=0 stage2=0 limine=0 boot ctxr
   [ -e "$etc/allow-low-esp" ] && return 0
+  # limine-snapper-sync (and limine-entry-tool) write to the partition under this lock: measure when they are done.
+  # It limits itself (LIMIT_USAGE_PERCENT) and checks the usage before it writes, so nothing is reserved for it.
+  if command -v flock >/dev/null 2>&1 && mkdir -p "$root/run/lock" 2>/dev/null && exec 8> "$root/run/lock/boot-partition.lock"; then
+    flock -w "$(setting ESP_LOCK_WAIT_SECONDS 120)" 8 || { echo "K114s space guard: stopped. limine-snapper-sync or limine-entry-tool is writing to the EFI partition (its lock is held). Run the transaction again in a moment. Nothing has been changed." >&2; return 1; }
+  fi
   for name in "$@"; do
     case $name in uki) uki=1 ;; stage2) stage2=1 ;; limine) limine=1 ;; *) uki=1; stage2=1; limine=1 ;; esac
   done
@@ -220,7 +231,7 @@ audit)
   for hook in "$root"/usr/share/libalpm/hooks/*.hook "$root"/etc/pacman.d/hooks/*.hook; do
     [ -f "$hook" ] || continue
     base=${hook##*/}
-    case $base in 0?-k114s-*) continue ;; esac
+    case $base in [0-9][0-9]-k114s-*) continue ;; esac
     # a hook in /etc overrides the one of the same name in /usr/share
     case $hook in "$root"/usr/share/*) [ -e "$root/etc/pacman.d/hooks/$base" ] && continue ;; esac
     printf '%s\n' "$ignore" | grep -Fxq "$base" && continue

@@ -65,18 +65,22 @@ set_dir=$(ls -d "$r"/var/lib/omarchy-k114s/recovery/*-install 2>/dev/null)
 ok "a recovery set of every held and protected package is written during install" "$(ls "$set_dir/packages" | grep -c 'pkg.tar.zst$') $(cd "$set_dir" && sha256sum --quiet -c SHA256SUMS >/dev/null 2>&1; status)" "18 0"
 ok "what r2c installed for the boot is untouched" "$(cat "$r/usr/local/lib/omarchy-j714s/update-boot-ctxr" | grep -c omarchy-k114s/update-boot-ctxr) $(cat "$r/etc/omarchy-mac-boot/owner-boot-chain") $(cat "$(k "$r")/k114s.dtb")" "1 K114s owner boot chain DTB"
 ok "no boot file on the ESP was changed" "$(cat "$r/boot/efi/m1n1/boot-ctxr.bin") $(sed -n 's/^default_entry: //p' "$r/boot/efi/limine.conf") $(ls "$r/boot/efi/EFI/Linux" | wc -l | tr -d ' ')" "STAGE2 1 1"
+ok "Stage 2 is managed from now on (the pacman hook never rewrites boot-ctxr.bin), and the loader versions are saved" "$(test -e "$r/etc/omarchy-k114s/stage2-managed"; status) $(cat "$(k "$r")/tooling-r3/loader-versions")" "0 m1n1-aurora=1.6.1.aurora24.v272-3 uboot-aurora=2026.07.aurora6.j714s3-1 "
 out=$(inst "$r"); ok "a second install is refused" "$? $(echo "$out" | grep -c 'already installed')" "1 1"
 
 # --- refresh: new scripts, same state ----------------------------------------------------------------
+cp "$L/01-k114s-guard-esp.hook" "$r/etc/pacman.d/hooks/11-k114s-guard-esp.hook"
 sed -i 's/^AUTO_RELEASE=.*/AUTO_RELEASE=no/' "$r/etc/omarchy-k114s/release.conf"; echo "mesa-aurora 1:27-1 20261201T000000Z" > "$(k "$r")/released.list"
 echo "# tampered" >> "$(k "$r")/k114s-guard"; held=$(sum "$(k "$r")/holds.list")
 out=$(inst "$r" --refresh); ok "--refresh copies the scripts again" "$? $(cmp -s "$L/k114s-guard" "$(k "$r")/k114s-guard"; status)" "0 0"
 ok "--refresh keeps the owner's settings, the hold list and what was released" "$(grep -c -x 'AUTO_RELEASE=no' "$r/etc/omarchy-k114s/release.conf") $(sum "$(k "$r")/holds.list") $(wc -l < "$(k "$r")/released.list" | tr -d ' ')" "1 $held 1"
+ok "--refresh removes the space guard's name from an earlier draft (11) and keeps 01" "$(ls "$r/etc/pacman.d/hooks" | grep -c -x '11-k114s-guard-esp.hook') $(ls "$r/etc/pacman.d/hooks" | grep -c -x '01-k114s-guard-esp.hook')" "0 1"
 ok "--refresh re-applies the holds (the released package is not held)" "$(sed -n 's/^IgnorePkg = //p' "$r/etc/pacman.conf" | tr ' ' '\n' | grep -c -x mesa-aurora)" 0
 rm "$(k "$r")/released.list"; sed -i 's/^AUTO_RELEASE=.*/AUTO_RELEASE=yes/' "$r/etc/omarchy-k114s/release.conf"
 
 # --- undo: exactly what r2c left ------------------------------------------------------------------------
-out=$(inst "$r" --undo); ok "--undo" "$? $(echo "$out" | grep -c 'undone')" "0 1"
+out=$(inst "$r" --undo); ok "--undo" "$? $(echo "$out" | grep -c 'k114s-tooling-install: undone')" "0 1"
+ok "undo names the folder of saved originals it keeps" "$(echo "$out" | grep -c 'tooling-r3.undone')" 1
 ok "undo restores every file r2c left, by content and mode, and removes every file r3 added" "$(snap "$r")" "$before"
 ok "undo: r2c's block is back in pacman.conf with r2c's hold list" "$(grep -c 'written by /usr/local/lib/omarchy-k114s/apply-holds' "$r/etc/pacman.conf") $(sed -n 's/^IgnorePkg = //p' "$r/etc/pacman.conf")" "1 $IMAGE_HELD"
 ok "undo: units disabled" "$(tail -n 2 "$r/systemctl.log" | head -n 1)" "disable --now k114s-holds.path k114s-boot-success.timer"
@@ -84,6 +88,19 @@ ok "undo keeps the recovery set and the saved files" "$(ls -d "$r"/var/lib/omarc
 out=$(inst "$r" --undo); ok "a second undo has nothing to do" "$? $(echo "$out" | grep -c 'nothing to undo')" "1 1"
 out=$(inst "$r"); ok "install again after an undo" "$?" 0
 out=$(inst "$r" --undo); ok "and undo again: still exactly r2c" "$(snap "$r")" "$before"
+
+# use-packaged-dtb is r2c's marker, and r3 (stage2 --dtb) creates and removes it: undo puts back what r2c left
+r=$(mk); : > "$(k "$r")/use-packaged-dtb"; before=$(snap "$r"); inst "$r" --no-recovery-set >/dev/null; rm -f "$(k "$r")/use-packaged-dtb"
+out=$(inst "$r" --undo); ok "undo restores r2c's use-packaged-dtb marker that r3 later removed" "$? $(test -e "$(k "$r")/use-packaged-dtb"; status) $(snap "$r")" "0 0 $before"
+r=$(mk); before=$(snap "$r"); inst "$r" --no-recovery-set >/dev/null; : > "$(k "$r")/use-packaged-dtb"
+out=$(inst "$r" --undo); ok "undo removes a use-packaged-dtb marker that r3 created (r2c's hook would honour it)" "$? $(test -e "$(k "$r")/use-packaged-dtb"; status) $(snap "$r")" "0 1 $before"
+# the last name of the sorted hold list is not installed: the old loop's last test returned 1 and killed the install part-way
+r=$(mk); echo zzz-not-installed >> "$(k "$r")/holds.list"; out=$(inst "$r" --no-recovery-set)
+ok "the last name of the hold list is not installed: the install still completes" "$? $(echo "$out" | grep -c 'k114s-tooling-install: installed') $(grep -c zzz "$(k "$r")/holds.list") $(ls "$r/etc/pacman.d/hooks" | wc -l | tr -d ' ')" "0 1 0 3"
+# a loader package that came in while Stage 2 was frozen: undo would hand boot-ctxr.bin to r2c's hook, which rewrites it
+r=$(mk); inst "$r" --no-recovery-set >/dev/null; : > "$r/etc/omarchy-k114s/stage2-frozen"; rm -rf "$r"/var/lib/pacman/local/m1n1-aurora-*; dbpkg "$r" m1n1-aurora 1.7.0.aurora25-1
+out=$(inst "$r" --undo); ok "undo is refused while Stage 2 is frozen and the loader packages are not the ones from the install" "$? $(echo "$out" | grep -c 'Stage 2 is frozen') $(ls "$r/etc/pacman.d/hooks" | wc -l | tr -d ' ')" "1 1 3"
+rm "$r/etc/omarchy-k114s/stage2-frozen"; out=$(inst "$r" --undo); ok "without the freeze it goes ahead" "$?" 0
 
 # --- refusals: nothing changed ---------------------------------------------------------------------------
 r=$(mk); b=$(snap "$r"); printf 'apple,j714s\0apple,t6050\0' > "$r/dt/compatible"; b=$(snap "$r"); out=$(inst "$r"); ok "not an apple,k114s Mac: refused, nothing changed" "$? $(snap "$r")" "1 $b"

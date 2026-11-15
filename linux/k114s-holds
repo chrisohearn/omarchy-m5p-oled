@@ -10,7 +10,8 @@
 #   k114s-holds check                 exit 0 when the block in pacman.conf is the one apply would write
 #   k114s-holds show                  the held names, one per line
 #   k114s-holds remove                take the block out
-#   k114s-holds release PKG [VER]     PKG leaves the holds for good (released.list), then apply
+#   k114s-holds release PKG [VER]     PKG leaves the holds for good (released.list), then apply.
+#                                     Never for a boot-chain package: those stay held
 #   k114s-holds hold PKG...           PKG is held (again), then apply
 #   k114s-holds lift-noextract PATH...  apply WITHOUT these NoExtract paths, for the one transaction
 #                                     that installs the fixed file (k114s-release adopt does this)
@@ -77,7 +78,7 @@ apply() {
   want=$(block)
   if [[ $(current_block) == "$want" && -z $(foreign_released) ]]; then return 0; fi
   [[ -f $LIB/holds.list ]] || warn "note: $LIB/holds.list is missing, holding the K114s boot stack only"
-  tmp=$PACCONF.k114s-new
+  tmp=$(mktemp "$PACCONF.k114s-new.XXXXXX")
   released=$(list_names "$LIB/released.list" | tr '\n' ' ')
   # Our block goes right under [options]. A released name is also taken out of any other
   # IgnorePkg line (the image's own line names the same packages until the first refresh drops it).
@@ -98,6 +99,11 @@ apply() {
 
 command=${1:-apply}
 [[ $# -eq 0 ]] || shift
+# One writer at a time (k114s-holds.path, the pre-refresh hook's sudo and the release tool can all run together).
+case $command in
+  apply | "" | remove | release | hold | lift-noextract | restore-noextract)
+    mkdir -p "$ROOT/run/lock"; exec 7> "$ROOT/run/lock/k114s-holds.lock"; flock -w 60 7 || die "another k114s-holds is writing $PACCONF" ;;
+esac
 case $command in
   apply | "") apply ;;
   check)
@@ -106,12 +112,15 @@ case $command in
   show) held_names ;;
   remove)
     grep -q "^$BEGIN_PREFIX" "$PACCONF" || exit 0
-    strip "$PACCONF" > "$PACCONF.k114s-new"
-    chmod 644 "$PACCONF.k114s-new"; mv -f "$PACCONF.k114s-new" "$PACCONF"
+    tmp=$(mktemp "$PACCONF.k114s-new.XXXXXX")
+    strip "$PACCONF" > "$tmp"
+    chmod 644 "$tmp"; mv -f "$tmp" "$PACCONF"
     say "holds removed from $PACCONF" ;;
   release)
     [[ $# -ge 1 ]] && valid_name "$1" || die "usage: k114s-holds release PKG [VERSION]"
     is_held "$1" || { say "$1 is not held"; exit 0; }
+    # a boot-chain package is released for ONE transaction by k114s-release (a permit), never for good
+    boot_class_names | grep -Fxq -- "$1" && die "$1 is a boot-chain package: it stays held and goes through k114s-release (additional boot entry, one-boot trial, boot-success record)"
     echo "$1 ${2:-unknown} $(now)" >> "$LIB/released.list"
     say "$1 released from the holds"
     apply ;;

@@ -44,6 +44,17 @@ case ${K114S_STAGE2_DTB:-} in
   *) fail "K114S_STAGE2_DTB must be packaged or pinned" ;;
 esac
 
+# r3: once the update tooling is installed (stage2-managed), m1n1/boot-ctxr.bin is written by NOBODY
+# but k114s-release, which switches it only after a candidate (K114S_STAGE2_OUT above) has booted
+# under the loader's one-boot trial. The pacman hook (96-omarchy-j714s-boot-ctxr.hook) calls this
+# with no K114S_STAGE2_OUT; it must not rewrite the one Stage 2 that every boot entry shares,
+# whatever packages or use-packaged-dtb say.
+managed=$root/etc/omarchy-k114s/stage2-managed
+if [ "$out" = boot-ctxr.bin ] && [ -e "$managed" ] && [ -s "$esp/boot-ctxr.bin" ]; then
+  echo "update-boot-ctxr-k114s: Stage 2 is managed by k114s-release ($managed exists); m1n1/boot-ctxr.bin left as it is"
+  exit 0
+fi
+
 # r3: while a new kernel or loader package is on trial, the proven Stage 2 must stay byte for byte
 # (it is shared by every boot entry). k114s-release writes this marker before the transaction
 # and removes it when the Stage 2 switch has been made on purpose (k114s-release stage2).

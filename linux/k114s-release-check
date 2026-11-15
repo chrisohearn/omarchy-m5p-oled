@@ -138,7 +138,7 @@ run_check() { # run_check TYPE ARG...: sets $detail; returns 0 pass, 1 fail, 2 c
   detail=
   case $type in
     version-newer | not-installed | manual | depends-on | file-exists | file-contains | file-matches | dtb-root-compatible | \
-      dtb-node | dtb-okay | dtb-prop | module-parm | code-imm16 | kconfig) ;;
+      dtb-node | dtb-okay | dtb-prop | module-parm | code-imm16 | kconfig | tree-drivers) ;;
     *) detail="unknown check type $type"; return 2 ;;
   esac
   case $type in
@@ -171,6 +171,33 @@ run_check() { # run_check TYPE ARG...: sets $detail; returns 0 pass, 1 fail, 2 c
   fetch
   [[ -z $fetch_error ]] || { detail=$fetch_error; return 2; }
   case $type in
+    tree-drivers)
+      # The compatibles of the tree this Mac boots: the running device tree (what the loader really
+      # handed the kernel: the pinned tree, or r3-gpu with the GPU) and the Stage 2 tree (the pinned
+      # one, or the channel's own after "stage2 --dtb packaged"). The proven (running) kernel is the
+      # baseline: whatever of those it carries a driver for, the channel's kernel must carry too.
+      # shortcut: the live tree's node status is read per node, not through disabled ancestors.
+      local want=$cache/x/$package.compat tree new_dir old_dir node lost=
+      tree=
+      if [[ -e $LIB/use-packaged-dtb ]]; then tree=$(first_match 'usr/lib/modules/*/dtbs/t6050-k114s.dtb' || true); fi
+      if [[ -z $tree ]]; then for tree in "$ESP/k114s-repair/k114s.dtb" "$LIB/k114s.dtb"; do [[ -r $tree ]] && break; tree=; done; fi
+      { [[ -z $tree ]] || "$(tool k114s-fdt)" "$tree" compatibles 2>/dev/null
+        while IFS= read -r node; do
+          [[ ! -e ${node%/*}/status || $(tr -d '\0' < "${node%/*}/status") == okay ]] && tr '\0' '\n' < "$node"
+        done < <(find -H "$ROOT/proc/device-tree" -name compatible -type f 2>/dev/null)
+      } | LC_ALL=C sort -u | grep -v '^$' > "$want" || true
+      [[ -s $want ]] || { detail="no device tree of the Mac could be read (no live tree, no Stage 2 tree)"; return 2; }
+      old_dir=$ROOT/usr/lib/modules/$(running_release)
+      new_dir=$(dirname "$(first_match 'usr/lib/modules/*/vmlinuz' || echo /nonexistent/x)")
+      [[ -s $old_dir/vmlinuz && -s $new_dir/vmlinuz ]] || { detail="cannot read the proven kernel ($old_dir) or the channel's ($new_dir)"; return 2; }
+      kernel_drivers() { # the wanted compatibles this kernel directory carries: exact strings in vmlinuz, or of: aliases of its modules
+        { tr '\0' '\n' < "$1/vmlinuz" | grep -x -F -f "$want" || true
+          [[ ! -f $1/modules.alias ]] || awk 'NR == FNR { w[$1]; next } $1 == "alias" { a = $2; sub(/^of:N\*T\*C/, "", a); sub(/C\*$/, "", a); if (a in w) print a }' "$want" "$1/modules.alias"
+        } | LC_ALL=C sort -u
+      }
+      lost=$(LC_ALL=C comm -23 <(kernel_drivers "$old_dir") <(kernel_drivers "$new_dir") | tr '\n' ' ')
+      if [[ -z $lost ]]; then detail="the kernel carries every driver of the tree this Mac boots that the proven kernel carries ($(wc -l < "$want" | tr -d ' ') compatibles)"; return 0; fi
+      detail="the channel's kernel lost the driver for: ${lost% }"; return 1 ;;
     depends-on)
       if sed -n 's/^depend = //p' "$unpacked/.PKGINFO" 2>/dev/null | grep -Eq -- "$1"; then detail="depends on $(sed -n 's/^depend = //p' "$unpacked/.PKGINFO" | grep -E -- "$1" | head -n 1)"; return 0; fi
       detail="no dependency matches $1"; return 1 ;;
@@ -279,7 +306,7 @@ for package in $wanted; do
   unset group_pass group_seen
   [[ $verdict != fixed ]] || fixed=$((fixed + 1))
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$package" "$class" "$verdict" "$installed" "$channel" "$repo" "$sha" "$package_file" >> "$cache/verdict.tsv.new"
-  ((keep)) || rm -rf "${cache:?}/x/$package" "$cache/x/$package.plain" "$cache/x/$package.image" "$cache/x/$package.config"
+  ((keep)) || rm -rf "${cache:?}/x/$package" "$cache/x/$package.plain" "$cache/x/$package.image" "$cache/x/$package.config" "$cache/x/$package.compat"
 done
 mv -f "$cache/verdict.tsv.new" "$cache/verdict.tsv"
 mv -f "$cache/checks.tsv.new" "$cache/checks.tsv"

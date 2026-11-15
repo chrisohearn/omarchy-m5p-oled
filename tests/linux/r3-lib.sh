@@ -4,6 +4,7 @@
 L=$(cd "${1:-$(dirname "${BASH_SOURCE[0]}")/../../linux}" && pwd)
 T=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 pass=0; fail=0
+export K114S_TEST=1     # k114s-guard honours K114S_ROOT and K114S_ESP_FREE only under this flag (hooks never get it)
 BASE=$(mktemp -d "${TMPDIR:-/tmp}/k114s-r3-test.XXXXXX")
 trap '[ -n "${R3_KEEP:-}" ] && echo "kept: $BASE" || { chmod -R u+rwX "$BASE" 2>/dev/null; rm -rf "$BASE"; }' EXIT   # R3_KEEP=1 keeps the folder for a look
 ok() { # ok NAME GOT WANT    (R3_DEBUG=1 also prints the last command output, $out, of a failing test)
@@ -38,8 +39,12 @@ mkroot() { # a fake root with the r3 tools installed as the installer would, the
       k114s-modules-cleanup k114s-fdt k114s-binscan k114s-booted-esp release-criteria.conf kernel-config.required rivals.list \
       protected.list noextract.list extras.list esp-audit-ignore.list holds.default; do cp "$L/$p" "$(lib "$r")/"; done
   cp "$L/update-boot-ctxr-k114s" "$(lib "$r")/update-boot-ctxr"
-  cp "$L"/0?-k114s-guard-*.hook "$r/etc/pacman.d/hooks/"
+  cp "$L"/[0-9][0-9]-k114s-guard-*.hook "$r/etc/pacman.d/hooks/"
   cp "$L/release.conf" "$r/etc/omarchy-k114s/release.conf"
+  if [ -n "${MKROOT_KERNEL:-}" ]; then   # the proven kernel's files and the Stage 2 tree, as the tree-drivers check reads them
+    kernel_tree "$r" 7.3.0-17.v272-4-ARCH none "$GOOD_CONFIG" "clamping Report Size"
+    python3 -I "$T/mkfdt.py" "$(lib "$r")/k114s.dtb" k114s-full
+  fi
   printf '%s\n' $HELD > "$(lib "$r")/holds.list"
   template "$r" edge
   dbpkg "$r" linux-aurora 7.3.0.aurora17.v272-4
@@ -85,9 +90,13 @@ CONFIG_NETFILTER_XT_MATCH_HL=m
 CONFIG_IP6_NF_MATCH_HL=m
 CONFIG_IP6_NF_MATCH_RT=y
 CONFIG_PKCS8_PRIVATE_KEY_PARSER=y'
+# The compatibles of the tree this Mac boots that the stand-in kernels carry a driver for: built in (a string in the
+# image) or as a module (an of: alias). KIMG_COMPAT overrides the built-in ones; KIMG_NOALIAS drops the module alias;
+# KIMG_MODULE is what the stand-in hid-magicmouse module holds (the dockchannel symbol of PR 1568 by default).
+KCOMPAT="apple,t6050-nvme-ans2 apple,t6050-pcie apple,dockchannel-hid apple,smc-hwmon apple,t6050-sart"
 kernel_image() { # kernel_image FILE RELEASE CONFIG [EXTRA TEXT]: an "image" with a banner and a built-in config
   # the banner twice, as a real image has it: first with a bare "#", then the text /proc/version shows
-  { printf 'MZ\0\0'; printf 'Linux version %s (test@build) # SMP PREEMPT\n\0Linux version %s (test@build) #1 SMP PREEMPT\n\0' "$2" "$2"; printf '%s\0' "${4:-}"
+  { printf 'MZ\0\0'; printf 'Linux version %s (test@build) # SMP PREEMPT\n\0Linux version %s (test@build) #1 SMP PREEMPT\n\0' "$2" "$2"; printf '%s\0' "${4:-}"; printf '%s\0' ${KIMG_COMPAT-$KCOMPAT}
     printf 'IKCFG_ST'; printf '%s\n' "$3" | gzip -c -n; printf 'IKCFG_ED'; } > "$1"
 }
 kernel_tree() { # kernel_tree TREE RELEASE DTB_VARIANT CONFIG [EXTRA]: the files of a linux-aurora package
@@ -97,7 +106,8 @@ kernel_tree() { # kernel_tree TREE RELEASE DTB_VARIANT CONFIG [EXTRA]: the files
   echo linux-aurora > "$m/pkgbase"; echo kernel/builtin.ko > "$m/modules.builtin"
   [ "$3" = none ] || python3 -I "$T/mkfdt.py" "$m/dtbs/t6050-k114s.dtb" "$3"
   python3 -I "$T/mkfdt.py" "$m/dtbs/t6050-j714s.dtb" j714s
-  echo "module $2" | zstd -q -c > "$m/kernel/drivers/hid/hid-magicmouse.ko.zst"
+  echo "module $2 ${KIMG_MODULE-magicmouse_raw_event_dockchannel}" | zstd -q -c > "$m/kernel/drivers/hid/hid-magicmouse.ko.zst"
+  [ -n "${KIMG_NOALIAS:-}" ] || printf 'alias of:N*T*Capple,t6050-dwc3 dwc3_apple\nalias of:N*T*Capple,t6050-dwc3C* dwc3_apple\nalias of:N*T*Capple,sn201202x sn201202x_apple\n' > "$m/modules.alias"
   echo "module $2" | zstd -q -c > "$m/kernel/drivers/net/wireless/apple/centauri/t6050/apple_centauri_t6050.ko.zst"
 }
 mkrepo() { # mkrepo CHANNEL PACKAGE_FILE...: (re)build the stand-in repository "omarchy" of that channel

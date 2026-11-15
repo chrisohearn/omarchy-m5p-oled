@@ -7,6 +7,7 @@
 #
 #   k114s-fdt FILE root-compatible              the root node's compatible strings, one per line
 #   k114s-fdt FILE nodes                        every node: PATH <tab> okay|disabled <tab> compatible,...
+#   k114s-fdt FILE compatibles                  every compatible string of every enabled node, once each, sorted
 #   k114s-fdt FILE find SELECTOR                paths of the nodes SELECTOR matches, one per line
 #   k114s-fdt FILE count-okay SELECTOR          how many matching nodes are enabled, ancestors included
 #   k114s-fdt FILE get SELECTOR PROPERTY        the property of the first match: strings one per
@@ -142,6 +143,10 @@ def main(argv):
             print("%s\t%s\t%s" % (node["path"], "okay" if okay(nodes, node) else "disabled",
                                   ",".join(strings_of(node["props"].get("compatible", b"")))))
         return 0
+    if command == "compatibles" and not args:
+        found = sorted({c for n in nodes if okay(nodes, n) for c in strings_of(n["props"].get("compatible", b"")) if c})
+        print("\n".join(found))
+        return 0 if found else 1
     if command == "find" and len(args) == 1:
         found = [n["path"] for n in select(nodes, args[0])]
         print("\n".join(found))

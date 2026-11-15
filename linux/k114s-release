@@ -4,6 +4,8 @@
 #     sudo k114s-release status              holds, the proven boot chain, a trial in progress, the ESP
 #     sudo k114s-release auto                what the post-update hook runs: check, release what is
 #                                            fixed, move a trial forward. Obeys release.conf. Never reboots.
+#     sudo k114s-release preflight           before "omarchy update": would a held package's dependency make the upgrade fail?
+#                                            (the pre-refresh hook runs it; it only reports)
 #     sudo k114s-release release PKG...      the same for named packages, whatever AUTO_* says
 #     sudo k114s-release release --accept-manual PKG...   also where the criteria say "a person decides"
 #     sudo k114s-release adopt FILE...       install locally built replacements of held packages (they stay
@@ -24,7 +26,9 @@
 #  - A rollback set is written first: the installed package rebuilt into an archive, /boot and
 #    the ESP boot files with hashes (k114s-recovery-set). No set, no release.
 #  - The hold guard lets exactly this transaction through (a permit naming its packages).
-#  - Userland packages switch directly.
+#  - Userland packages switch directly. The GPU stack (mesa-aurora, vulkan-aurora: "keep-held" in the
+#    criteria) and every boot-chain package STAY HELD: they are installed under the permit for that one
+#    transaction, so the next channel build is checked again, never installed by an ordinary update.
 #  - Boot-chain packages never replace the proven boot path in one step:
 #      1. the fixed kernel/firmware is installed while Stage 2 is frozen. Its boot image becomes
 #         an ADDITIONAL menu entry; the proven image stays the default; the proven kernel's
@@ -39,6 +43,9 @@
 #      back to the configured file if it hangs. Each boot recorded ok through it arms it again.
 #      On a LATER run, with enough recorded boots and the candidate running, it becomes the
 #      configured file; the old one is kept on the ESP for the way back from macOS.
+#  - Every boot-chain change, the first or a later one, takes this road. Omarchy's own
+#    11-omarchy-mac-saved-modules.hook may move the proven kernel's modules to /usr/lib/modules/.old in
+#    the transaction (a channel kernel whose release string sorts below the running one): they are put back.
 #  - Another trial of the boot chain (a standing Stage 2 trial in /etc/omarchy-k114s/stage2-trial,
 #    an armed aura-try that is not ours, a boot-menu trial) is never overridden: Stage 2 waits.
 #  - Space on the ESP is computed before anything is written.
@@ -62,7 +69,14 @@ declare -A PLAN_VERSION=() PLAN_CLASS=() PLAN_FILE=()
 
 log() { mkdir -p "$STATE"; echo "$(now) $*" >> "$STATE/log"; say "$*"; }
 note() { summary+=("$*"); log "$*"; }
-run_pacman() { env OMARCHY_UPDATE_PACMAN=1 "$PACMAN" "${PACMAN_ARGS[@]}" "$@"; }
+run_pacman() { # a transaction runs its boot hooks (limine-entry-tool takes the boot-partition lock itself), so this process lets go of the lock meanwhile
+  local status=0 transaction=0
+  [[ $1 != -S && $1 != -U ]] || transaction=1
+  ((!transaction)) || boot_unlock
+  env OMARCHY_UPDATE_PACMAN=1 "$PACMAN" "${PACMAN_ARGS[@]}" "$@" 8>&- || status=$?
+  return "$status"
+}
+keep_held() { [[ $(awk -v p="$1" '$1 == "package" && $2 == p { print $4; exit }' "$(data_file release-criteria.conf)") == keep-held ]]; }
 permit_write() { mkdir -p "$RUN"; { echo "# k114s-release permit $(now) pid $$"; printf '%s\n' "$@"; } > "$PERMIT"; }
 permit_clear() { rm -f "$PERMIT"; }
 holds() { bash "$(tool k114s-holds)" "$@"; }
@@ -151,10 +165,15 @@ release_userland() { # release_userland PKG: verdict fixed, class userland
   id=$(new_id "$package")
   dir=$(rollback_set "$id" "$package" --no-uki) || { note "$package: could not write the rollback set; left held"; return 0; }
   permit_write "install $package"
-  holds release "$package" "$want" >/dev/null
+  # keep-held packages (the GPU stack) are installed under the permit alone and stay held: the next channel build is checked again
+  keep_held "$package" || holds release "$package" "$want" >/dev/null
   if run_pacman -S --noconfirm --needed "$package" > "$dir/pacman.log" 2>&1 && [[ $(installed_version "$package") == "$want" ]]; then
     permit_clear
-    note "$package released: now $want from the channel. Rollback: sudo pacman -U $dir/packages/$package-*.pkg.tar.zst"
+    if keep_held "$package"; then
+      note "$package installed (it stays held: the next channel build is checked again): now $want from the channel. Rollback: sudo k114s-release adopt $dir/packages/$package-*.pkg.tar.zst"
+    else
+      note "$package released: now $want from the channel. Rollback: sudo pacman -U $dir/packages/$package-*.pkg.tar.zst"
+    fi
   else
     permit_clear
     holds hold "$package" >/dev/null
@@ -176,7 +195,7 @@ adopt_userland() { # adopt_userland FILE PACKAGE VERSION: switch directly; it st
   permit_write "install $package"
   if run_pacman -U --noconfirm "$file" > "$dir/pacman.log" 2>&1 && [[ $(installed_version "$package") == "$version" ]]; then
     permit_clear; holds restore-noextract >/dev/null
-    log "$package $version adopted from ${file##*/}; it stays held. Rollback: sudo pacman -U $dir/packages/$package-*.pkg.tar.zst"
+    log "$package $version adopted from ${file##*/}; it stays held. Rollback: sudo k114s-release adopt $dir/packages/$package-*.pkg.tar.zst (a plain pacman -U is stopped by the hold guard)"
   else
     permit_clear; holds restore-noextract >/dev/null
     die "$package: the transaction did not go through (see $dir/pacman.log); nothing changed"
@@ -234,6 +253,7 @@ stage_boot() { # stage_boot PKG...: verdict fixed, classes boot-uki / boot-stage
   if [[ -f $TRIAL ]]; then note "boot-chain release waits: a trial is in progress ($(kv "$TRIAL" packages))"; return 0; fi
   if [[ -e $ENTRY_TRIAL ]]; then note "boot-chain release waits: a boot-menu trial of someone else is under way ($ENTRY_TRIAL)"; return 0; fi
   esp_is_mounted || { note "boot-chain release waits: nothing is mounted at $ESP"; return 0; }
+  boot_lock
   known_good_ok || { note "boot-chain release waits: $why"; return 0; }
   if [[ -x $LIB/k114s-booted-esp && ${K114S_SKIP_ESP_CHECK:-0} != 1 ]]; then
     OMARCHY_ROOT=$ROOT "$LIB/k114s-booted-esp" >/dev/null || { note "boot-chain release waits: $ESP is not the ESP this boot came from"; return 0; }
@@ -310,14 +330,29 @@ stage_boot() { # stage_boot PKG...: verdict fixed, classes boot-uki / boot-stage
   for package in "${packages[@]}"; do before_version[$package]=$(installed_version "$package" || true); done
   for package in "${packages[@]}"; do
     lines+=("install $package")
-    if [[ $PLAN_SOURCE == channel ]]; then holds release "$package" "${PLAN_VERSION[$package]}" >/dev/null; else files+=("${PLAN_FILE[$package]}"); fi
+    # Boot-chain packages are NOT released from the holds, not even for this transaction: the permit lets
+    # exactly these packages through the guard and pacman installs a named, ignored package. They are
+    # held before, during and after, so the next channel build has to pass the check and the trial again.
+    [[ $PLAN_SOURCE == channel ]] || files+=("${PLAN_FILE[$package]}")
   done
   permit_write "${lines[@]}"
-  local ok=1
+  local ok=1 mods=$ROOT/usr/lib/modules had_mods=0 old_rel
+  old_rel=$(running_release)
+  [[ ! -d $mods/$old_rel/kernel ]] || had_mods=1
   if [[ $PLAN_SOURCE == channel ]]; then run_pacman -S --noconfirm --needed "${packages[@]}" > "$dir/pacman.log" 2>&1 || ok=0
   else run_pacman -U --noconfirm "${files[@]}" > "$dir/pacman.log" 2>&1 || ok=0; fi     # local builds: they stay held
   permit_clear
   for package in "${packages[@]}"; do [[ $(installed_version "$package") == "${PLAN_VERSION[$package]}" ]] || ok=0; done
+  # Omarchy's 11-omarchy-mac-saved-modules.hook moves the RUNNING kernel's modules to /usr/lib/modules/.old when the
+  # installed kernel's release string sorts below the running one (7.3.0-17-ARCH < 7.3.0-17.v272-4-ARCH). The proven
+  # entry must keep its modules (Wi-Fi, the patched hid-magicmouse): they go back before anything is recorded.
+  # This and everything below runs whatever the boot partition's lock does: nothing after the transaction may stop early.
+  if ((had_mods)) && [[ ! -d $mods/$old_rel/kernel ]]; then
+    if [[ -e $mods/$old_rel ]]; then note "PROBLEM: $mods/$old_rel exists without its kernel modules after the transaction, so the proven kernel's modules ($mods/.old/$old_rel) were not put back. The proven entry would boot without them: do not restart; fix it by hand or restore from $dir (extras.tar)"
+    elif [[ -d $mods/.old/$old_rel/kernel ]] && mv "$mods/.old/$old_rel" "$mods/$old_rel"; then rmdir "$mods/.old" 2>/dev/null || true; log "the proven kernel's modules ($old_rel) had been moved to $mods/.old during the transaction; they were put back"
+    else note "PROBLEM: the proven kernel's modules ($mods/$old_rel) are gone after the transaction and could not be put back. The proven entry would boot without them: do not restart; restore them from $dir (extras.tar) or $mods/.old"; fi
+  fi
+  boot_lock soft || log "the boot partition's lock was still held after ${K114S_LOCK_WAIT:-120} s; the steps that restore the proven boot path go on without it"
   # Whatever happened, the proven path must be exactly as it was: the configured Stage 2 and,
   # under a standing trial, the Stage 2 the proven boots come through.
   local rel want_sum
@@ -335,9 +370,6 @@ stage_boot() { # stage_boot PKG...: verdict fixed, classes boot-uki / boot-stage
   if [[ -n $index && $(limine_default "$conf") != "$index" ]]; then limine_set_default "$conf" "$index" && log "the default boot entry is the proven image again (entry $index)"; fi
   [[ -n $index ]] || note "PROBLEM: the boot menu has no entry for the proven image $known_uki any more; see $dir/esp/limine.conf"
   if ((!ok)); then
-    for package in "${packages[@]}"; do
-      [[ $(installed_version "$package") == "${PLAN_VERSION[$package]}" ]] || holds hold "$package" >/dev/null
-    done
     if ((drop)) && [[ ! -f $ESP/$std ]]; then cp "$dir/esp/$std" "$ESP/$std" 2>/dev/null || true; fi
     local any_installed=0
     for package in "${packages[@]}"; do [[ $(installed_version "$package") != "${PLAN_VERSION[$package]}" || $(installed_version "$package") == "${before_version[$package]}" ]] || any_installed=1; done
@@ -346,7 +378,7 @@ stage_boot() { # stage_boot PKG...: verdict fixed, classes boot-uki / boot-stage
       ((was_frozen)) || rm -f "$FROZEN"
       grep -Fxv -- "$(running_release)" "$KEEP_MODULES" > "$KEEP_MODULES.new" 2>/dev/null || true; mv -f "$KEEP_MODULES.new" "$KEEP_MODULES"
     fi
-    note "${packages[*]}: the transaction did not go through (see $dir/pacman.log). The proven boot path is untouched; what did not install is held again"
+    note "${packages[*]}: the transaction did not go through (see $dir/pacman.log). The proven boot path is untouched; the packages stay held"
     return 0
   fi
   if ((${#uki_pkgs[@]} == 0)); then
@@ -396,6 +428,7 @@ running_trial() { # is the trial chain the one running, unchanged?
 retire() {
   local kind old_uki new_uki dir conf before after index old_release
   kind=$(kv "$TRIAL" kind); dir=$(kv "$TRIAL" rollback); conf=$(limine_conf)
+  boot_lock
   running_trial || { note "retire waits: the boot chain on trial is not the one running"; return 0; }
   if [[ $kind == stage2 ]]; then promote_stage2; return 0; fi
   if [[ $kind == uki ]]; then
@@ -517,6 +550,18 @@ cmd_stage2() {
     die "the Stage 2 hook refused (see $dir/stage2.log); nothing changed, the proven Stage 2 is in place"
   fi
   [[ -s $candidate ]] || die "the Stage 2 hook wrote no candidate (see $dir/stage2.log); nothing changed"
+  if [[ $dtb == packaged ]]; then
+    # update-m1n1 cuts boot.bin from the newest -ARCH kernel directory, which can be the proven kernel's restored one,
+    # not the installed linux-aurora's (the one the release check read): the tree in the candidate must be the package's.
+    local pkgdtb m1n1 m1n1_size
+    pkgdtb=$(run_pacman -Qlq linux-aurora 2>/dev/null | sed -n 's#^.*\(usr/lib/modules/[^/]*/dtbs/t6050-k114s\.dtb\)$#\1#p' | head -n 1)
+    m1n1=$ROOT/usr/lib/asahi-boot/m1n1.bin; [[ ! -s $ROOT/usr/lib/asahi-boot/m1n1-ctxr.bin ]] || m1n1=$ROOT/usr/lib/asahi-boot/m1n1-ctxr.bin
+    m1n1_size=$(size "$m1n1")
+    if [[ -z $pkgdtb || ! -s $ROOT/$pkgdtb ]] || ! cmp -s -i "$m1n1_size:0" -n "$(size "$ROOT/$pkgdtb")" "$candidate" "$ROOT/$pkgdtb"; then
+      rm -f "$candidate"
+      die "the K114s device tree in boot.bin is not the one the installed linux-aurora carries${pkgdtb:+ ($pkgdtb)}: update-m1n1 took it from another kernel directory. Nothing changed. Run update-m1n1 with DTBS set to that kernel's dtbs directory (/etc/default/update-m1n1), then try again"
+    fi
+  fi
   [[ $(sum "$ESP/$STAGE2_REL") == "$(known_configured)" ]] || { rm -f "$candidate"; die "PROBLEM: $STAGE2_REL changed while the candidate was built; its copy is in $dir/esp"; }
   new=$(sum "$candidate")
   if [[ $new == "$(known_configured)" ]]; then
@@ -621,9 +666,6 @@ cmd_abandon() {
     permit_write "${lines[@]}"
     if ! run_pacman -U --noconfirm "${overwrite[@]}" "${files[@]}" > "$dir/abandon.log" 2>&1; then
       permit_clear
-      if [[ $(kv "$TRIAL" source) != files ]]; then   # as before the attempt: channel builds on trial are released packages
-        for package in $packages; do holds release "$package" "$(installed_version "$package")" >/dev/null; done
-      fi
       die "putting the old packages back did not go through (see $dir/abandon.log); the trial stays as it was"
     fi
     permit_clear
@@ -644,6 +686,7 @@ cmd_forget_image() {
   [[ $rel =~ ^EFI/Linux/[A-Za-z0-9._+-]+\.efi$ ]] || die "usage: k114s-release forget-image EFI/Linux/NAME.efi"
   esp_is_mounted || die "nothing is mounted at $ESP"
   [[ -f $ESP/$rel ]] || die "$rel is not on the ESP"
+  boot_lock
   [[ ! -f $TRIAL ]] || die "a trial is in progress; finish or abandon it first"
   known_good_ok || die "$why"
   proven=$(kv "$KNOWN" uki)
@@ -676,6 +719,7 @@ cmd_forget_image() {
 do_release() { # do_release MODE PKG...: MODE auto obeys release.conf, MODE named releases what was asked
   local mode=$1 fixed=() boot=() name class verdict
   shift
+  boot_unlock     # the check downloads packages: the boot partition's lock is not held meanwhile
   run_check ${1:+--packages "$*"} || { note "the release check could not run (network?); nothing released"; return 0; }
   while IFS=$'\t' read -r name class verdict _; do
     [[ $verdict == fixed ]] || continue
@@ -695,6 +739,23 @@ do_release() { # do_release MODE PKG...: MODE auto obeys release.conf, MODE name
   if [[ $mode == named ]]; then
     for name in "$@"; do [[ " ${fixed[*]:-} " == *" $name "* ]] || note "$name is not released: $(verdict_of "$name" 3)"; done
   fi
+}
+cmd_preflight() { # the upgrade the channel offers, worked out in the check's private copy of the lists; nothing is installed
+  local out status=0 name blocked=() lines=() verdict
+  boot_unlock
+  run_check || { say "preflight: the release check could not run (network?); nothing checked"; return 0; }
+  out=$("$PACMAN" "${PACMAN_ARGS[@]}" --dbpath "$VAR/check/db" -Sup --noconfirm 2>&1) || status=$?
+  ((status)) || { say "preflight: no held package stands in the way of the channel's upgrade"; return 0; }
+  for name in $(held_names); do grep -Fq -- "$name" <<<"$out" && blocked+=("$name"); done
+  if ((${#blocked[@]} == 0)); then say "preflight: the channel's upgrade would fail, not because of a held package: $(tail -n 2 <<<"$out" | tr '\n' ' ')"; return 0; fi
+  for name in "${blocked[@]}"; do
+    verdict=$(verdict_of "$name" 3)
+    if [[ $verdict == fixed ]]; then lines+=("$name: the channel's build is fit for the K114s. After the update stops, run: sudo k114s-release release $name (add --accept-manual where the criteria say a person decides), then update again")
+    else lines+=("$name: the channel's build is not fit yet (${verdict:-no verdict}); the update stops until it is. Look at: sudo k114s-release status"); fi
+  done
+  say "preflight: the channel's upgrade would FAIL on a dependency of held package(s): ${blocked[*]}"
+  printf '%s\n' "${lines[@]}" | sed 's/^/  /'
+  notify normal "K114s updates" "$(printf '%s\n' "The next omarchy update would fail on held ${blocked[*]}" "${lines[@]}" | cut -c1-400)"
 }
 cmd_status() {
   local conf name
@@ -723,6 +784,7 @@ cmd_status() {
   [[ $(id -u) == 0 || -n ${K114S_ROOT:-} ]] || echo "(run with sudo to read the ESP: boot images, menu, proven-chain check)"
   if esp_is_mounted && [[ -d $ESP ]]; then
     echo "ESP:       $(( $(esp_free) / 1000000 )) MB free"
+    if snapper_sync_on; then echo "           limine-snapper-sync is on: snapshot boot files use $(( $(snapshot_bytes) / 1000000 )) MB (limine_history); it limits itself and checks the usage before it writes"; fi
     conf=$(limine_conf)
     [[ -f $conf ]] && echo "           default entry $(limine_default "$conf"): $(limine_title_of "$conf" "$(limine_default "$conf")")"
     for name in "$ESP"/EFI/Linux/*.efi "$ESP"/m1n1/*.bin; do [[ -f $name ]] && echo "           $(( $(size "$name") / 1000000 )) MB  ${name#"$ESP"/}"; done
@@ -758,11 +820,12 @@ case $command in
     if [[ ${1:-} == --accept-manual ]]; then accept_manual=1; shift; fi
     (($#)) || die "usage: k114s-release release [--accept-manual] PKG..."
     do_release named "$@" ;;
+  preflight) cmd_preflight ;;
   adopt) cmd_adopt "$@" ;;
   mark-known-good) cmd_mark_known_good ;;
   retire) [[ -f $TRIAL ]] || die "no trial is in progress"; [[ -n $(kv "$TRIAL" proven) ]] || die "the trial has no recorded successful boot yet"; advance 1 ;;
   stage2) tidy_stage2; cmd_stage2 "$@" ;;
   abandon) cmd_abandon ;;
   forget-image) cmd_forget_image "$@" ;;
-  *) die "unknown command $command (status, auto, release, adopt, mark-known-good, retire, stage2, abandon, forget-image)" ;;
+  *) die "unknown command $command (status, auto, preflight, release, adopt, mark-known-good, retire, stage2, abandon, forget-image)" ;;
 esac

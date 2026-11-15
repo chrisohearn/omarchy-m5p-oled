@@ -40,7 +40,9 @@ DATA=(release-criteria.conf kernel-config.required rivals.list protected.list no
   esp-audit-ignore.list holds.default)
 NEW_HOOKS=(00-k114s-guard-install.hook 00-k114s-guard-remove.hook 01-k114s-guard-esp.hook)
 OLD_HOOKS=(00-k114s-hold-guard.hook 01-k114s-esp-space.hook)
-OLD_TOOLS=(apply-holds hold-guard esp-space-guard update-boot-ctxr k114s-edge-check k114s-booted-esp holds.list)
+OLD_TOOLS=(apply-holds hold-guard esp-space-guard update-boot-ctxr k114s-edge-check k114s-booted-esp holds.list use-packaged-dtb)
+EARLIER_HOOKS=(11-k114s-guard-esp.hook)     # the space guard's name in an earlier draft of r3
+LOADERS=(m1n1-aurora uboot-aurora)
 UNIT_FILES=(k114s-boot-success.service k114s-boot-success.timer k114s-holds.path k114s-holds.service)
 DROPIN=$UNITS/linux-modules-cleanup.service.d/k114s-keep.conf
 OTHER=(update-boot-ctxr-k114s linux-modules-cleanup-k114s-keep.conf release.conf
@@ -65,6 +67,17 @@ restore() {
   if [[ -e $SAVED/$2.orig ]]; then mkdir -p "$(dirname "$1")"; cp -a "$SAVED/$2.orig" "$1"
   elif [[ -e $SAVED/$2.absent ]]; then rm -f "$1"; fi
 }
+loader_versions() { # the installed versions of the loader packages, one line
+  local package dir version out=
+  for package in "${LOADERS[@]}"; do
+    version=-
+    for dir in "$ROOT/var/lib/pacman/local/$package"-*/; do
+      [[ -f $dir/desc && $(awk '/^%NAME%$/ { getline; print; exit }' "$dir/desc") == "$package" ]] && version=$(awk '/^%VERSION%$/ { getline; print; exit }' "$dir/desc")
+    done
+    out+="$package=$version "
+  done
+  echo "$out"
+}
 user_hook() { echo "$USER_HOME/.config/omarchy/hooks/$1"; }
 
 copy_files() {
@@ -86,6 +99,8 @@ esac
 SHIM
   chmod 755 "$LIB/apply-holds"
   for file in "${NEW_HOOKS[@]}"; do install -m 644 "$HERE/$file" "$HOOKS/$file"; done
+  for file in "${EARLIER_HOOKS[@]}"; do rm -f "$HOOKS/$file"; done
+  : > "$ETC/stage2-managed"     # from now on only k114s-release writes m1n1/boot-ctxr.bin (see update-boot-ctxr-k114s)
   for file in "${UNIT_FILES[@]}"; do install -m 644 "$HERE/$file" "$UNITS/$file"; done
   mkdir -p "$(dirname "$DROPIN")"
   install -m 644 "$HERE/linux-modules-cleanup-k114s-keep.conf" "$DROPIN"
@@ -112,27 +127,32 @@ if [[ $mode == undo ]]; then
     say "note: these packages were released and now follow the channel; r2c's hold list would hold them again at their present version:"
     sed 's/^/  /' "$LIB/released.list"
   fi
+  # A loader package that came in while Stage 2 was frozen is not what r2c's Stage 2 was built from:
+  # undo would hand m1n1/boot-ctxr.bin back to r2c's hook, which rewrites it from those packages.
+  if [[ -e $ETC/stage2-frozen && -f $SAVED/loader-versions && $(loader_versions) != "$(cat "$SAVED/loader-versions")" ]]; then
+    die "Stage 2 is frozen and the loader packages changed since the install ($(loader_versions), at install: $(cat "$SAVED/loader-versions")): undo would let r2c's hook rewrite m1n1/boot-ctxr.bin. Switch Stage 2 (k114s-release stage2) or put those packages back first"
+  fi
   units disable
   for file in "${UNIT_FILES[@]}"; do rm -f "$UNITS/$file"; done
   rm -f "$DROPIN"; rmdir "$(dirname "$DROPIN")" 2>/dev/null || true
   "$SYSTEMCTL" daemon-reload || true
   # pacman.conf: take the r3 block out, then let r2c's own apply-holds write its block back
   if [[ -x $LIB/k114s-holds ]]; then K114S_ROOT=$ROOT bash "$LIB/k114s-holds" remove >/dev/null || true; fi
-  for file in "${NEW_HOOKS[@]}"; do rm -f "$HOOKS/$file"; done
+  for file in "${NEW_HOOKS[@]}" "${EARLIER_HOOKS[@]}"; do rm -f "$HOOKS/$file"; done
   for file in "${OLD_HOOKS[@]}"; do restore "$HOOKS/$file" "hook-$file"; done
   for file in "${TOOLS[@]}" "${DATA[@]}" released.list; do rm -f "$LIB/$file"; done
   for file in "${OLD_TOOLS[@]}"; do restore "$LIB/$file" "tool-$file"; done
-  rm -f "$LIB/use-packaged-dtb.r3"
   if [[ -n $USER_HOME ]]; then
     restore "$(user_hook pre-refresh-pacman.d/k114s-holds)" user-pre-refresh
     restore "$(user_hook post-update.d/k114s-release-check)" user-post-update
   fi
   if [[ -e $SAVED/release.conf.created ]]; then rm -f "$ETC/release.conf"; fi
   if [[ -e $SAVED/channel.created ]]; then rm -f "$ETC/channel"; fi
-  rm -f "$ETC/stage2-frozen" "$ETC/keep-modules"
+  rm -f "$ETC/stage2-frozen" "$ETC/keep-modules" "$ETC/stage2-managed"
   if [[ -x $LIB/apply-holds ]]; then K114S_ROOT=$ROOT bash "$LIB/apply-holds" >/dev/null || say "note: r2c's apply-holds could not write its block; run it by hand"; fi
   mv "$SAVED" "$SAVED.undone.$(date +%s)"
-  say "undone: r2c's guards, hooks and hold list are back. Recovery and rollback sets under /var/lib/omarchy-k114s are kept."
+  say "undone: r2c's guards, hooks, hold list and Stage 2 hook (with its use-packaged-dtb choice) are back."
+  say "kept: the recovery and rollback sets under /var/lib/omarchy-k114s, and the saved originals in $SAVED.undone.* (delete that folder when you no longer need them)"
   exit 0
 fi
 
@@ -174,27 +194,29 @@ if [[ -n $USER_HOME ]]; then
   save "$(user_hook post-update.d/k114s-release-check)" user-post-update
 fi
 
+loader_versions > "$SAVED/loader-versions"
 copy_files
-for file in "${OLD_HOOKS[@]}"; do rm -f "$HOOKS/$file"; done
-rm -f "$LIB/hold-guard" "$LIB/esp-space-guard"
 
 # The hold list: what was held stays held; the default set is added; names that are not
 # installed go (the image pinned "omarchy" and "omarchy-settings", which Edge's omarchy-dev replaced).
+# It and the holds in pacman.conf are in place BEFORE r2c's guards are taken away.
 {
   [[ ! -f $LIB/holds.list ]] || awk '!/^[[:space:]]*(#|$)/ { print $1 }' "$LIB/holds.list"
   awk '!/^[[:space:]]*(#|$)/ { print $1 }' "$LIB/holds.default"
 } | grep -E '^[A-Za-z0-9@._+-]+$' | LC_ALL=C sort -u | while read -r package; do
   for dir in "$ROOT/var/lib/pacman/local/$package"-*/; do
-    [[ -f $dir/desc ]] && [[ $(awk '/^%NAME%$/ { getline; print; exit }' "$dir/desc") == "$package" ]] && { echo "$package"; break; }
+    if [[ -f $dir/desc && $(awk '/^%NAME%$/ { getline; print; exit }' "$dir/desc") == "$package" ]]; then echo "$package"; break; fi
   done
 done > "$LIB/holds.list.new"
 [[ -s $LIB/holds.list.new ]] || printf '%s\n' linux-aurora m1n1-aurora uboot-aurora > "$LIB/holds.list.new"
 mv -f "$LIB/holds.list.new" "$LIB/holds.list"
-
 if [[ ! -e $ETC/release.conf ]]; then install -m 644 "$HERE/release.conf" "$ETC/release.conf"; : > "$SAVED/release.conf.created"; fi
 if [[ ! -e $ETC/channel ]]; then echo edge > "$ETC/channel"; : > "$SAVED/channel.created"; fi
-
 K114S_ROOT=$ROOT bash "$LIB/k114s-holds" apply
+
+for file in "${OLD_HOOKS[@]}"; do rm -f "$HOOKS/$file"; done
+rm -f "$LIB/hold-guard" "$LIB/esp-space-guard"
+
 K114S_ROOT=$ROOT bash "$LIB/k114s-holds" check || die "the holds did not verify in /etc/pacman.conf"
 units enable
 K114S_ROOT=$ROOT bash "$LIB/k114s-guard" audit || say "note: until the space guard knows those triggers, every install is checked for space"

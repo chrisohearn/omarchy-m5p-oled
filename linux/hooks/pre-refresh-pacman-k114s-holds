@@ -30,11 +30,14 @@ if [[ -n $channel && $channel != "$want" && ! -e $root/etc/omarchy-k114s/allow-c
     "nothing will be installed. Put the channel back with:  omarchy-refresh-pacman $want"
 fi
 
+# With the holds back: would the channel's upgrade fail on a dependency of a held package (a new LLVM soname
+# against the held Mesa)? Said now, before the long update fails; it never stops the update itself.
+preflight() { [[ -x $lib/k114s-release ]] && $sudo -n "$lib/k114s-release" preflight 2>/dev/null || true; }
 for _ in $(seq 1 "${K114S_HOLDS_WAIT:-10}"); do
-  "$lib/k114s-holds" check 2>/dev/null && exit 0
+  if "$lib/k114s-holds" check 2>/dev/null; then preflight; exit 0; fi
   sleep 0.5
 done
-if $sudo "$lib/k114s-holds" apply && "$lib/k114s-holds" check; then exit 0; fi
+if $sudo "$lib/k114s-holds" apply && "$lib/k114s-holds" check; then preflight; exit 0; fi
 
 hooks=$root/etc/pacman.d/hooks
 if [[ -f $hooks/00-k114s-guard-install.hook && -x $lib/k114s-guard ]]; then

@@ -92,6 +92,28 @@ truncate -s $((4 * MB)) "$r/boot/efi/m1n1/boot.bin"; truncate -s $((4 * MB)) "$r
 out=$(echo usr/lib/firmware/brcm/x.bin | guard "$r" esp $((88 * MB))); ok "esp: a firmware update with room for one boot image passes (80+8)" "$?" 0
 out=$(echo usr/lib/firmware/brcm/x.bin | guard "$r" esp $((88 * MB - 1))); ok "esp: one byte short stops" "$?" 1
 ok "esp: the message shows the sum" "$(echo "$out" | grep -c -E 'boot image for linux-aurora: 83 MB|margin kept free: 8 MB|^92 MB free; the writes need 93 MB')" 3
+# limine-snapper-sync is enabled on the Mac and limits itself (LIMIT_USAGE_PERCENT), checking the usage before it writes:
+# nothing is reserved for it, so its config changes no sum (a reservation made every boot-file update on this ESP stop)
+touch "$r/etc/limine-snapper-sync.conf"
+out=$(echo usr/lib/firmware/brcm/x.bin | guard "$r" esp $((88 * MB))); ok "esp: with limine-snapper-sync on, the same firmware update passes with the same 88 MB" "$?" 0
+ok "esp: and the sum names no snapshot copy" "$(echo "$out" | grep -c 'snapper')" 0
+# this Mac's real sizes: vmlinuz 54,086,144, initramfs 25,023,354, standard image 79,253,504, loader files 10,040,000 x2 + 4,440,000
+truncate -s 54086144 "$k/vmlinuz"; truncate -s 25023354 "$r/boot/initramfs-linux-aurora.img"; truncate -s 79253504 "$r/boot/efi/EFI/Linux/omarchy_linux-aurora.efi"
+truncate -s 10040000 "$r/boot/efi/m1n1/boot.bin"; truncate -s 4440000 "$r/boot/efi/m1n1/boot-ctxr.bin"
+out=$(echo usr/lib/modules/7.4.0-1-ARCH/vmlinuz | guard "$r" esp 166000000); ok "esp: real sizes, snapper config present, the standard image forgotten (166 MB free): a kernel update passes" "$?" 0
+out=$(echo usr/lib/firmware/brcm/x.bin | guard "$r" esp 166000000); ok "esp: and so does a firmware update" "$?" 0
+rm "$r/etc/limine-snapper-sync.conf"
+truncate -s $((54 * MB)) "$k/vmlinuz"; truncate -s $((24 * MB)) "$r/boot/initramfs-linux-aurora.img"; truncate -s $((79 * MB)) "$r/boot/efi/EFI/Linux/omarchy_linux-aurora.efi"
+truncate -s $((4 * MB)) "$r/boot/efi/m1n1/boot.bin"; truncate -s $((4 * MB)) "$r/boot/efi/m1n1/boot-ctxr.bin"
+# the guard measures when limine-snapper-sync (and limine-entry-tool) are done: it takes their lock itself
+mkdir -p "$r/run/lock"; echo "ESP_LOCK_WAIT_SECONDS=1" >> "$r/etc/omarchy-k114s/release.conf"
+(flock "$r/run/lock/boot-partition.lock" sleep 4) & sleep 1
+out=$(echo usr/lib/firmware/brcm/x.bin | guard "$r" esp $((200 * MB))); ok "esp: the boot partition's lock is held: stopped, nothing measured" "$? $(echo "$out" | grep -c 'its lock is held')" "1 1"
+wait
+out=$(echo usr/lib/firmware/brcm/x.bin | guard "$r" esp $((200 * MB))); ok "esp: the lock is free again: it measures and passes" "$?" 0
+sed -i '/^ESP_LOCK_WAIT_SECONDS/d' "$r/etc/omarchy-k114s/release.conf"
+out=$(echo usr/share/limine/BOOTAA64.EFI | guard "$r" esp $((10 * MB))); ok "esp: limine alone writes no boot image and no snapshot copy" "$?" 0
+rm "$r/etc/limine-snapper-sync.conf"
 out=$(echo usr/lib/modules/7.4.0-1-ARCH/vmlinuz | guard "$r" esp $((99 * MB))); ok "esp: a kernel needs the boot image and the loader files (80+12+8): 99 MB stops" "$?" 1
 out=$(echo usr/lib/modules/7.4.0-1-ARCH/vmlinuz | guard "$r" esp $((100 * MB))); ok "esp: 100 MB passes" "$?" 0
 out=$(echo usr/lib/asahi-boot/m1n1.bin | guard "$r" esp $((20 * MB))); ok "esp: a loader package needs the loader files only (12+8)" "$?" 0
@@ -139,7 +161,7 @@ out=$(echo firefox | guard "$r" install 0); ok "conservative marker: every insta
 if [ -d /usr/lib/omarchy/mac-boot ] && [ -d /usr/share/libalpm/hooks ]; then
   r=$(mkroot); mkdir -p "$r/usr/share/libalpm/hooks"
   cp /usr/share/libalpm/hooks/*.hook "$r/usr/share/libalpm/hooks/" 2>/dev/null
-  for hook in /etc/pacman.d/hooks/*.hook; do case ${hook##*/} in 0?-k114s-*) ;; *) cp "$hook" "$r/etc/pacman.d/hooks/" 2>/dev/null ;; esac; done
+  for hook in /etc/pacman.d/hooks/*.hook; do case ${hook##*/} in [0-9][0-9]-k114s-*) ;; *) cp "$hook" "$r/etc/pacman.d/hooks/" 2>/dev/null ;; esac; done
   out=$(guard "$r" audit); ok "audit: covers every boot-file hook installed on this machine" "$? $(echo "$out" | head -n 3 | tr '\n' ' ')" "0 k114s-guard audit: the space guard's triggers cover every boot-file hook on this system "
 fi
 
@@ -200,6 +222,9 @@ STUB
 printf '#!/bin/bash\necho "sudo: a password is required" >&2\nexit 1\n' > "$BASE/sudo-fail"; chmod +x "$BASE/sudo-ok" "$BASE/sudo-fail"
 r=$(mkroot); holds "$r" apply >/dev/null; export SUDO_LOG=$r/sudo.log
 out=$(hook "$r" K114S_SUDO="$BASE/sudo-fail"); ok "hook: holds in place, nothing to do, sudo not needed" "$? $(echo "$out" | wc -c | tr -d ' ')" "0 1"
+r2=$(mkroot); holds "$r2" apply >/dev/null; mkdir -p "$(lib "$r2")"; printf '#!/bin/bash\necho "preflight ran: $*"\n' > "$(lib "$r2")/k114s-release"; chmod +x "$(lib "$r2")/k114s-release"
+printf '#!/bin/bash\n[[ ${1:-} != -n ]] || shift\nexec "$@"\n' > "$BASE/sudo-n"; chmod +x "$BASE/sudo-n"
+out=$(hook "$r2" K114S_SUDO="$BASE/sudo-n"); ok "hook: with the holds in place it runs the release tool's preflight (a held package's dependency that would stop the update)" "$? $(echo "$out" | grep -c 'preflight ran: preflight')" "0 1"
 template "$r" edge; out=$(hook "$r" K114S_SUDO="$BASE/sudo-ok"); ok "hook: after a refresh it puts the holds back through sudo" "$?" 0
 ok "hook: the holds verify" "$(holds "$r" check; status)" 0
 template "$r" edge; out=$(hook "$r" K114S_SUDO="$BASE/sudo-fail"); ok "hook: sudo fails -> the hook fails" "$?" 1
@@ -228,5 +253,31 @@ ok "hook: with the reason" "$(echo "$out" | grep -c 'the hold guard is not insta
 r=$(mkroot); sed -i "s#$BASE/root[^/]*/reached#$r/reached#" "$BASE/bin/omarchy-refresh-pacman"
 out=$(K114S_ROOT=$r K114S_HOLDS_WAIT=1 K114S_SUDO="$BASE/sudo-fail" bash "$BASE/bin/omarchy-refresh-pacman" 2>&1)
 ok "hook: with the guard installed the refresh runs on into the guard" "$(test -e "$r/reached-pacman"; status)" 0
+
+# --- a boot-chain package is never "released" for good ---------------------------------------------------------------
+r=$(mkroot); printf 'linux-aurora 7.4.4-1 20261201T000000Z\nm1n1-aurora 1.7.0-1 20261201T000000Z\nuboot-aurora 1-1 20261201T000000Z\nomarchy-mac-boot 1-1 20261201T000000Z\n' > "$(lib "$r")/released.list"
+for package in linux-aurora m1n1-aurora uboot-aurora omarchy-mac-boot; do
+  out=$(echo "$package" | guard "$r" install); ok "released.list names $package: the guard still stops an ordinary install" "$?" 1
+  out=$(echo "$package" | guard "$r" remove); ok "released.list names $package: and still stops its removal" "$?" 1
+done
+holds "$r" apply >/dev/null; ok "the holds block keeps every boot-chain package whatever released.list says" "$(sed -n 's/^IgnorePkg = //p' "$r/etc/pacman.conf" | tr ' ' '\n' | grep -c -x -E 'linux-aurora|m1n1-aurora|uboot-aurora|omarchy-mac-boot')" 4
+out=$(holds "$r" release linux-aurora); ok "k114s-holds release refuses a boot-chain package" "$? $(echo "$out" | grep -c 'stays held')" "1 1"
+r=$(mkroot); printf 'omarchy-mac-boot 1-1 20261201T000000Z\n' > "$(lib "$r")/released.list"; sed -i '/^package omarchy-mac-boot/d' "$(lib "$r")/release-criteria.conf"
+out=$(echo omarchy-mac-boot | guard "$r" install); ok "a boot package the criteria do not describe any more is not a boot class: its release counts" "$?" 0
+# pacman runs hooks in file-name order: the space guard stops a transaction before Omarchy's 10-omarchy-hyprland-reload-pause.hook
+# has paused Hyprland's reload (a stopped transaction never runs the resume hook)
+ok "the space guard's hook sorts before 10-omarchy-hyprland-reload-pause.hook" "$([ "01-k114s-guard-esp.hook" '<' "10-omarchy-hyprland-reload-pause.hook" ] && echo yes)" yes
+ok "and the hook file itself is named 01" "$(ls "$L"/*-k114s-guard-esp.hook | xargs -n1 basename)" "01-k114s-guard-esp.hook"
+ok "the audit knows hooks of any number (a 0N- prefix only exempted ours before)" "$(grep -c '\[0-9\]\[0-9\]-k114s-' "$L/k114s-guard")" 1
+# the test overrides do not reach production: pacman hooks inherit the environment of whoever ran pacman
+r=$(mkroot); out=$(echo usr/lib/firmware/x | K114S_ROOT=$r K114S_ESP_FREE=1 bash "$(lib "$r")/k114s-guard" esp 2>&1); ok "with the test flag, K114S_ESP_FREE is honoured" "$(echo "$out" | grep -c '^0 MB free')" 1
+out=$(echo usr/lib/firmware/x | env -u K114S_TEST K114S_ROOT=$r K114S_ESP_FREE=1 bash "$(lib "$r")/k114s-guard" esp 2>&1); ok "without it, K114S_ESP_FREE is ignored (no way to skip the space check through the environment)" "$(echo "$out" | grep -c '^0 MB free')" 0
+: > "$r/etc/omarchy-k114s/allow-coupled-update"
+out=$(echo linux-aurora | env -u K114S_TEST K114S_ROOT=$r bash "$(lib "$r")/k114s-guard" install 2>&1); ok "without the flag, K114S_ROOT is ignored too (the override marker of a fake root does not count)" "$?" 1
+out=$(echo linux-aurora | K114S_ROOT=$r bash "$(lib "$r")/k114s-guard" install 2>&1); ok "with the flag the fake root counts" "$?" 0
+# k114s-holds: concurrent writers (the path unit, the pre-refresh hook's sudo, the release tool) never publish a half-written pacman.conf
+r=$(mkroot); template "$r" edge; before=$(conf_sum "$r")
+for n in 1 2 3 4 5 6 7 8; do holds "$r" apply >/dev/null & done; wait
+ok "eight concurrent applies: one block, checks out, no temp file left behind" "$(grep -c '^# >>> K114s holds' "$r/etc/pacman.conf") $(holds "$r" check >/dev/null; status) $(ls "$r/etc" | grep -c 'pacman.conf.k114s-new')" "1 0 0"
 
 finish "r3 guard tests"
