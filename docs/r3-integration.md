@@ -447,6 +447,7 @@ D0. Backups and facts. Stop if a hash pair differs: the recovery copy is what th
 D1. Free the slot, and check that the repair entry survived. **Prerequisite: step 1 is complete (the owner confirmed `sudo ./k114s-repair status` with the fixed tool on the Mac) and step B passed (the marker exists).**
 
     (
+    : "${K:?STOP: set K first (top of this section)}"
     findmnt /boot/efi >/dev/null || { echo "STOP: /boot/efi is not mounted; go to step Z"; exit 1; }      # the installed guard does not check this
     sudo limine-entry-tool --remove-uki linux-aurora
     sudo $K check                                          # default_entry 1; entry 1 boots the repair image; its hash matches; NO "BAD"
@@ -465,6 +466,7 @@ D2. Keep `update-m1n1` from rewriting `boot.bin` during the install (it would us
 D3. Install. (The space guard passes only now.)
 
     (
+    : "${R:?STOP: set R first (top of this section)}"
     findmnt /boot/efi >/dev/null || { echo "STOP: /boot/efi is not mounted; go to step Z"; exit 1; }      # the installed guard does not check this
     sudo pacman -U $R/linux-k114s-7.3.0.r3a-2-aarch64.pkg.tar.zst
     )
@@ -478,6 +480,7 @@ If a Limine step fails, the package is installed without its image: **step Z**.
 D4. Restore `update-m1n1` and check what happened, before anything is armed.
 
     (
+    : "${K:?STOP: set K first (top of this section)}"
     findmnt /boot/efi >/dev/null || { echo "STOP: /boot/efi is not mounted; go to step Z"; exit 1; }      # the installed guard does not check this
     sudo cp -p /var/lib/k114s-recovery/update-m1n1.before-r3a /etc/default/update-m1n1
     sudo sha256sum /boot/efi/m1n1/boot-ctxr.bin | cut -c1-16                               # 45a5dbef19c14898 (unchanged: r1)
@@ -505,9 +508,12 @@ Stop (step Z) if entry 1 is not the repair entry, `default_entry` is not 1, a ha
 
 **6. Step E: the r3a kernel, once, on the proven r1 tree.**
 
-    sudo $K arm Omarchy/linux-k114s                         # refuses unless every check above still holds; then saves to U-Boot and proves it
+    (
+    : "${K:?STOP: set K first (top of this section)}"
+    sudo $K arm Omarchy/linux-k114s || { echo "STOP: the arm refused; nothing is armed"; exit 1; }   # refuses unless every check above still holds; then saves to U-Boot and proves it
     sudo $K status                                          # efivarfs: LoaderEntryOneShot = Omarchy.linux-k114s ; U-Boot file holds it
     sudo systemctl reboot
+    )
 
 If the Mac hangs before the root filesystem or shows nothing: hold the power button until it is off and start it. Nothing is armed any more (Limine erased the request when it read it),
 `default_entry` is 1, and the Mac comes up on the repair entry with the proven Stage 2. If it also fails to come up, macOS: `sudo ./k114s-repair stage2 r1` and `sudo ./k114s-repair default repair`
@@ -518,6 +524,7 @@ If the Mac hangs before the root filesystem or shows nothing: hold the power but
 After the reboot, run the whole block (it stops at its first line if the ESP is not mounted):
 
     (
+    : "${K:?STOP: set K and REPO first (top of this section): they do not survive the reboot}" "${REPO:?STOP: set REPO first}"
     findmnt /boot/efi >/dev/null || { echo "STOP: /boot/efi is not mounted; go to step Z"; exit 1; }
     uname -r                                          # 7.3.0-17.v272-4-k114s-r3a-ARCH
     sudo $K status                                    # "this boot started: Omarchy.linux-k114s"; no request left
@@ -533,11 +540,15 @@ Do not suspend. Closing the lid locks the session (drop-in from step C) and noth
 After the reboot, run the whole block (it stops at its first line if the ESP is not mounted):
 
     (
+    : "${K:?STOP: set K and R first (top of this section): they do not survive the reboot}" "${R:?STOP: set R first}"
     findmnt /boot/efi >/dev/null || { echo "STOP: /boot/efi is not mounted; go to step Z"; exit 1; }
-    sudo cp $R/boot-ctxr-r3a.bin /boot/efi/m1n1/boot-ctxr-r3a.bin
-    sudo sha256sum /boot/efi/m1n1/boot-ctxr-r3a.bin | cut -c1-64          # 5164bb1e1be1fba3...
-    sudo sh -c "printf 'armed\nm1n1/boot-ctxr-r3a.bin\n' > /boot/efi/aura-try && sync -f /boot/efi"
-    sudo $K arm Omarchy/linux-k114s --with-stage2-trial || { echo "STOP: the arm failed; go to step Z"; exit 1; }    # only this check is lifted
+    sudo cp $R/boot-ctxr-r3a.bin /boot/efi/m1n1/boot-ctxr-r3a.bin && sudo sync -f /boot/efi
+    [ "$(sudo sha256sum /boot/efi/m1n1/boot-ctxr-r3a.bin | cut -c1-64)" = 5164bb1e1be1fba39aee64229863b2f835828edd8b4f90e8cfa91e71a6fd8cd9 ] ||
+      { echo "STOP: the copied Stage 2 is not the built one; nothing is armed (sudo rm /boot/efi/m1n1/boot-ctxr-r3a.bin)"; exit 1; }
+    sudo $K arm Omarchy/linux-k114s --with-stage2-trial || { echo "STOP: the arm refused; nothing is armed"; exit 1; }    # only this check is lifted
+    # the Stage 2 trial last: if writing it fails, the pending request alone is step E's configuration, already proven
+    sudo sh -c "printf 'armed\nm1n1/boot-ctxr-r3a.bin\n' > /boot/efi/aura-try && sync -f /boot/efi" ||
+      { echo "STOP: aura-try was not written; the next boot is step E's configuration (r3a kernel, proven tree)"; exit 1; }
     sudo systemctl reboot                                   # inside the block: a STOP above never reaches it
     )
 
@@ -547,30 +558,41 @@ After the reboot, run the whole block (it stops at its first line if the ESP is 
 **9. Step G: (iii) the r3a kernel on the GPU tree, as its own step.** Only after step F is clean. The kernel is the 0009-only kernel: 0009 enables the receive interrupt beside both pollers, so a line that never fires keeps polling as before and the storm guard is in place, but **this is the first time that interrupt is enabled on this Mac** (r1 had `rx_poll_only`, the interrupt never on).
 
     (
+    : "${K:?STOP: set K first (top of this section): it does not survive the reboot}"
     findmnt /boot/efi >/dev/null || { echo "STOP: /boot/efi is not mounted; go to step Z"; exit 1; }
+    sudo $K arm Omarchy/linux-k114s --with-stage2-trial || { echo "STOP: the arm refused; nothing is armed"; exit 1; }
+    sudo sh -c "printf 'armed\nm1n1/boot-ctxr-r3-gpu.bin\n' > /boot/efi/aura-try && sync -f /boot/efi" ||
+      { echo "STOP: aura-try was not written; the next boot is step E's configuration (r3a kernel, proven tree)"; exit 1; }
     touch ~/.config/k114s-gpu-desktop-r3a                  # the guard's second opt-in (the first, ~/.config/k114s-gpu-desktop, is already there)
-    sudo mv /etc/omarchy-k114s/stage2-trial.parked-r3a /etc/omarchy-k114s/stage2-trial
-    sudo sh -c "printf 'armed\nm1n1/boot-ctxr-r3-gpu.bin\n' > /boot/efi/aura-try && sync -f /boot/efi"
-    sudo $K arm Omarchy/linux-k114s --with-stage2-trial || { echo "STOP: the arm failed; go to step Z"; exit 1; }
+    sudo mv /etc/omarchy-k114s/stage2-trial.parked-r3a /etc/omarchy-k114s/stage2-trial   # last: a STOP above leaves the trial parked
     sudo systemctl reboot
     )
 
 Expected: `aurora,trial` names `boot-ctxr-r3-gpu.bin`; `tests/hardware/k114s-r3a-check.sh --allow-gpu` lists the render node and the mailbox interrupt counts; the desktop is on the GPU as before (`journalctl -b | grep 'renders on'`);
-`/var/lib/k114s-recovery/trial-boot-report.log` has the boot. A hang needs a forced power-off (hold the power button); the next boot uses the configured Stage 2 and the repair entry. Because `stage2-trial` is back, the clean shutdown after a good boot
+`/var/lib/k114s-recovery/trial-boot-report.log` has the boot. A hang needs a forced power-off (hold the power button); the next boot uses the configured Stage 2, and, as in step F, it is the r3a kernel again if the hang came before Limine read the request, the repair entry otherwise. Because `stage2-trial` is back, the clean shutdown after a good boot
 re-arms the GPU trial for the next boot, which returns the Mac to the standing state of today (repair kernel on the GPU tree). Suspend stays forbidden.
 
 **Z. Undo of the whole install (closes the window).** Paste the whole block: it first makes sure the ESP is mounted and stops, having changed nothing, if it cannot be. (`allow-low-esp` does not skip the guard's mount check.)
 
     (
     findmnt /boot/efi >/dev/null || sudo mount /boot/efi
+    : "${K:?STOP: set K first (top of this section); nothing was changed}"
     findmnt /boot/efi >/dev/null || { echo "STOP: /boot/efi is not mounted and could not be mounted; fix that first, nothing was changed"; exit 1; }
-    sudo $K clear
+    sudo $K clear || { echo "STOP: clear failed; nothing else was changed"; exit 1; }
+    # a Stage 2 trial written by step F or G must not outlive the undo
+    [ "$(sudo sed -n 1p /boot/efi/aura-try 2>/dev/null)" != armed ] || sudo sh -c "sed -i 1s/armed/spent/ /boot/efi/aura-try && sync -f /boot/efi"
     sudo cp -p /etc/default/update-m1n1 /var/lib/k114s-recovery/update-m1n1.before-undo
     echo 'export M1N1_UPDATE_DISABLED=1' | sudo tee -a /etc/default/update-m1n1 >/dev/null
     sudo touch /etc/omarchy-k114s/allow-low-esp                     # the guard also runs on removal
-    sudo pacman -R linux-k114s                                      # removes the UKI, the menu entry, the preset, /boot files
+    if pacman -Q linux-k114s >/dev/null 2>&1; then
+      sudo pacman -R linux-k114s ||                                 # removes the UKI, the menu entry, the preset, /boot files
+        { sudo rm -f /etc/omarchy-k114s/allow-low-esp; sudo cp -p /var/lib/k114s-recovery/update-m1n1.before-undo /etc/default/update-m1n1
+          echo "STOP: linux-k114s was not removed; the request is cleared and aura-try is spent, nothing else changed. Run Z again"; exit 1; }
+    fi
     sudo rm /etc/omarchy-k114s/allow-low-esp
-    sudo cp -p /var/lib/k114s-recovery/update-m1n1.before-undo /etc/default/update-m1n1
+    # the update-m1n1 setting from before the install (D2's copy) when there is one: D4 may never have run
+    if [ -f /var/lib/k114s-recovery/update-m1n1.before-r3a ]; then sudo cp -p /var/lib/k114s-recovery/update-m1n1.before-r3a /etc/default/update-m1n1
+    else sudo cp -p /var/lib/k114s-recovery/update-m1n1.before-undo /etc/default/update-m1n1; fi
     sudo cp -p /var/lib/k114s-recovery/uki/omarchy_linux-aurora.efi /boot/efi/EFI/Linux/omarchy_linux-aurora.efi
     # the repair image too, if step D1 (limine-entry-tool) removed or changed it
     h=$(sudo sha256sum /boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi 2>/dev/null | cut -c1-16); [ "$h" = 51148ff7005d2986 ] || sudo cp -p /var/lib/k114s-recovery/uki/omarchy_linux-aurora-k114s.efi /boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi
