@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Wed, 11 Nov 2026 10:23:49 -0700
+Subject: [PATCH 1/4] ASoC: apple: macaudio: Add K116
+
+The K116s (16-inch M5 Pro OLED) has the J714s's audio: six SN012776 amps
+in two woofer pairs and two tweeters, the same slots, frame and V/I sense
+layout, and the CS42L84 jack codec, so it shares macaudio_j714_cfg under
+its own chassis compatible.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+[thomas: keep apple,k116-macaudio sorted in the binding]
+Signed-off-by: Thomas Glanzmann <thomas@glanzmann.de>
+---
+omarchy-m5p-oled note (not part of the upstream commit):
+Source: aurora-silicon/linux commit 45f4de446485d04741fb2b78f3e952e94db1d0b0, pull request 1648
+(merged 2026-11-14), unchanged. Tested upstream on a K116s by its author.
+Why here: the K114 entry in patch 0004 goes next to this one, and the K116s is the board the
+K114s sound description is ported from. Not needed for the K114s to make sound.
+
+ Documentation/devicetree/bindings/sound/apple,macaudio.yaml | 1 +
+ sound/soc/apple/macaudio.c                                  | 2 ++
+ 2 files changed, 3 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/sound/apple,macaudio.yaml b/Documentation/devicetree/bindings/sound/apple,macaudio.yaml
+index 65601dace..37956f0a3 100644
+--- a/Documentation/devicetree/bindings/sound/apple,macaudio.yaml
++++ b/Documentation/devicetree/bindings/sound/apple,macaudio.yaml
+@@ -55,6 +55,7 @@ properties:
+               - apple,j813-macaudio
+               - apple,j815-macaudio
+               - apple,j873-macaudio
++              - apple,k116-macaudio
+           - const: apple,macaudio
+       - description:
+           Machines that share the speaker and jack layout of an earlier
+diff --git a/sound/soc/apple/macaudio.c b/sound/soc/apple/macaudio.c
+index 096be117d..5fe613124 100644
+--- a/sound/soc/apple/macaudio.c
++++ b/sound/soc/apple/macaudio.c
+@@ -4411,6 +4411,8 @@ static const struct of_device_id macaudio_snd_device_id[]  = {
+ 	{ .compatible = "apple,j700-macaudio", .data = &macaudio_j700_cfg },
+ 	/* j714    -       sn012776    15      2x 2W+1T (AOP-fed, V/I sense) */
+ 	{ .compatible = "apple,j714-macaudio", .data = &macaudio_j714_cfg },
++	/* k116    -       sn012776    15      2x 2W+1T (AOP-fed, V/I sense; the 16" PROLED chassis, J714's amps and frame) */
++	{ .compatible = "apple,k116-macaudio", .data = &macaudio_j714_cfg },
+ 	/* j713    -       sn012776    15      2x 1W+1T (AOP-fed, one serializer) */
+ 	{ .compatible = "apple,j713-macaudio", .data = &macaudio_j713_cfg },
+ 	/* The J713 jack runs on the AOP like the J616s one. */

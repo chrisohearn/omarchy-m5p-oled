@@ -1,0 +1,45 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled): is the device tree that booted free of any speaker path?
+#
+#     tree-check [--root DIR]        (--root: a replica of / for tests)
+#
+# Exit 0: no amplifier node, no speaker DMA channel on an enabled node and no bound amplifier address,
+#         and either no sound node or the Stage A card (compatible apple,k114-macaudio, only the jack link).
+#         These checks run whether or not a sound node exists.
+# Exit 1: anything else, with the reasons on stdout. A tree that cannot be read counts as "anything else".
+# Run as an ExecCondition of the user's wireplumber.service, by speaker-readiness.sh and by install-audio.sh.
+# Silent and read-only. It sees the tree, not the file the loader chose: a packaged tree is caught here.
+ROOT=
+case ${1:-} in --root) ROOT=${2%/} ;; --root=*) ROOT=${1#--root=}; ROOT=${ROOT%/} ;; "") ;; *) echo "usage: tree-check [--root DIR]" >&2; exit 2 ;; esac
+dt=$ROOT/proc/device-tree
+bad=0
+no() { echo "not the Stage A tree: $*"; bad=1; }
+[[ -d $dt ]] || { echo "no device tree to read ($dt)"; exit 1; }
+# amplifier, DMA and I2C checks come first: they hold with or without a sound node
+if grep -rqaiE --include=compatible 'sn012776|tas27|cs35l|ssm3515|max9836|speaker' "$dt" 2>/dev/null; then no "an amplifier node exists"; fi
+# a disabled node (status "disabled") never binds a driver, so its channel names are harmless
+enabled() { # a node is enabled only if it and every ancestor below $dt is okay (no status means okay)
+  local n=$1 st
+  while [[ $n == "$dt"/* ]]; do
+    st=
+    [[ -e $n/status ]] && st=$(tr -d '\0' < "$n/status")
+    [[ -z $st || $st == okay || $st == ok ]] || return 1
+    n=${n%/*}
+  done
+  return 0
+}
+while IFS= read -r f; do
+  enabled "${f%/*}" || continue
+  if tr '\0' '\n' < "$f" | grep -qxE 'spkr|sense'; then no "a speaker DMA channel (spkr or sense) exists on an enabled node (${f#$dt/})"; fi
+done < <(find -H "$dt" -name dma-names 2>/dev/null)   # -H: /proc/device-tree is a symlink
+if ls "$ROOT"/sys/bus/i2c/devices 2>/dev/null | grep -qE -- '-003[8-9a-d]$'; then no "an I2C device is bound at an amplifier address (0x38 to 0x3d)"; fi
+if [[ ! -d $dt/sound ]]; then (( bad )) || echo "no sound node, no amplifier, no speaker channel: nothing to guard"; exit $bad; fi
+compat=$(tr '\0' ' ' < "$dt/sound/compatible" 2>/dev/null)
+[[ $compat == "apple,k114-macaudio apple,macaudio " ]] || no "sound/compatible is '${compat% }'"
+for l in "$dt"/sound/dai-link@*; do
+  [[ -e $l ]] || continue
+  [[ ${l##*/} == dai-link@0 ]] || no "a second card link, ${l##*/}"
+done
+if grep -qaiE 'speaker|amp' "$dt"/sound/dai-link@*/link-name 2>/dev/null; then no "a link is named for the speakers or an amplifier"; fi
+(( bad )) || echo "the Stage A tree: jack link only, no amplifier, no speaker channel"
+exit $bad
