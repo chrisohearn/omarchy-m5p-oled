@@ -85,6 +85,8 @@ Exact revisions are in `pins/sources.json`; who wrote what is in [NOTICE.md](NOT
 | --- | --- |
 | `docs/matrix.md` | subsystem by subsystem: upstream fix, K114s applicability, state, next step |
 | `docs/upstream-applicability.md` | the detailed source review behind the matrix |
+| `docs/r3-gpu-result.md` | the GPU on the K114s: what ran, what was measured, how to install and undo it |
+| `docs/r3-display-gpu.md` | the display coprocessor and GPU design (only the GPU step has run) |
 | `docs/edge-update-path.md` | how updates on the Edge channel are kept safe, and how that was tested |
 | `docs/bundle-r2.md` | the bundle's own instructions |
 | `dts/` | K114s device tree sources (trial 1, r1 and its variants, the r3 GPU and display trees) |
@@ -106,8 +108,9 @@ Exact revisions are in `pins/sources.json`; who wrote what is in [NOTICE.md](NOT
   that runs from macOS. The device tree is shared by all boot entries, so the original kernel
   entry alone is not a fallback; `rollback stage2` is.
 - A delivered bundle is never rebuilt. A change makes a new revision.
-- Every new boot file is tried for one boot only, and a failed try falls back to the proven one by
-  itself. Hardware acceptance is the owner's.
+- Every new boot file is tried for one boot only: the loader marks the trial used before it boots
+  it, so after a failed try (a forced power-off if it hangs) the next boot uses the proven one.
+  Hardware acceptance is the owner's.
 - No sibling's firmware, calibration or identity is reused. Speakers are never driven without
   protection data for this model.
 - Edge channel only. No Dev checkout.
