@@ -9,8 +9,9 @@
 #   packages/        each installed package rebuilt into a pacman archive by k114s-repackage,
 #                    with its report (what differs from the package as installed, what is missing)
 #   boot/            the files directly in /boot (kernel copy, initramfs)
-#   esp/             limine.conf, m1n1/boot.bin, m1n1/boot-ctxr.bin, EFI/BOOT/*, EFI/Linux/*.efi,
-#                    k114s-repair/k114s.dtb   (--no-uki leaves the 80-112 MB boot images out)
+#   esp/             limine.conf, m1n1/*.bin (boot.bin, the configured Stage 2, any trial image),
+#                    the aura-try marker, EFI/BOOT/*, EFI/Linux/*.efi, k114s-repair/k114s.dtb
+#                    (--no-uki leaves the 80-112 MB boot images out)
 #   extras.tar       files no package owns that the K114s boot needs (extras.list)
 #   esp-files.sha256 a hash of EVERY file on the ESP, copied or not
 #   state.txt        packages, kernel, booted image, default menu entry, free space
@@ -68,8 +69,8 @@ copy_esp() { # copy_esp REL: keep the folder structure
   cp -p "$ESP/$1" "$out/esp/$1"
 }
 copy_esp limine.conf
-copy_esp m1n1/boot.bin
-copy_esp "$STAGE2_REL"
+for file in "$ESP"/m1n1/*.bin; do [[ -f $file ]] && copy_esp "m1n1/${file##*/}"; done
+copy_esp "$AURA_TRY_REL"
 copy_esp k114s-repair/k114s.dtb
 for file in "$ESP"/EFI/BOOT/*; do [[ -f $file ]] && copy_esp "EFI/BOOT/${file##*/}"; done
 if ((uki)); then
@@ -102,7 +103,9 @@ fi
     echo "default entry   $default: $(limine_title_of "$conf" "${default:-0}")"
   fi
   echo "esp free bytes  $(esp_free)"
-  echo "stage2 sha256   $(sum "$ESP/$STAGE2_REL")"
+  echo "stage2 sha256   $(sum "$ESP/$STAGE2_REL")   ($STAGE2_REL, the configured Stage 2)"
+  echo "booted stage2   $(booted_stage2) $(booted_stage2_sum)"
+  [[ -z $(aura_try_path) ]] || echo "aura-try        $(sed -n 1p "$ESP/$AURA_TRY_REL") $(aura_try_path)"
   echo "archived        ${made[*]:-}"
   echo "not installed   ${skipped[*]:-}"
 } > "$out/state.txt"

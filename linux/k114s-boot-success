@@ -8,7 +8,9 @@
 #   network    the Wi-Fi interface exists (BOOT_NET_INTERFACE, wlan0)
 #   trackpad   the input device exists (BOOT_TRACKPAD_NAME, "Apple MTP multi-touch")
 # together with WHAT booted: the boot image the EFI stub was started from and its SHA-256, the
-# kernel banner, and the SHA-256 of m1n1/boot-ctxr.bin (Stage 2) as it is on the ESP now.
+# kernel banner, and the Stage 2 image this boot came through with its SHA-256 as it is on the
+# ESP now. That is m1n1/boot-ctxr.bin, unless the loader says it booted a one-boot trial image
+# (chosen/aurora,trial): then it is that file, and the record carries a "trial" line.
 #
 # k114s-release reads these records: a boot image or Stage 2 on trial is "proven" only by a
 # record with result ok for exactly those hashes, and nothing old is retired without one.
@@ -67,7 +69,9 @@ uki=$(booted_uki)
   if [[ -n $uki && -f $ESP/$uki ]]; then echo "uki_sha256 $(sum "$ESP/$uki")"; else echo "uki_sha256 unknown"; fi
   echo "kernel $(running_version)"
   echo "kernel_release $(running_release)"
-  if [[ -f $ESP/$STAGE2_REL ]]; then echo "stage2_sha256 $(sum "$ESP/$STAGE2_REL")"; else echo "stage2_sha256 unknown"; fi
+  echo "stage2 $(booted_stage2)"
+  echo "stage2_sha256 $(booted_stage2_sum)"
+  [[ -z $(booted_trial) ]] || echo "trial $(booted_trial)"
   echo "desktop $desktop"
   echo "network $network ($interface)"
   echo "trackpad $pad ($trackpad)"
@@ -75,7 +79,20 @@ uki=$(booted_uki)
 } > "$record.new"
 rm -f "$boots"/*-"$boot_id"
 mv -f "$record.new" "$record"
-say "boot recorded as $result: image ${uki:-unknown}, desktop $desktop, $interface $network, trackpad $pad"
+say "boot recorded as $result: image ${uki:-unknown}, Stage 2 $(booted_stage2)$( [[ -z $(booted_trial) ]] || echo " (a one-boot trial)" ), desktop $desktop, $interface $network, trackpad $pad"
+
+# A Stage 2 trial of k114s-release is armed again after every start recorded ok through it (the
+# loader's trial lasts one start). A start that is not ok, or another trial, leaves it spent: the
+# next start then comes through the proven file.
+trial=$VAR/release/trial
+if [[ $result == ok && -f $trial && $(kv "$trial" kind) == stage2 && $(booted_stage2) == "$STAGE2_TRY_REL" ]]; then
+  other=$(foreign_trial "$STAGE2_TRY_REL")
+  if [[ -n $other ]]; then warn "the Stage 2 trial is not armed again: $other"
+  elif [[ $(sum "$ESP/$STAGE2_TRY_REL") != "$(kv "$trial" stage2_sha256)" ]]; then warn "the Stage 2 trial is not armed again: $STAGE2_TRY_REL is not the candidate on trial"
+  elif [[ $(aura_try_armed) != "$STAGE2_TRY_REL" ]]; then
+    if aura_try_arm "$STAGE2_TRY_REL"; then say "the Stage 2 trial is armed again for the next start"; else warn "could not arm the Stage 2 trial again"; fi
+  fi
+fi
 
 # Self-checks that belong to every boot: the holds are in pacman.conf, the guard hooks are in
 # place, and the space guard still knows every boot-file hook.

@@ -37,7 +37,7 @@ mk() { # a fake root as r2c's linux-persist.sh left it (its own files, hooks, ho
 }
 inst() { # inst ROOT [ARG...]: the installer from the repository's linux/ folder
   local r=$1; shift
-  env K114S_ROOT="$r" K114S_USER_HOME="${USER_HOME-$r/userhome}" K114S_DT_COMPATIBLE="$r/dt/compatible" K114S_SYSTEMCTL="$r/systemctl" K114S_EFI_STUB_ID="$r/stub-id" \
+  env ${AURA+K114S_AURA_TRIAL=$AURA} K114S_ROOT="$r" K114S_USER_HOME="${USER_HOME-$r/userhome}" K114S_DT_COMPATIBLE="$r/dt/compatible" K114S_SYSTEMCTL="$r/systemctl" K114S_EFI_STUB_ID="$r/stub-id" \
     K114S_UNAME_R=$KOLD K114S_PROC_VERSION="Linux version $KOLD (test@build) #1 SMP PREEMPT" K114S_ESP_FREE=300000000 K114S_ESP_DT="$r/none" \
     bash "${FROM:-$L}/k114s-tooling-install" "$@" 2>&1
 }
@@ -106,6 +106,21 @@ ok "an existing release.conf is the owner's and is kept" "$(cat "$r/etc/omarchy-
 out=$(inst "$r" --undo); ok "undo leaves a release.conf it did not create" "$(cat "$r/etc/omarchy-k114s/release.conf")" "AUTO_RELEASE=no"
 r=$(mk); inst "$r" --no-recovery-set >/dev/null; mkdir -p "$r/var/lib/omarchy-k114s/release"; echo "kind uki" > "$r/var/lib/omarchy-k114s/release/trial"
 out=$(inst "$r" --undo); ok "undo is refused while a boot-chain trial is in progress" "$? $(echo "$out" | grep -c 'trial is in progress') $(ls "$r/etc/pacman.d/hooks" | wc -l | tr -d ' ')" "1 1 3"
+# the Mac as found on 2026-11-14: the lead's own pieces beside r2c's (a standing GPU Stage 2 trial, its
+# re-arm unit, trial reports, the Omarchy script patches). The installer works around them and its undo leaves them.
+lead() { local r=$1 k; k=$(lib "$r"); mkdir -p "$r/etc/omarchy-k114s" "$k/omarchy-patches"
+  for f in stage2-rearm trial-boot-report trial-default-revert gpu-desktop-restart gpu-desktop-revert omarchy-patches-apply omarchy-patches-lib.sh omarchy-patches/0001.patch; do echo "lead's $f" > "$k/$f"; done
+  echo "lead's hook" > "$r/etc/pacman.d/hooks/03-k114s-omarchy-patches.hook"; echo "lead's unit" > "$r/etc/systemd/system/k114s-stage2-rearm.service"
+  echo GPU-STAGE2 > "$r/boot/efi/m1n1/boot-ctxr-r3-gpu.bin"; printf 'spent\nm1n1/boot-ctxr-r3-gpu.bin\n' > "$r/boot/efi/aura-try"
+  printf 'm1n1/boot-ctxr-r3-gpu.bin\n%s\n' "$(sum "$r/boot/efi/m1n1/boot-ctxr-r3-gpu.bin")" > "$r/etc/omarchy-k114s/stage2-trial"; }
+leadsum() { (cd "$1" && sha256sum usr/local/lib/omarchy-k114s/{stage2-rearm,trial-boot-report,trial-default-revert,gpu-desktop-restart,gpu-desktop-revert,omarchy-patches-apply,omarchy-patches-lib.sh,omarchy-patches/0001.patch} \
+  etc/pacman.d/hooks/03-k114s-omarchy-patches.hook etc/systemd/system/k114s-stage2-rearm.service boot/efi/m1n1/boot-ctxr-r3-gpu.bin boot/efi/aura-try etc/omarchy-k114s/stage2-trial | sha256sum | cut -c1-16); }
+r=$(mk); lead "$r"; before=$(snap "$r"); lb=$(leadsum "$r"); out=$(AURA=m1n1/boot-ctxr-r3-gpu.bin inst "$r" --no-recovery-set)
+ok "install beside the lead's standing Stage 2 trial and patches" "$? $(leadsum "$r")" "0 $lb"
+ok "the proven chain is what booted: the trial image, with the configured file as the fallback" \
+  "$(awk '$1 == "stage2" || $1 == "configured_stage2_sha256" { print $2 }' "$r/var/lib/omarchy-k114s/release/known-good" | tr '\n' ' ')" "m1n1/boot-ctxr-r3-gpu.bin $(sum "$r/boot/efi/m1n1/boot-ctxr.bin") "
+out=$(AURA=m1n1/boot-ctxr-r3-gpu.bin inst "$r" --refresh); ok "refresh leaves the lead's pieces" "$? $(leadsum "$r")" "0 $lb"
+out=$(inst "$r" --undo); ok "undo leaves the lead's pieces and restores r2c exactly" "$? $(leadsum "$r") $(snap "$r")" "0 $lb $before"
 # a failure part-way: the message, and the undo
 if [ "$(id -u)" != 0 ]; then
   r=$(mk); b=$(snap "$r"); chmod 555 "$r/etc/systemd/system"; out=$(inst "$r" --no-recovery-set); ok "a failure part-way stops with the undo hint" "$? $(echo "$out" | grep -c 'stopped part-way')" "1 1"

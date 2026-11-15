@@ -37,7 +37,7 @@ All under `linux/`, installed to `/usr/local/lib/omarchy-k114s` by `k114s-toolin
 | `k114s-fdt`, `k114s-binscan` | read-only readers of device tree blobs and AArch64 code (the image has no `dtc`) |
 | `holds.default`, `rivals.list`, `protected.list`, `noextract.list`, `extras.list`, `esp-audit-ignore.list`, `release.conf` | data |
 | `k114s-lib.sh` | shared functions; every path hangs off `K114S_ROOT`, which is how the tests run the same code as a normal user |
-| `update-boot-ctxr-k114s` | r2c's Stage 2 hook with one addition: it leaves `boot-ctxr.bin` alone while `/etc/omarchy-k114s/stage2-frozen` exists |
+| `update-boot-ctxr-k114s` | r2c's Stage 2 hook with two additions: it leaves `boot-ctxr.bin` alone while `/etc/omarchy-k114s/stage2-frozen` exists, and with `K114S_STAGE2_OUT=boot-ctxr-NAME.bin` (and `K114S_STAGE2_DTB=packaged\|pinned`) it writes a candidate beside it instead. Its default behaviour is r2c's |
 
 r2c's own files (`apply-holds`, `hold-guard`, `esp-space-guard`, the two old hook files,
 `linux-persist.sh`) are unchanged in the repository; `--undo` puts them back.
@@ -135,8 +135,8 @@ replaces the proven boot path in one step.
 
 | Step | What happens | What stays |
 | --- | --- | --- |
-| before | the proven chain must be recorded (`mark-known-good`: the image the EFI stub was started from, its hash, the Stage 2 hash), intact and the one running; the ESP must be the booted one; space is computed | nothing changes if any of this fails; the run says what it waits for |
-| stage | Stage 2 is frozen, the running kernel's release goes on the module keep list, the fixed packages are installed in one transaction. The system's own hooks build the new kernel's boot image as `omarchy_linux-aurora.efi` | the proven image byte for byte; `m1n1/boot-ctxr.bin` byte for byte; the default menu entry (put back if a hook moved it); the proven kernel's modules. When the proven image **is** `omarchy_linux-aurora.efi`, it is first copied to `omarchy_linux-aurora-known-good.efi` with a first, default menu entry |
+| before | the proven chain must be recorded (`mark-known-good`: the image the EFI stub was started from, its hash, the Stage 2 this boot came through and its hash, and the hash of the configured `m1n1/boot-ctxr.bin` the loader falls back to), intact and the one running; no boot-menu trial of someone else may be under way; the ESP must be the booted one; space is computed | nothing changes if any of this fails; the run says what it waits for |
+| stage | Stage 2 is frozen, the running kernel's release goes on the module keep list, the fixed packages are installed in one transaction. The system's own hooks build the new kernel's boot image as `omarchy_linux-aurora.efi` | the proven image byte for byte; `m1n1/boot-ctxr.bin` byte for byte, and the Stage 2 file a standing trial boots (both put back from the rollback set if anything changed them); the default menu entry (put back if a hook moved it); the proven kernel's modules. When the proven image **is** `omarchy_linux-aurora.efi`, it is first copied to `omarchy_linux-aurora-known-good.efi` with a first, default menu entry |
 | prove | `k114s-boot-success` must record a boot with result ok for exactly the trial's image hash and Stage 2 hash, from a **different boot** than the one that staged it | everything; the run that proves retires nothing |
 | retire | on a later run, with `RETIRE_AFTER_BOOTS` (2) recorded boots and the trial chain running: the old image and its menu entry go, the default moves, the keep list empties | the old image stays in the rollback set; the menu as it was is kept beside it |
 
@@ -144,13 +144,40 @@ replaces the proven boot path in one step.
 archives as a pacman transaction (the saved module folder is handed back to its package with
 `--overwrite`), they are held again and the trial's markers go.
 
-**Stage 2** (m1n1, U-Boot, the device tree) is one file for every menu entry. It cannot be tried
-beside the old one, and the way back when Linux does not start is from macOS. So loader packages
-are installed with Stage 2 frozen, and the switch is its own step, by the owner unless
-`AUTO_STAGE2_SWITCH=yes`: `sudo k114s-release stage2 [--dtb packaged|pinned]`. It keeps the proven
-file on the ESP as `k114s-repair/known-good/boot-ctxr.bin` with its hash, prints how to put it back
-from macOS, and is proven and confirmed by the same boot records. `--dtb packaged` is how the pinned
-K114s tree is given up for the released kernel's own.
+**Stage 2** (m1n1, U-Boot, the device tree) is one file for every menu entry, so a new one cannot
+be an additional boot entry. It can be tried beside the proven file, though: the installed loader
+(Aura) has a one-boot trial. A file `aura-try` at the root of the EFI partition holding
+`armed\n<path>\n` makes it boot `<path>` once in place of the configured `m1n1/boot-ctxr.bin`: it
+marks the file `spent` before it reads the image, runs the trial under its 178-second watchdog,
+tells Linux through `chosen/aurora,trial`, and a trial that hangs is reset onto the configured file.
+(Read from the lead's GPU trial on this Mac, 2026-11-14; `docs/r3-gpu-result.md` on `r3/gpu-desktop`.)
+
+So loader packages are installed with Stage 2 frozen, and Stage 2 is tried as its own step, by
+the owner unless `AUTO_STAGE2_SWITCH=yes`: `sudo k114s-release stage2 [--dtb packaged|pinned]`.
+
+| Step | What happens | What stays |
+| --- | --- | --- |
+| before | the proven chain is intact and running; no other trial is under way (a standing trial in `/etc/omarchy-k114s/stage2-trial`, an armed `aura-try` naming another file, a boot-menu trial in `/etc/omarchy-k114s/trial-default`, a boot that came through someone else's trial); room for three Stage 2 sized files and the margin | nothing is written if any of this fails |
+| try | the Stage 2 hook builds a candidate from the installed packages as `m1n1/boot-ctxr-try.bin`, with the named tree; `aura-try` is armed for it | `m1n1/boot-ctxr.bin` byte for byte (it is the watchdog's fallback); the freeze |
+| boots | each start through the candidate that `k114s-boot-success` records as ok arms it again for the next start. A start that is not ok, a start that hung and was reset, or a start through the configured file leaves it spent; `auto` says so (`stage2 --rearm` tries again) | the proven file is what the next start uses unless the trial is armed |
+| switch | on a later run, with `RETIRE_AFTER_BOOTS` (2) recorded ok starts through the candidate and the candidate running: the configured file is copied to `k114s-repair/known-good/boot-ctxr.bin` (with its hash), the candidate replaces `m1n1/boot-ctxr.bin` (written beside, renamed, verified), the marker goes, the freeze goes, the tree choice is kept in `use-packaged-dtb` | the old file on the ESP for the way back from macOS, and in the rollback set. The candidate file stays until a start no longer comes through it |
+
+`k114s-release abandon` during a Stage 2 trial disarms it (only a marker that names our candidate)
+and removes the candidate; nothing proven was overwritten, so nothing has to be put back.
+`--dtb packaged` is how the pinned K114s tree is given up for the released kernel's own.
+
+**The lead's standing trial.** On 2026-11-14 this Mac boots `m1n1/boot-ctxr-r3-gpu.bin` through
+`aura-try` at every start (`stage2-rearm` arms it again at a clean shutdown after a start through
+it); `m1n1/boot-ctxr.bin` (r1, `45a5dbef...`) is the fallback. The tooling lives with that:
+
+- `mark-known-good` (and so the installer) records what booted: Stage 2 `m1n1/boot-ctxr-r3-gpu.bin`
+  with its hash, and the configured file's hash beside it. The proven chain is then "intact and
+  running" only while both files are as recorded and the start came through the trial file.
+- A kernel or firmware trial goes ahead under the standing trial: Stage 2 does not change. A start
+  that fell back to the configured file does not count as a boot of the trial chain.
+- `k114s-release stage2` waits until the standing trial is over (made the configured file, its
+  `stage2-trial` file removed), and then `mark-known-good` is run once from a start that works.
+- Boot records, recovery sets and `status` name the Stage 2 file each start came through.
 
 **Locally built packages** take the same roads and stay held: `sudo k114s-release adopt FILE...`.
 A userland package (the plugin rebuilt against `hyprland-m5`, branch `r3/titlebars`) switches
@@ -260,6 +287,10 @@ writes a recovery set. It installs no package, changes no file on the ESP and do
 
 Two things to settle on the machine first, both read on 2026-11-14:
 
+- **The standing GPU trial.** The installer records the start it runs in as proven, Stage 2
+  included. Run it from a start that came through the GPU trial (as every start does today), or
+  from one through the configured file once the trial has been made the configured file. The
+  `stage2-trial` file blocks Stage 2 trials of this tool, by design.
 - **Which image is proven.** The EFI variable says the running system was started from
   `EFI/Linux/omarchy_linux-aurora.efi`, the standard image, not the repair image. The installer
   records the running one. If the repair entry should be the proven one, boot it and run
@@ -291,16 +322,16 @@ r3 syntax and data checks: 80 passed, 0 failed
 r3 guard tests: 156 passed, 0 failed
 r3 recovery tests: 58 passed, 0 failed
 r3 release-check tests: 73 passed, 0 failed
-r3 release tests: 78 passed, 0 failed
-r3 install tests: 46 passed, 0 failed
-r3 pacman tests (replica: real pacman in a user namespace): 150 passed, 0 failed
-r3 update tooling: 641 passed, 0 failed, 0 test file(s) skipped
+r3 release tests: 120 passed, 0 failed
+r3 install tests: 50 passed, 0 failed
+r3 pacman tests (replica: real pacman in a user namespace): 156 passed, 0 failed
+r3 update tooling: 693 passed, 0 failed, 0 test file(s) skipped
 ```
 
 `R3_DEBUG=1` prints the output of a failing test, `R3_KEEP=1` keeps the temp folder. A test file
 that lacks a tool on the host says SKIPPED. r2c's own tests (`test-persist.sh`, `test-hook.sh`)
 need the build fixtures and were not rerun here; the one r2c file changed,
-`update-boot-ctxr-k114s`, has its addition tested in `test-r3-release.sh` and in the replica.
+`update-boot-ctxr-k114s`, has its additions tested in `test-r3-release.sh` and in the replica. `test-omarchy-patches.sh linux` (origin/main's) passes beside them: 67 passed, 0 failed.
 
 What the replica run shows, in order: the installer over r2c's state; an ordinary update with a
 full ESP goes through and the space guard does not even run; an update that rebuilds the boot
@@ -309,8 +340,14 @@ with no holds, harmless with them); named installs and removals; a switch to sta
 reinstall`; `NoExtract`; adopting the rebuilt plugin; a userland release through the post-update
 hook, its rollback from the archive; a refused kernel transaction; a kernel, firmware and loader
 release staged, abandoned, staged again, booted from the old entry, booted incomplete, proven,
-retired on the second boot; the Stage 2 switch, its abandon, its proof; the steady state where
+retired on the second boot; a Stage 2 trial refused beside a standing trial of someone else, then
+armed beside the proven file, a trial start that hangs and falls back, `--rearm`, two good trial
+starts that arm it again, the switch on a later run, the candidate cleaned up; the steady state where
 the proven image is the standard one; a locally built kernel through the same road; undo.
+
+Read on the live Mac as a normal user (agent-run, read-only, 2026-11-14 17:57): `k114s-release
+status` from this branch reports `booted: Stage 2 m1n1/boot-ctxr-r3-gpu.bin (a one-boot trial)` and
+the lead's standing trial under `elsewhere:`; the r3 guards are not installed yet.
 
 Bugs these tests found in the first draft, all fixed: a check that always passed because a glob
 ran with globbing off; a trial that a record from the staging boot could have "proven"; a retire
@@ -326,8 +363,12 @@ module folder; three silent exits under `set -e`.
   the boot is ok. It says what a script observed (a Hyprland process, `wlan0`, the
   input device `Apple MTP multi-touch`); all three names were read on this Mac. It does not know
   whether the pointer moves.
-- **Stage 2** has no additional-entry safety. The switch is the owner's command, and the way back
-  is from macOS.
+- **Stage 2** has no additional menu entry; its safety is the loader's one-boot trial and its
+  watchdog, as the lead used it for the GPU Stage 2. A candidate that starts Linux but breaks
+  something the boot check does not look at would still be armed again; the switch to it needs two
+  recorded ok starts and a later run, and the way back after the switch is from macOS. The
+  `aura-try` format and the `chosen/aurora,trial` property were read from the lead's files and
+  this Mac's device tree, not from the loader's source.
 - **The real boot hooks** (`limine-mkinitcpio`, `update-m1n1`, `kernel-modules-hook`) were stood
   in for. Their triggers were read from this machine; that Limine keeps the K114s menu block and
   `default_entry` is taken from the 2026-11-14 pacman log, and `k114s-release` checks both after

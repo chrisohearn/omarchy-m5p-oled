@@ -25,11 +25,30 @@ fail() { echo "update-boot-ctxr-k114s: $*; boot-ctxr.bin left as it was" >&2; ex
 be32() { od -An -tu1 -j "$2" -N 4 "$1" | awk '{print (($1*256+$2)*256+$3)*256+$4}'; }
 magic() { od -An -tx1 -j "$2" -N 4 "$1" | tr -d ' \n'; }
 
+# r3: k114s-release builds a CANDIDATE beside the configured file, for a one-boot trial (aura-try):
+#   K114S_STAGE2_OUT=boot-ctxr-NAME.bin   write m1n1/<that name>; boot-ctxr.bin is not touched
+#   K114S_STAGE2_DTB=packaged|pinned      which K114s tree, whatever the use-packaged-dtb marker says
+out=boot-ctxr.bin
+case ${K114S_STAGE2_OUT:-} in
+  '') ;;
+  */* | boot-ctxr.bin) fail "K114S_STAGE2_OUT must be a file name boot-ctxr-NAME.bin" ;;
+  boot-ctxr-*.bin) out=$K114S_STAGE2_OUT ;;
+  *) fail "K114S_STAGE2_OUT must be a file name boot-ctxr-NAME.bin" ;;
+esac
+packaged=0
+[ -e "$lib/use-packaged-dtb" ] && packaged=1
+case ${K114S_STAGE2_DTB:-} in
+  '') ;;
+  packaged) packaged=1 ;;
+  pinned) packaged=0 ;;
+  *) fail "K114S_STAGE2_DTB must be packaged or pinned" ;;
+esac
+
 # r3: while a new kernel or loader package is on trial, the proven Stage 2 must stay byte for byte
 # (it is shared by every boot entry). k114s-release writes this marker before the transaction
-# and removes it when the Stage 2 switch is made on purpose (k114s-release stage2).
+# and removes it when the Stage 2 switch has been made on purpose (k114s-release stage2).
 frozen=$root/etc/omarchy-k114s/stage2-frozen
-if [ -e "$frozen" ] && [ -s "$esp/boot-ctxr.bin" ]; then
+if [ "$out" = boot-ctxr.bin ] && [ -e "$frozen" ] && [ -s "$esp/boot-ctxr.bin" ]; then
   echo "update-boot-ctxr-k114s: Stage 2 is frozen ($frozen exists); m1n1/boot-ctxr.bin left as it is"
   exit 0
 fi
@@ -60,9 +79,9 @@ done
 [ "$count" -ge 1 ] || fail "no device trees after the Aura Stage 2"
 [ "$(od -An -tx1 -j "$off" -N 3 "$boot" | tr -d ' \n')" = 1f8b08 ] || fail "no gzip next stage after the device trees"
 
-tmp=$esp/.boot-ctxr.bin.k114s-new
+tmp=$esp/.$out.k114s-new
 trap 'rm -f "$tmp" "$tmp.dtb"' EXIT
-if [ -e "$lib/use-packaged-dtb" ]; then
+if [ "$packaged" = 1 ]; then
   [ -n "$found_off" ] || fail "boot.bin has no apple,k114s device tree"
   dd if="$boot" of="$tmp.dtb" bs=1M iflag=skip_bytes,count_bytes skip="$found_off" count="$found_len" 2>/dev/null
   dtb=$tmp.dtb
@@ -77,7 +96,7 @@ out_size=$(stat -c %s "$tmp")
 [ "$out_size" -le 16777216 ] || fail "Stage 2 would exceed Aura's 16 MiB slot"
 [ "$out_size" -eq $(( $(stat -c %s "$m1n1_out") + $(stat -c %s "$dtb") + total - off )) ] || fail "assembled size is wrong"
 sync "$tmp"
-mv -f "$tmp" "$esp/boot-ctxr.bin"
+mv -f "$tmp" "$esp/$out"
 trap - EXIT
 rm -f "$tmp.dtb"
-echo "update-boot-ctxr-k114s: wrote $esp/boot-ctxr.bin ($out_size bytes, K114s device tree $(sha256sum "$dtb" | cut -c1-16))"
+echo "update-boot-ctxr-k114s: wrote $esp/$out ($out_size bytes, K114s device tree $(sha256sum "$dtb" | cut -c1-16))"

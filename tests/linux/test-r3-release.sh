@@ -82,7 +82,9 @@ if have pacman repo-add fakeroot vercmp bsdtar zstd; then
   ok "it still left the holds alone and wrote no rollback set" "$(K114S_ROOT=$r bash "$(lib "$r")/k114s-holds" show | grep -c -x linux-aurora) $(ls "$r/var/lib/omarchy-k114s/rollback" | wc -l | tr -d ' ')" "1 0"
   ok "the wait is notified" "$(notes "$r" | grep -c 'no proven boot chain is recorded yet')" 1
   r=$(mk); sync_db "$r"; run "$r" k114s-release mark-known-good >/dev/null; echo CHANGED > "$r/boot/efi/m1n1/boot-ctxr.bin"; out=$(run "$r" k114s-release auto)
-  ok "Stage 2 is not the file that was proven: waits" "$(waits 'is not the Stage 2 that was recorded as proven')" 1
+  ok "the configured Stage 2 is not the file that was proven: waits" "$(waits 'is not the file recorded with the proven chain')" 1
+  r=$(mk); sync_db "$r"; run "$r" k114s-release mark-known-good >/dev/null; : > "$r/etc/omarchy-k114s/trial-default"; out=$(run "$r" k114s-release auto)
+  ok "a boot-menu trial of someone else is under way: the boot chain waits" "$(waits 'boot-chain release waits: a boot-menu trial of someone else is under way') $(test -e "$r/var/lib/omarchy-k114s/release/trial"; status)" "1 1"
   r=$(mk); sync_db "$r"; run "$r" k114s-release mark-known-good >/dev/null; echo x >> "$r/boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi"; out=$(run "$r" k114s-release auto)
   ok "the proven image changed on the ESP: waits" "$(waits 'is not the file that was recorded')" 1
   r=$(mk); sync_db "$r"; run "$r" k114s-release mark-known-good >/dev/null; stub "$r" EFI/Linux/omarchy_linux-aurora.efi; out=$(run "$r" k114s-release auto)
@@ -161,9 +163,93 @@ r=$(mk); run "$r" k114s-release mark-known-good >/dev/null; s2=$(sum "$r/boot/ef
 truncate -s $((4 * MB)) "$r/boot/efi/m1n1/boot-ctxr.bin"; run "$r" k114s-release mark-known-good >/dev/null; s2=$(sum "$r/boot/efi/m1n1/boot-ctxr.bin")
 out=$(ESP_FREE=$((19 * MB)) run "$r" k114s-release stage2); ok "Stage 2 switch: not enough room for new file, temp and kept copy (3x4+8): refused" "$? $(sum "$r/boot/efi/m1n1/boot-ctxr.bin")" "1 $s2"
 out=$(run "$r" k114s-release stage2 --dtb elsewhere); ok "Stage 2 switch: unknown tree choice refused" "$?" 1
-out=$(run "$r" k114s-release stage2); ok "Stage 2 switch: the hook refuses (no boot.bin to cut from): the proven file stays, frozen" "$? $(sum "$r/boot/efi/m1n1/boot-ctxr.bin") $(test -s "$r/etc/omarchy-k114s/stage2-frozen"; status)" "1 $s2 0"
+out=$(run "$r" k114s-release stage2); ok "Stage 2 trial: the hook refuses (no boot.bin to cut from): the proven file stays, no candidate, nothing armed" "$? $(sum "$r/boot/efi/m1n1/boot-ctxr.bin") $(test -e "$r/boot/efi/m1n1/boot-ctxr-try.bin"; status) $(test -e "$r/boot/efi/aura-try"; status)" "1 $s2 1 1"
 ok "Stage 2 switch refused: no trial was started" "$(test -e "$r/var/lib/omarchy-k114s/release/trial"; status)" 1
 r=$(mk); out=$(run "$r" k114s-release stage2); ok "Stage 2 switch without a proven chain: refused" "$? $(echo "$out" | grep -c 'no proven boot chain is recorded yet')" "1 1"
+
+# --- aura-try: the loader's one-boot Stage 2 trial (a standing one is the lead's; ours is the candidate) -----------
+GPU=m1n1/boot-ctxr-r3-gpu.bin
+rec() { cat "$1"/var/lib/omarchy-k114s/release/boots/*-"$2" 2>/dev/null; }
+aura() { # aura ROOT: the Mac as found on 2026-11-14: a standing trial of $GPU, re-armed at shutdown, this boot came through it
+  echo GPU-STAGE2 > "$1/boot/efi/$GPU"; printf 'spent\n%s\n' "$GPU" > "$1/boot/efi/aura-try"
+  printf '%s\n%s\n' "$GPU" "$(sum "$1/boot/efi/$GPU")" > "$1/etc/omarchy-k114s/stage2-trial"
+}
+r=$(mk); aura "$r"; out=$(K114S_AURA_TRIAL=$GPU run "$r" k114s-release mark-known-good)
+ok "mark-known-good under a standing trial: what booted is the trial image, the configured file is recorded beside it" \
+  "$? $(known "$r" stage2) $(known "$r" stage2_sha256) $(known "$r" configured_stage2_sha256) $(known "$r" trial)" "0 $GPU $(sum "$r/boot/efi/$GPU") $(sum "$r/boot/efi/m1n1/boot-ctxr.bin") $GPU"
+out=$(K114S_AURA_TRIAL=$GPU run "$r" k114s-release status); ok "status: intact and running, the booted Stage 2 and the other trial are shown" \
+  "$(echo "$out" | grep -c -E "intact and running|^booted:    Stage 2 $GPU \(a one-boot trial\)|^elsewhere: a standing Stage 2 trial of $GPU|^aura-try:  spent $GPU")" 4
+out=$(K114S_AURA_TRIAL= run "$r" k114s-release status); ok "a start through the configured file is not the proven chain while the trial image is" "$(echo "$out" | grep -c "did not come through the proven Stage 2 ($GPU); it came through m1n1/boot-ctxr.bin")" 1
+echo CHANGED > "$r/boot/efi/m1n1/boot-ctxr.bin"; out=$(K114S_AURA_TRIAL=$GPU run "$r" k114s-release status)
+ok "the configured file (the watchdog's fallback) changed: not intact" "$(echo "$out" | grep -c 'the configured Stage 2, what the loader falls back to')" 1
+r=$(mk); out=$(K114S_AURA_TRIAL=m1n1/boot-ctxr-gone.bin run "$r" k114s-release mark-known-good); ok "a trial image that is not on the ESP: nothing recorded" "$? $(test -e "$r/var/lib/omarchy-k114s/release/known-good"; status)" "1 1"
+r=$(mk); out=$(K114S_AURA_TRIAL=../../etc/x run "$r" k114s-release mark-known-good); ok "a trial path that leaves the ESP is not followed" "$? $(echo "$out" | grep -c 'not on the ESP as a file')" "1 1"
+r=$(mk); aura "$r"; K114S_AURA_TRIAL=$GPU run "$r" k114s-release mark-known-good >/dev/null; b=$(sum "$r/boot/efi/aura-try")
+out=$(K114S_AURA_TRIAL=$GPU run "$r" k114s-release stage2); ok "Stage 2 trial refused while a standing trial is under way; nothing written" \
+  "$? $(echo "$out" | grep -c 'another trial of the boot chain is under way: a standing Stage 2 trial') $(sum "$r/boot/efi/aura-try") $(test -e "$r/boot/efi/m1n1/boot-ctxr-try.bin"; status) $(test -e "$r/var/lib/omarchy-k114s/release/trial"; status)" "1 1 $b 1 1"
+r=$(mk); run "$r" k114s-release mark-known-good >/dev/null; echo X > "$r/boot/efi/m1n1/boot-ctxr-x.bin"; printf 'armed\nm1n1/boot-ctxr-x.bin\n' > "$r/boot/efi/aura-try"
+out=$(run "$r" k114s-release stage2); ok "Stage 2 trial refused while another file is armed" "$? $(echo "$out" | grep -c 'an armed one-boot Stage 2 trial of m1n1/boot-ctxr-x.bin') $(sed -n 2p "$r/boot/efi/aura-try")" "1 1 m1n1/boot-ctxr-x.bin"
+r=$(mk); run "$r" k114s-release mark-known-good >/dev/null; : > "$r/etc/omarchy-k114s/trial-default"
+out=$(run "$r" k114s-release stage2); ok "Stage 2 trial refused during a boot-menu trial" "$? $(echo "$out" | grep -c 'a one-boot boot-menu trial')" "1 1"
+# the re-arm at boot: a trial of ours, kind stage2, this start came through the candidate
+s2trial() { # s2trial ROOT: a Stage 2 trial of k114s-release by hand: candidate on the ESP, marker spent by the loader
+  local r=$1 st=$1/var/lib/omarchy-k114s/release
+  run "$r" k114s-release mark-known-good >/dev/null
+  echo CANDIDATE > "$r/boot/efi/m1n1/boot-ctxr-try.bin"; printf 'spent\nm1n1/boot-ctxr-try.bin\n' > "$r/boot/efi/aura-try"
+  mkdir -p "$r/var/lib/omarchy-k114s/rollback/s1/esp/m1n1"; cp "$r/boot/efi/m1n1/boot-ctxr.bin" "$r/var/lib/omarchy-k114s/rollback/s1/esp/m1n1/"
+  printf 'id s1\nkind stage2\npackages m1n1-aurora uboot-aurora\ndtb packaged\nuki %s\nuki_sha256 %s\nstage2 m1n1/boot-ctxr-try.bin\nstage2_sha256 %s\nconfigured_stage2_sha256 %s\nrollback %s\nstarted 20260101T000000Z\nboot_id aaaa0000\n' \
+    "$(known "$r" uki)" "$(known "$r" uki_sha256)" "$(sum "$r/boot/efi/m1n1/boot-ctxr-try.bin")" "$(sum "$r/boot/efi/m1n1/boot-ctxr.bin")" "$r/var/lib/omarchy-k114s/rollback/s1" > "$st/trial"
+  echo x > "$r/etc/omarchy-k114s/stage2-frozen"
+}
+TRY=m1n1/boot-ctxr-try.bin
+r=$(mk); s2trial "$r"; out=$(K114S_AURA_TRIAL=$TRY run "$r" k114s-boot-success)
+ok "a good start through our candidate: recorded with its hash, and armed again for the next start" \
+  "$(rec "$r" aaaa0001 | grep -c -E "^(stage2 $TRY|stage2_sha256 $(sum "$r/boot/efi/$TRY")|trial $TRY|result ok)$") $(head -n 1 "$r/boot/efi/aura-try") $(echo "$out" | grep -c 'armed again')" "4 armed 1"
+r=$(mk); s2trial "$r"; out=$(DESKTOP=no K114S_AURA_TRIAL=$TRY run "$r" k114s-boot-success); ok "an incomplete start through it: not armed again (the next start is the proven file)" "$(head -n 1 "$r/boot/efi/aura-try")" spent
+r=$(mk); s2trial "$r"; out=$(K114S_AURA_TRIAL= run "$r" k114s-boot-success); ok "a start that fell back to the configured file: not armed again" "$(head -n 1 "$r/boot/efi/aura-try")" spent
+r=$(mk); s2trial "$r"; echo OTHER > "$r/boot/efi/$TRY"; out=$(K114S_AURA_TRIAL=$TRY run "$r" k114s-boot-success); ok "the candidate is not the file on trial: not armed" "$(head -n 1 "$r/boot/efi/aura-try")" spent
+r=$(mk); s2trial "$r"; aura "$r"; out=$(K114S_AURA_TRIAL=$TRY run "$r" k114s-boot-success); ok "another trial appeared: ours is not armed over it" "$(cat "$r/boot/efi/aura-try" | tr '\n' ' ')" "spent $GPU "
+r=$(mk); s2trial "$r"; out=$(BOOT_ID=aaaa0002 run "$r" k114s-release auto); ok "auto after a start that did not come through it: says so, changes nothing proven" \
+  "$(echo "$out" | grep -c 'this start did not come through m1n1/boot-ctxr-try.bin') $(test -e "$r/boot/efi/$TRY"; status)" "1 0"
+out=$(BOOT_ID=aaaa0002 run "$r" k114s-release stage2 --rearm); ok "stage2 --rearm arms the candidate again" "$? $(cat "$r/boot/efi/aura-try" | tr '\n' ' ')" "0 armed $TRY "
+out=$(BOOT_ID=aaaa0002 run "$r" k114s-release auto); ok "auto while it is armed: restart when convenient" "$(echo "$out" | grep -c 'is armed for the next start')" 1
+# promotion: two good starts through the candidate, on a later run
+s2boots() { local r=$1 n; for n in 2 3; do printf 'time 2026010%sT000000Z\nboot_id aaaa000%s\nuki %s\nuki_sha256 %s\nstage2 %s\nstage2_sha256 %s\ntrial %s\nresult ok\n' "$n" "$n" "$(known "$r" uki)" "$(known "$r" uki_sha256)" "$TRY" "$(sum "$r/boot/efi/$TRY")" "$TRY" \
+  > "$r/var/lib/omarchy-k114s/release/boots/2026010${n}T000000Z-aaaa000$n"; done; }
+r=$(mk); s2trial "$r"; mkdir -p "$r/var/lib/omarchy-k114s/release/boots"; s2boots "$r"; old=$(sum "$r/boot/efi/m1n1/boot-ctxr.bin"); new=$(sum "$r/boot/efi/$TRY")
+out=$(BOOT_ID=aaaa0003 K114S_AURA_TRIAL=$TRY run "$r" k114s-release auto); ok "the run that sees the first records only proves the candidate" "$(grep -c '^proven' "$r/var/lib/omarchy-k114s/release/trial") $(sum "$r/boot/efi/m1n1/boot-ctxr.bin")" "1 $old"
+out=$(BOOT_ID=aaaa0003 K114S_AURA_TRIAL= run "$r" k114s-release auto); ok "a later run from a start through the configured file: no switch" "$(sum "$r/boot/efi/m1n1/boot-ctxr.bin") $(echo "$out" | grep -c 'did not come through')" "$old 1"
+out=$(BOOT_ID=aaaa0003 K114S_AURA_TRIAL=$TRY ESP_FREE=$((8 * MB)) run "$r" k114s-release auto); ok "no room for the kept copy and a temp file: the switch waits" "$(sum "$r/boot/efi/m1n1/boot-ctxr.bin") $(echo "$out" | grep -c 'switch waits for room')" "$old 1"
+: > "$r/etc/omarchy-k114s/trial-default"; out=$(BOOT_ID=aaaa0003 K114S_AURA_TRIAL=$TRY run "$r" k114s-release auto); ok "another trial under way: the switch waits" "$(sum "$r/boot/efi/m1n1/boot-ctxr.bin") $(echo "$out" | grep -c 'the Stage 2 switch waits: a one-boot boot-menu trial')" "$old 1"
+rm "$r/etc/omarchy-k114s/trial-default"
+out=$(BOOT_ID=aaaa0003 K114S_AURA_TRIAL=$TRY run "$r" k114s-release auto); ok "a later run, from a start through the candidate, after two good starts: it becomes the configured file" "$? $(sum "$r/boot/efi/m1n1/boot-ctxr.bin")" "0 $new"
+ok "the old configured file is kept on the ESP with its hash, and in the rollback set" "$(sum "$r/boot/efi/k114s-repair/known-good/boot-ctxr.bin") $(cut -c1-64 "$r/boot/efi/k114s-repair/known-good/boot-ctxr.bin.sha256") $(sum "$r/var/lib/omarchy-k114s/rollback/s1/esp/m1n1/boot-ctxr.bin")" "$old $old $old"
+ok "proven now: the configured file; the trial is closed, the freeze and the marker are gone, the tree choice is kept" \
+  "$(known "$r" stage2) $(known "$r" stage2_sha256) $(known "$r" configured_stage2_sha256) $(test -e "$r/var/lib/omarchy-k114s/release/trial"; status) $(test -e "$r/etc/omarchy-k114s/stage2-frozen"; status) $(test -e "$r/boot/efi/aura-try"; status) $(test -e "$(lib "$r")/use-packaged-dtb"; status)" \
+  "m1n1/boot-ctxr.bin $new $new 1 1 1 0"
+ok "the candidate file stays while this start runs from it, and the chain is intact" "$(test -e "$r/boot/efi/$TRY"; status) $(K114S_AURA_TRIAL=$TRY run "$r" k114s-release status | grep -c 'intact and running')" "0 1"
+rm -rf "$REPO/edge"; out=$(BOOT_ID=aaaa0004 K114S_AURA_TRIAL= run "$r" k114s-release auto); ok "the next start comes through the configured file: the candidate leaves the ESP" "$(test -e "$r/boot/efi/$TRY"; status) $(K114S_AURA_TRIAL= BOOT_ID=aaaa0004 run "$r" k114s-release status | grep -c 'intact and running')" "1 1"
+r=$(mk); s2trial "$r"; out=$(BOOT_ID=aaaa0002 run "$r" k114s-release abandon); ok "abandon of a Stage 2 trial: disarmed, candidate gone, configured untouched, frozen" \
+  "$? $(test -e "$r/boot/efi/aura-try"; status) $(test -e "$r/boot/efi/$TRY"; status) $(sum "$r/boot/efi/m1n1/boot-ctxr.bin") $(test -s "$r/etc/omarchy-k114s/stage2-frozen"; status)" "0 1 1 $(known "$r" configured_stage2_sha256) 0"
+r=$(mk); s2trial "$r"; printf 'armed\nm1n1/boot-ctxr-x.bin\n' > "$r/boot/efi/aura-try"; out=$(BOOT_ID=aaaa0002 run "$r" k114s-release abandon); ok "abandon leaves another's marker alone" "$(sed -n 2p "$r/boot/efi/aura-try")" m1n1/boot-ctxr-x.bin
+
+# the Stage 2 trial started for real (the hook builds the candidate), given up, and the automatic switch
+r=$(mk); mkdir -p "$r/usr/lib/asahi-boot"; printf 'M1N1-STAGE2-PREFIX' > "$r/usr/lib/asahi-boot/m1n1.bin"
+python3 -I "$T/mkfdt.py" "$r/j.dtb" j714s; python3 -I "$T/mkfdt.py" "$r/packaged.dtb" k114s-bare; python3 -I "$T/mkfdt.py" "$r/boot/efi/k114s-repair/k114s.dtb" k114s-full
+{ cat "$r/usr/lib/asahi-boot/m1n1.bin" "$r/j.dtb" "$r/packaged.dtb"; echo U-BOOT | gzip -c -n; } > "$r/boot/efi/m1n1/boot.bin"
+run "$r" k114s-release mark-known-good >/dev/null; conf=$(sum "$r/boot/efi/m1n1/boot-ctxr.bin"); echo "$conf" > "$r/etc/omarchy-k114s/stage2-frozen"
+out=$(run "$r" k114s-release stage2 --dtb pinned); ok "stage2: the candidate is built beside the configured file and armed" \
+  "$? $(sum "$r/boot/efi/m1n1/boot-ctxr.bin") $(grep -c -a 'apple,centauri-platform-id' "$r/boot/efi/$TRY") $(head -n 1 "$r/boot/efi/aura-try") $(awk '$1 == "kind" || $1 == "dtb" { print $2 }' "$r/var/lib/omarchy-k114s/release/trial" | tr '\n' ' ')" "0 $conf 1 armed stage2 pinned "
+out=$(run "$r" k114s-release stage2); ok "a second stage2 during the trial: refused" "$? $(echo "$out" | grep -c 'one change at a time')" "1 1"
+out=$(run "$r" k114s-release abandon); ok "abandon in the boot that armed it" "$? $(test -e "$r/boot/efi/$TRY"; status) $(test -e "$r/boot/efi/aura-try"; status) $(sum "$r/boot/efi/m1n1/boot-ctxr.bin")" "0 1 1 $conf"
+sed -i 's/^AUTO_STAGE2_SWITCH=.*/AUTO_STAGE2_SWITCH=yes/' "$r/etc/omarchy-k114s/release.conf"; rm -rf "$REPO/edge"; out=$(run "$r" k114s-release auto)
+ok "AUTO_STAGE2_SWITCH=yes does not try a candidate that was given up" "$(echo "$out" | grep -c 'was given up before') $(test -e "$r/var/lib/omarchy-k114s/release/trial"; status) $(test -e "$r/boot/efi/$TRY"; status)" "1 1 1"
+{ cat "$r/usr/lib/asahi-boot/m1n1.bin" "$r/j.dtb" "$r/packaged.dtb"; echo NEW-U-BOOT | gzip -c -n; } > "$r/boot/efi/m1n1/boot.bin"; out=$(run "$r" k114s-release auto)
+ok "AUTO_STAGE2_SWITCH=yes: a new candidate is tried by itself, beside the proven file" "$(awk '$1 == "kind" { print $2 }' "$r/var/lib/omarchy-k114s/release/trial") $(head -n 1 "$r/boot/efi/aura-try") $(sum "$r/boot/efi/m1n1/boot-ctxr.bin")" "stage2 armed $conf"
+run "$r" k114s-release abandon >/dev/null
+K114S_STAGE2_OUT=boot-ctxr-x.bin K114S_STAGE2_DTB=pinned OMARCHY_ROOT=$r sh "$(lib "$r")/update-boot-ctxr" >/dev/null 2>&1; mv "$r/boot/efi/m1n1/boot-ctxr-x.bin" "$r/boot/efi/m1n1/boot-ctxr.bin"
+run "$r" k114s-release mark-known-good >/dev/null; echo x > "$r/etc/omarchy-k114s/stage2-frozen"; out=$(run "$r" k114s-release stage2 --dtb pinned)
+ok "the packages build the configured file byte for byte: nothing to try, the freeze is lifted" "$? $(echo "$out" | grep -c 'nothing to try, and the freeze is lifted') $(test -e "$r/etc/omarchy-k114s/stage2-frozen"; status) $(test -e "$r/var/lib/omarchy-k114s/release/trial"; status)" "0 1 1 1"
 
 # --- the Stage 2 hook's freeze (the rest of the hook is r2c's, tested with the image's own files there) -----
 r=$(mkroot); mkdir -p "$r/usr/lib/asahi-boot"; printf 'M1N1-STAGE2-PREFIX' > "$r/usr/lib/asahi-boot/m1n1.bin"
@@ -178,6 +264,11 @@ out=$(s2hook); ok "frozen: a new loader does not reach Stage 2, and the hook suc
 rm "$r/etc/omarchy-k114s/stage2-frozen"; out=$(s2hook); ok "unfrozen with the packaged tree: the new loader and the kernel package's own K114s tree" "$? $(grep -c -a 'NEW-M1N1-PREFIX' "$r/boot/efi/m1n1/boot-ctxr.bin") $(grep -c -a 'apple,centauri-platform-id' "$r/boot/efi/m1n1/boot-ctxr.bin") $(grep -c -a 'apple,k114s' "$r/boot/efi/m1n1/boot-ctxr.bin")" "0 1 0 1"
 rm "$(lib "$r")/use-packaged-dtb" "$r/boot/efi/m1n1/boot-ctxr.bin"; echo x > "$r/etc/omarchy-k114s/stage2-frozen"
 out=$(s2hook); ok "a freeze never leaves the Mac WITHOUT a Stage 2: a missing file is built" "$? $(test -s "$r/boot/efi/m1n1/boot-ctxr.bin"; status)" "0 0"
+conf=$(sum "$r/boot/efi/m1n1/boot-ctxr.bin")
+out=$(K114S_STAGE2_OUT=boot-ctxr-try.bin K114S_STAGE2_DTB=packaged s2hook); ok "a candidate is built beside it, frozen or not; the configured file is not touched"   "$? $(sum "$r/boot/efi/m1n1/boot-ctxr.bin") $(grep -c -a 'NEW-M1N1-PREFIX' "$r/boot/efi/m1n1/boot-ctxr-try.bin") $(grep -c -a 'apple,centauri-platform-id' "$r/boot/efi/m1n1/boot-ctxr-try.bin")" "0 $conf 1 0"
+: > "$(lib "$r")/use-packaged-dtb"; out=$(K114S_STAGE2_OUT=boot-ctxr-try.bin K114S_STAGE2_DTB=pinned s2hook); ok "the tree named for the candidate wins over the marker" "$? $(grep -c -a 'apple,centauri-platform-id' "$r/boot/efi/m1n1/boot-ctxr-try.bin")" "0 1"
+for name in boot-ctxr.bin ../boot-ctxr-x.bin other.bin; do out=$(K114S_STAGE2_OUT=$name s2hook); ok "candidate name $name is refused" "$? $(sum "$r/boot/efi/m1n1/boot-ctxr.bin")" "1 $conf"; done
+out=$(K114S_STAGE2_DTB=elsewhere s2hook); ok "an unknown tree choice is refused" "$?" 1
 
 # --- boot-success ------------------------------------------------------------------------------------------------
 rec() { cat "$1"/var/lib/omarchy-k114s/release/boots/*-"$2" 2>/dev/null; }

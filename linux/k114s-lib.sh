@@ -15,7 +15,9 @@ RUN=$ROOT/run/omarchy-k114s
 ESP=$ROOT/boot/efi
 PACCONF=$ROOT/etc/pacman.conf
 PACMAN=${K114S_PACMAN:-pacman}
-STAGE2_REL=m1n1/boot-ctxr.bin
+STAGE2_REL=m1n1/boot-ctxr.bin           # the configured Stage 2: what the loader boots unless a trial is armed
+STAGE2_TRY_REL=m1n1/boot-ctxr-try.bin   # a Stage 2 candidate k114s-release puts beside it for a one-boot trial
+AURA_TRY_REL=aura-try                   # the loader's one-boot trial marker at the ESP root: "armed\n<path>\n"
 PERMIT=$RUN/permit
 
 # pacman pointed at the root in use. The live system needs no extra arguments.
@@ -146,6 +148,60 @@ booted_uki() { # the EFI path of the image the stub was started from, as "EFI/Li
   # (read 2026-11-14): backslashes become slashes, doubled and leading ones go.
   tail -c +5 "$var" | tr -d '\0' | tr '\\' '/' | tr -s '/' | sed 's#^/##'
 }
+
+# --- the booted Stage 2 -----------------------------------------------------------------------
+# The loader (Aura) boots the configured m1n1/boot-ctxr.bin, unless a file "aura-try" at the ESP
+# root holds "armed\n<path>\n": then it marks the file "spent", boots <path> ONCE under its
+# watchdog, and tells Linux in chosen/aurora,trial. A trial that hangs is reset onto the
+# configured file. (Seen on this Mac 2026-11-14: m1n1/boot-ctxr-r3-gpu.bin booted this way.)
+booted_trial() { # what the loader booted once in place of the configured Stage 2; empty on an ordinary boot
+  if [[ -n ${K114S_AURA_TRIAL+set} ]]; then echo "$K114S_AURA_TRIAL"; return 0; fi     # tests
+  local file=$ROOT/proc/device-tree/chosen/aurora,trial
+  [[ -r $file ]] || return 0
+  tr -d '\0' < "$file"
+}
+booted_stage2() { # the ESP path of the Stage 2 image this boot came through; "?" when a trial names something else
+  local trial
+  trial=$(booted_trial)
+  if [[ -z $trial ]]; then echo "$STAGE2_REL"
+  elif [[ $trial =~ ^[A-Za-z0-9._/-]+$ && $trial != /* && $trial != *..* ]]; then echo "$trial"
+  else echo "?"; fi
+}
+booted_stage2_sum() { # the SHA-256 of that image as it is on the ESP now; "unknown" when it cannot be read
+  local rel
+  rel=$(booted_stage2)
+  if [[ $rel != "?" && -f $ESP/$rel ]]; then sum "$ESP/$rel"; else echo unknown; fi
+}
+aura_try_path() { [[ -f $ESP/$AURA_TRY_REL ]] && sed -n 2p "$ESP/$AURA_TRY_REL" 2>/dev/null || true; }     # the path a marker names, armed or spent
+aura_try_armed() { # the path an ARMED marker names; nothing when there is no marker or it is spent
+  [[ -f $ESP/$AURA_TRY_REL && $(sed -n 1p "$ESP/$AURA_TRY_REL" 2>/dev/null) == armed ]] || return 0
+  aura_try_path
+}
+aura_try_arm() { # aura_try_arm REL: arm the loader's one-boot trial of ESP file REL (written beside, then renamed)
+  [[ $1 =~ ^m1n1/boot-ctxr-[A-Za-z0-9._-]+\.bin$ && -s $ESP/$1 ]] || return 1
+  printf 'armed\n%s\n' "$1" > "$ESP/$AURA_TRY_REL.k114s-new" && sync "$ESP/$AURA_TRY_REL.k114s-new" && mv -f "$ESP/$AURA_TRY_REL.k114s-new" "$ESP/$AURA_TRY_REL" &&
+    [[ $(aura_try_armed) == "$1" ]]
+}
+aura_try_clear() { # aura_try_clear REL: take the marker away when it names REL (armed or spent); another's is left alone
+  [[ -f $ESP/$AURA_TRY_REL && $(aura_try_path) == "$1" ]] || return 0
+  rm -f "$ESP/$AURA_TRY_REL"
+}
+# Trials of the boot chain that are not k114s-release's own. Seen on this Mac 2026-11-14:
+#   /etc/omarchy-k114s/stage2-trial   "<path>\n<sha256>\n": a standing Stage 2 trial, re-armed at every
+#                                     clean shutdown after a boot that came through it (stage2-rearm)
+#   /etc/omarchy-k114s/trial-default  a one-boot boot-menu trial (trial-default-revert puts default 1 back)
+STANDING_TRIAL=$ETC/stage2-trial
+ENTRY_TRIAL=$ETC/trial-default
+foreign_trial() { # foreign_trial [OUR_REL]: describe another trial under way; nothing when there is none
+  local ours=${1:-} armed
+  if [[ -s $STANDING_TRIAL ]]; then echo "a standing Stage 2 trial of $(sed -n 1p "$STANDING_TRIAL") ($STANDING_TRIAL, armed again after each good start through it)"; return 0; fi
+  [[ ! -e $ENTRY_TRIAL ]] || { echo "a one-boot boot-menu trial ($ENTRY_TRIAL)"; return 0; }
+  armed=$(aura_try_armed)
+  if [[ -n $armed && $armed != "$ours" ]]; then echo "an armed one-boot Stage 2 trial of $armed ($ESP/$AURA_TRY_REL)"; return 0; fi
+  if [[ -n $(booted_trial) && $(booted_trial) != "$ours" ]]; then echo "this boot came through a one-boot Stage 2 trial of $(booted_trial)"; fi
+  return 0
+}
+kv() { awk -v k="$2" '$1 == k { $1 = ""; sub(/^ /, ""); print; exit }' "$1" 2>/dev/null || true; }   # kv FILE KEY: the rest of the first "KEY ..." line
 
 # --- notifications ----------------------------------------------------------------------------
 notify() { # notify URGENCY TITLE BODY: to every graphical session; never fails, never blocks long

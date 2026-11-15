@@ -2,6 +2,7 @@
 [Unit]
 Description=K114s: record a successful boot of this boot chain
 After=multi-user.target
+RequiresMountsFor=/boot/efi
 ConditionPathExists=/usr/local/lib/omarchy-k114s/k114s-boot-success
 
 [Service]

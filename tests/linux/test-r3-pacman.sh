@@ -26,7 +26,7 @@ S=$BASE/sys; P=$BASE/pkgs; mkdir -p "$P"
 KLIB=$S/usr/local/lib/omarchy-k114s; ESPD=$S/boot/efi; STATE=$S/var/lib/omarchy-k114s
 KOLD=7.3.0-17.v272-4-ARCH; KNEW=7.4.4-1-ARCH
 banner() { echo "Linux version $1 (test@build) #1 SMP PREEMPT"; }
-UNAME_R=$KOLD; ESP_FREE=$((300 * MB)); BOOT_ID=b0000001
+UNAME_R=$KOLD; ESP_FREE=$((300 * MB)); BOOT_ID=b0000001; AURA_TRIAL=
 
 # --- the throwaway system -----------------------------------------------------------------------
 mkdir -p "$S"/etc/pacman.d/hooks "$S"/etc/default "$S"/etc/k114s-test/sys/class/net/wlan0 "$S"/etc/k114s-test/proc/bus/input \
@@ -54,7 +54,7 @@ sb() { # run a command inside the throwaway system as its root
     --setenv PATH /usr/bin --setenv HOME /root --setenv LC_ALL C --unsetenv K114S_ROOT \
     --setenv K114S_UNAME_R "$UNAME_R" --setenv K114S_PROC_VERSION "$(banner "$UNAME_R")" --setenv K114S_ESP_FREE "$ESP_FREE" \
     --setenv K114S_EFI_STUB_ID /etc/k114s-test/stub-id --setenv K114S_ESP_DT /nonexistent --setenv K114S_NOTIFY_LOG /var/log/notify.log \
-    --setenv K114S_BOOT_ID "$BOOT_ID" --setenv K114S_DESKTOP yes --setenv K114S_SYS /etc/k114s-test/sys --setenv K114S_PROC /etc/k114s-test/proc \
+    --setenv K114S_BOOT_ID "$BOOT_ID" --setenv K114S_AURA_TRIAL "$AURA_TRIAL" --setenv K114S_DESKTOP yes --setenv K114S_SYS /etc/k114s-test/sys --setenv K114S_PROC /etc/k114s-test/proc \
     --setenv K114S_BOOT_WAIT 0 --setenv K114S_DT_COMPATIBLE /etc/k114s-test/compatible --setenv K114S_SYSTEMCTL /usr/bin/true \
     --setenv K114S_USER_HOME /people/owner --setenv K114S_HOLDS_WAIT 1 --setenv K114S_SUDO "${SUDO_STUB:-/usr/local/lib/test-sudo}" --chdir / "$@" 2>&1
 }
@@ -64,6 +64,13 @@ update() { sb pacman -Syyu --noconfirm "$@"; }   # "omarchy update"'s transactio
 rel() { sb /usr/local/lib/omarchy-k114s/k114s-release "$@"; }
 notes() { cat "$S/var/log/notify.log" 2>/dev/null; }
 boot() { # boot IMAGE_REL RELEASE: the next start came from that boot image; /run is new, the boot units run. Sets $out.
+  # The loader's one-boot trial: an armed aura-try is marked spent and its file booted once (chosen/aurora,trial).
+  # HANG=1: that trial start hangs and the watchdog resets the Mac onto the configured Stage 2.
+  AURA_TRIAL=
+  if [ "$(sed -n 1p "$ESPD/aura-try" 2>/dev/null)" = armed ]; then
+    AURA_TRIAL=$(sed -n 2p "$ESPD/aura-try"); printf 'spent\n%s\n' "$AURA_TRIAL" > "$ESPD/aura-try"
+    [ -z "${HANG:-}" ] || AURA_TRIAL=
+  fi
   printf '\6\0\0\0' > "$S/etc/k114s-test/stub-id"; printf '/%s' "$(printf '%s' "/$1" | tr / '\\')" | iconv -f ascii -t utf-16le >> "$S/etc/k114s-test/stub-id"
   UNAME_R=$2; BOOT_ID=b$(printf '%07d' $(( 10#${BOOT_ID#b} + 1 )))
   rm -rf "$S"/run/*
@@ -358,22 +365,34 @@ ok "Stage 2 is STILL the proven file: a loader package was part of it" "$(sum "$
 out=$(rel status); ok "status after retire" "$(echo "$out" | grep -c -E 'intact and running|trial:     none|Stage 2:   frozen')" 3
 boot EFI/Linux/omarchy_linux-aurora.efi "$KNEW"; ok "next boot: the old kernel's modules are cleaned up as usual" "$(test -d "$S/usr/lib/modules/$KOLD"; status) $(test -d "$S/usr/lib/modules/.old/$KOLD"; status)" "1 0"
 
-# --- Stage 2: its own step, by the owner -----------------------------------------------------------------------------------
+# --- Stage 2: a candidate beside the proven file, tried through the loader's one-boot trial ------------------------------
+TRY=$ESPD/m1n1/boot-ctxr-try.bin
 : > "$S/var/log/notify.log"; out=$(rel auto)
-ok "auto never switches Stage 2 by itself (AUTO_STAGE2_SWITCH=no)" "$(sum "$ESPD/m1n1/boot-ctxr.bin") $(echo "$out" | grep -c 'Stage 2 is still the proven file')" "$STAGE2_R2C 1"
+ok "auto never starts a Stage 2 trial by itself (AUTO_STAGE2_SWITCH=no)" "$(sum "$ESPD/m1n1/boot-ctxr.bin") $(echo "$out" | grep -c 'Stage 2 is still the proven file') $(test -e "$TRY"; status)" "$STAGE2_R2C 1 1"
+echo GPU-STAGE2 > "$ESPD/m1n1/boot-ctxr-r3-gpu.bin"; printf '%s\n%s\n' m1n1/boot-ctxr-r3-gpu.bin "$(sum "$ESPD/m1n1/boot-ctxr-r3-gpu.bin")" > "$S/etc/omarchy-k114s/stage2-trial"
+out=$(rel stage2 --dtb packaged); ok "refused while someone else's standing Stage 2 trial is under way; nothing written" "$? $(echo "$out" | grep -c 'a standing Stage 2 trial of m1n1/boot-ctxr-r3-gpu.bin') $(test -e "$TRY"; status) $(test -e "$ESPD/aura-try"; status)" "1 1 1 1"
+rm -f "$S/etc/omarchy-k114s/stage2-trial" "$ESPD/m1n1/boot-ctxr-r3-gpu.bin"
 out=$(rel stage2 --dtb packaged); ok "k114s-release stage2 --dtb packaged" "$?" 0
-STAGE2_NEW=$(sum "$ESPD/m1n1/boot-ctxr.bin")
-ok "Stage 2 is now built from the installed loader and the released kernel's own K114s tree" "$(test "$STAGE2_NEW" != "$STAGE2_R2C"; status) $(grep -c -a 'm1n1 channel' "$ESPD/m1n1/boot-ctxr.bin") $(grep -c -a 'apple,j714s' "$ESPD/m1n1/boot-ctxr.bin")" "0 1 0"
-ok "the proven Stage 2 is kept on the EFI partition for the way back from macOS" "$(sum "$ESPD/k114s-repair/known-good/boot-ctxr.bin") $(cut -c1-64 "$ESPD/k114s-repair/known-good/boot-ctxr.bin.sha256")" "$STAGE2_R2C $STAGE2_R2C"
-ok "it tells how to go back from macOS" "$(echo "$out" | grep -c -E 'start macOS|k114s-repair/known-good/boot-ctxr.bin')" 2
-ok "a Stage 2 trial is recorded" "$(awk '$1 == "kind" { print $2 }' "$STATE/release/trial")" stage2
+CAND=$(sum "$TRY")
+ok "the candidate is built from the installed loader and the released kernel's own K114s tree" "$(test "$CAND" != "$STAGE2_R2C"; status) $(grep -c -a 'm1n1 channel' "$TRY") $(grep -c -a 'apple,j714s' "$TRY")" "0 1 0"
+ok "BESIDE the proven file, which is untouched" "$(sum "$ESPD/m1n1/boot-ctxr.bin") $(test -s "$S/etc/omarchy-k114s/stage2-frozen"; status)" "$STAGE2_R2C 0"
+ok "the loader's one-boot trial is armed for it; a Stage 2 trial is recorded" "$(tr '\n' ' ' < "$ESPD/aura-try") $(awk '$1 == "kind" { print $2 }' "$STATE/release/trial")" "armed m1n1/boot-ctxr-try.bin  stage2"
 rm -f "$STATE"/release/boots/*-"$BOOT_ID"; sb /usr/local/lib/omarchy-k114s/k114s-boot-success >/dev/null; out=$(rel auto)
-ok "a record written in the boot that made the switch proves nothing (it started from the old Stage 2)" "$(grep -c '^proven' "$STATE/release/trial") $(echo "$out" | grep -c 'on trial, not booted yet')" "0 1"
-out=$(rel abandon); ok "abandon puts the proven Stage 2 back and freezes it" "$? $(sum "$ESPD/m1n1/boot-ctxr.bin") $(test -s "$S/etc/omarchy-k114s/stage2-frozen"; status)" "0 $STAGE2_R2C 0"
-out=$(rel stage2 --dtb packaged); boot EFI/Linux/omarchy_linux-aurora.efi "$KNEW"; out=$(rel auto)
-ok "after a good boot with the new Stage 2: proven" "$(grep -c '^proven' "$STATE/release/trial")" 1
+ok "a record written in the boot that armed it proves nothing" "$(grep -c '^proven' "$STATE/release/trial") $(echo "$out" | grep -c 'is armed for the next start')" "0 1"
+HANG=1 boot EFI/Linux/omarchy_linux-aurora.efi "$KNEW"
+ok "a trial start that hangs: the watchdog's start comes through the proven file, and the trial is spent" "$(echo "$out" | grep -c 'boot recorded as ok: image EFI/Linux/omarchy_linux-aurora.efi, Stage 2 m1n1/boot-ctxr.bin,') $(head -n 1 "$ESPD/aura-try")" "1 spent"
+out=$(rel auto); ok "auto says so; nothing proven changed" "$(echo "$out" | grep -c 'this start did not come through m1n1/boot-ctxr-try.bin') $(sum "$ESPD/m1n1/boot-ctxr.bin") $(grep -c '^proven' "$STATE/release/trial")" "1 $STAGE2_R2C 0"
+out=$(rel stage2 --rearm); ok "stage2 --rearm arms it again" "$? $(head -n 1 "$ESPD/aura-try")" "0 armed"
+boot EFI/Linux/omarchy_linux-aurora.efi "$KNEW"
+ok "the trial start: recorded ok through the candidate, and armed again for the next start" "$(echo "$out" | grep -c 'Stage 2 m1n1/boot-ctxr-try.bin (a one-boot trial)') $(head -n 1 "$ESPD/aura-try")" "1 armed"
+out=$(rel auto); ok "proven, and not switched in the run that proved it" "$(grep -c '^proven' "$STATE/release/trial") $(sum "$ESPD/m1n1/boot-ctxr.bin")" "1 $STAGE2_R2C"
+boot EFI/Linux/omarchy_linux-aurora.efi "$KNEW"; : > "$S/var/log/notify.log"; out=$(rel auto)
+ok "a later run after the second good start through it: it is the configured Stage 2 and the proven one" "$(sum "$ESPD/m1n1/boot-ctxr.bin") $(awk '$1 == "stage2_sha256" { print $2 }' "$STATE/release/known-good") $(test -e "$STATE/release/trial"; status) $(test -e "$S/etc/omarchy-k114s/stage2-frozen"; status)" "$CAND $CAND 1 1"
+ok "the old file is kept on the EFI partition for the way back from macOS" "$(sum "$ESPD/k114s-repair/known-good/boot-ctxr.bin") $(cut -c1-64 "$ESPD/k114s-repair/known-good/boot-ctxr.bin.sha256")" "$STAGE2_R2C $STAGE2_R2C"
+ok "it tells how to go back from macOS; the marker is gone" "$(echo "$out" | grep -c -E 'start macOS|k114s-repair/known-good/boot-ctxr.bin  over') $(test -e "$ESPD/aura-try"; status)" "2 1"
 boot EFI/Linux/omarchy_linux-aurora.efi "$KNEW"; out=$(rel auto)
-ok "after the second: it is the proven Stage 2" "$(awk '$1 == "stage2_sha256" { print $2 }' "$STATE/release/known-good") $(test -e "$STATE/release/trial"; status) $(test -e "$S/etc/omarchy-k114s/stage2-frozen"; status)" "$STAGE2_NEW 1 1"
+ok "the next start comes through the configured file; the candidate leaves the ESP" "$(test -e "$TRY"; status) $(rel status | grep -c 'intact and running')" "1 1"
+STAGE2_NEW=$CAND
 
 # --- the steady state: the proven image is the standard one, and the next kernel arrives ----------------------------------
 held_before=$(state)

@@ -110,7 +110,7 @@ ok "copies are byte for byte" "$(sum "$set_dir/esp/m1n1/boot-ctxr.bin")" "$(sum 
 ok "every ESP file is hashed, copied or not" "$(grep -c -E 'vendorfw/firmware.cpio|EFI/Linux/omarchy_linux-aurora.efi' "$set_dir/esp-files.sha256")" 2
 ok "the ESP hashes verify against the ESP" "$(cd "$r/boot/efi" && sha256sum --quiet -c "$set_dir/esp-files.sha256" >/dev/null 2>&1; status)" 0
 ok "files no package owns are in extras.tar" "$(bsdtar -tf "$set_dir/extras.tar" | grep -c -E 'updates/hid-magicmouse.ko$|centauri/k114s-fw$|omarchy-j714s/update-boot-ctxr$|owner-boot-chain$|etc/default/limine$')" 5
-ok "state: booted image and Stage 2 hash" "$(grep -c -E "^booted image    EFI/Linux/omarchy_linux-aurora-k114s.efi$|^stage2 sha256   $(sum "$r/boot/efi/m1n1/boot-ctxr.bin")$" "$set_dir/state.txt")" 2
+ok "state: booted image and Stage 2 hash" "$(grep -c -E "^booted image    EFI/Linux/omarchy_linux-aurora-k114s.efi$|^stage2 sha256   $(sum "$r/boot/efi/m1n1/boot-ctxr.bin")   \(m1n1/boot-ctxr.bin, the configured Stage 2\)$" "$set_dir/state.txt")" 2
 ok "pacman.conf and the hold list are kept with it" "$(ls "$set_dir" | grep -c -x -E 'pacman.conf|holds.list|README.txt|packages.txt')" 4
 ok "nothing was written to the ESP" "$(cd "$r/boot/efi" && find . -type f -exec sha256sum {} + | LC_ALL=C sort | sha256sum)" "$esp_before"
 ok "the set is on the root filesystem, not the ESP" "$(case $set_dir in "$r"/boot/*) echo esp ;; *) echo root ;; esac)" root
