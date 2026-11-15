@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s candidate r3a: the proven r1 tree plus the r3 pieces that can be built without
+ * this Mac's own Apple device tree data.
+ *
+ *   r1             N1 Wi-Fi/Bluetooth, two USB-C host ports, SMC sensors (K114S_R1_N1, K114S_R1_USB)
+ *   usb            t6050-k114s-usb.dtsi: no section defined, so no change (docs/r3-usb.md: the
+ *                  ports are idle by design, nothing in the tree is wrong)
+ *   sleep          t6050-k114s-sleep.dtsi: apple,internal-panel on the boot framebuffer (the
+ *                  connector becomes eDP-1) and apple,always-on on the three PMP power domains
+ *                  (they stay disabled here, so that line does nothing yet)
+ *   sound          NOT in this tree. The jack and microphone fragment needs this Mac's PMP values
+ *                  (t6050-k114s-pmp-tunables.dtsi, generated from its Apple device tree as root).
+ *                  Build t6050-k114s-r3a-sound.dts, which defines K114S_R3A_SOUND, once that file
+ *                  exists. Speakers are never part of it.
+ *   display, GPU   NOT in this tree (candidate r3b: needs the new Stage 2 loader for the panel).
+ *
+ * Nothing here has run on a K114s.
+ */
+#define K114S_R1_N1
+#define K114S_R1_USB
+#include "t6050-k114s-common.dtsi"
+#include "t6050-k114s-usb.dtsi"
+#include "t6050-k114s-sleep.dtsi"
+#ifdef K114S_R3A_SOUND
+#include "t6050-k114s-sound.dtsi"
+#endif

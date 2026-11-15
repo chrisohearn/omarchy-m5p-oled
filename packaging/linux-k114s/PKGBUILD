@@ -1,0 +1,66 @@
+# Maintainer: none (K114s r3a candidate; built from a finished kernel tree, see docs/r3-integration.md)
+#
+# linux-k114s: the K114s r3a kernel as its own package, beside linux-aurora and not replacing it.
+#
+# Everything lands in /usr/lib/modules/<release>/ and the release string (7.3.0-17.v272-4-k114s-r3a-ARCH)
+# differs from linux-aurora's (7.3.0-17.v272-4-ARCH), so no file is shared with linux-aurora and the
+# running kernel's module directory stays package-owned (linux-modules-cleanup.service leaves it alone).
+# The layout is Arch's: vmlinuz (the raw arm64 Image), pkgbase, modules.*, kernel/, dtbs/ (flat).
+# The system's hooks do the rest: pkgbase names the mkinitcpio preset, and the Limine hook builds
+# omarchy_linux-k114s.efi for it.
+#
+# This file does not compile anything. It packages a finished build:
+#   K114S_SRC   the kernel source tree      (default $K114S_BUILD_ROOT/src/r3a)
+#   K114S_OUT   its output directory        (default $K114S_BUILD_ROOT/build/r3a)
+# with the toolchain of $K114S_BUILD_ROOT (default ~/k114s-build; env.sh and bin/kmake there).
+#   source ~/k114s-build/env.sh; cd packaging/linux-k114s
+#   BUILDDIR=... PKGDEST=... makepkg -f --nodeps --skipinteg      (no root; takes about a minute)
+
+pkgname=linux-k114s
+pkgver=7.3.0.r3a
+pkgrel=1
+pkgdesc='K114s (MacBook Pro 14-inch, M5 Pro) kernel candidate r3a and its modules; installs beside linux-aurora'
+arch=('aarch64')
+url='https://github.com/chrisohearn/omarchy-m5p-oled'
+license=('GPL-2.0-only')
+depends=('coreutils' 'kmod' 'initramfs')
+options=('!strip' '!debug' '!lto' '!emptydirs')
+# no source=(): the kernel tree and its output directory are named by the environment
+_root=${K114S_BUILD_ROOT:-$HOME/k114s-build}
+_src=${K114S_SRC:-$_root/src/r3a}
+_out=${K114S_OUT:-$_root/build/r3a}
+
+package() {
+  local kernel_release modpath
+  kernel_release=$(<"$_out/include/config/kernel.release")
+  case $kernel_release in
+    *-ARCH) ;;
+    *) echo "release '$kernel_release' does not end in -ARCH (boot bundle discovery needs it)" >&2; return 1 ;;
+  esac
+  [[ $kernel_release != 7.3.0-17.v272-4-ARCH ]] || { echo "release equals linux-aurora's" >&2; return 1; }
+  modpath="$pkgdir/usr/lib/modules/$kernel_release"
+
+  # vmlinuz: the uncompressed Image, as linux-aurora ships it
+  install -Dm644 "$_out/arch/arm64/boot/Image" "$modpath/vmlinuz"
+
+  # modules, stripped of debug info; kbuild runs depmod for the new tree
+  ( cd "$_src" && "$_root/bin/kmake" O="$_out" INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
+      DEPMOD=/usr/bin/depmod modules_install )
+  # the build and source links point into the build area
+  rm -f "$modpath/build" "$modpath/source"
+
+  # device trees, flat, and exactly the 46 that linux-aurora ships (dtbs.list): update-m1n1 puts every
+  # dtbs/*.dtb of the newest -ARCH directory into m1n1/boot.bin, so the set must not grow.
+  # t6050-k114s.dtb here is the kernel tree's own; the Stage 2 (boot-ctxr.bin) carries the pinned
+  # tree built from dts/, not this file.
+  install -dm755 "$modpath/dtbs"
+  while read -r dtb; do
+    install -m644 "$_out/arch/arm64/boot/dts/apple/$dtb" "$modpath/dtbs/$dtb"
+  done < "$startdir/dtbs.list"
+
+  # names the mkinitcpio preset and the Limine entry (the UKI becomes omarchy_linux-k114s.efi)
+  echo "$pkgname" | install -Dm644 /dev/stdin "$modpath/pkgbase"
+
+  # the file the kernel and modules were built from, for the record
+  install -Dm644 "$_out/.config" "$pkgdir/usr/share/$pkgname/config-$kernel_release"
+}

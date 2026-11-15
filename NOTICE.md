@@ -21,9 +21,27 @@ and keep their authors and licenses.
 | `build/validate-config.py` | method of betizzel/omarchy-m5 `installer/recipes/linux-aurora-j714s/validate-config.py` (`886269a`), rewritten and extended | betizzel and omarchy-m5 contributors (method) | MIT |
 | `patches/linux/config/k114s-required.config` | this repository; the lines marked `[recipe]` restate betizzel/omarchy-m5 `j714s-required.config` | this repository; betizzel and omarchy-m5 contributors for those lines | MIT |
 | `patches/linux/config/k114s-r3.config` | this repository; option names and help texts are the Linux kernel's, and the selection was compared with aurora-silicon/alarm-aurora's `linux-aurora` configuration (kernel pin `d89d8c0c`) | this repository | MIT |
+| `patches/linux/sleep-lid/0001`, `0002` | aurora-silicon/linux pull request 1647, commits `aa16d423cf8a`, `70bf8ed1867b` | Jens Axboe; Thomas Glanzmann | GPL-2.0 (Linux kernel) |
+| `patches/linux/sleep-lid/0003` | this repository (K114s admission, six lines) | this repository | GPL-2.0 (Linux kernel) |
+| `patches/linux/sleep-lid/0004` | aurora-silicon/linux pull request 1688, commit `1006491abe42`; first in omacom/linux-aurora `9dee12b1266c` | ed (edimoldovan) | GPL-2.0 (Linux kernel) |
+| `patches/linux/sleep-lid/0005`, `0006` | aurora-silicon/linux pull request 1688, commits `76c5ea390d74`, `67e63a577af4` | Joshua Warren | GPL-2.0 (Linux kernel); device tree GPL-2.0+ OR MIT |
+| `patches/linux/sleep-lid/0007` | aurora-silicon/linux pull request 1615, commit `089b082fa329` | Joshua Warren | GPL-2.0 (Linux kernel) |
+| `patches/linux/sleep-lid/0008` | aurora-silicon/linux pull request 1789, commit `f61eb4550a95` | Jens Axboe; Thomas Glanzmann | GPL-2.0+ OR MIT (device tree) |
+| `patches/linux/sleep-lid/0009`, `0010` | aurora-silicon/linux pull request 1844, commits `41c359da8175`, `788441e0890e` | Erik Bourget; Diljit Singh | GPL-2.0 (Linux kernel) |
+| `patches/linux/sound/0001` | aurora-silicon/linux commit `45f4de446485`, pull request 1648 | Jens Axboe | GPL-2.0 (Linux kernel) |
+| `patches/linux/sound/0002`, `0003` | aurora-silicon/linux commits `ad10208a01c6`, `48243e8f3d32`, pull request 1787 | Jens Axboe | GPL-2.0 (Linux kernel) |
+| `patches/linux/sound/0004` | this repository (the K114 card, speakers off) | this repository | GPL-2.0 (Linux kernel) |
+| `patches/linux/display-gpu/0003`-`0006` | aurora-silicon/linux pull request 1868, commits `a4a0fb67bfe8`, `10f14b7ff802`, `3176918ba21e`, `84b3b93c04e6` | Joshua Warren (joshuaswarren) | GPL-2.0 (Linux kernel) |
+| `patches/linux/display-gpu/0009`, `0010` | aurora-silicon/linux pull request 1648, commits `3adc985b5a61`, `8f418a490a97` | Thomas Glanzmann | GPL-2.0 (Linux kernel; the binding files' own SPDX lines) |
+| `dts/t6050-k114s-sleep.dtsi`, `dts/t6050-k114s-sound.dtsi`, `dts/t6050-k114s-usb.dtsi`, `dts/t6050-k114s-r3*.dts` | K114s ports of nodes of `t6050-k116s.dts` (pull requests 1648, 1688, 1789) | Jens Axboe, Joshua Warren, The Asahi Linux Contributors; K114s port here | GPL-2.0+ OR MIT |
 
 Nothing of Apple's is in this repository. Firmware is read from Apple's own restore image on the
 owner's machine and never redistributed.
 
 Commit trailers name the AI model that co-wrote a change. No `Signed-off-by` or `Tested-by` line
 is added on anyone's behalf.
+
+In `patches/linux/sleep-lid/` and `patches/linux/display-gpu/`, some upstream authors' e-mail addresses in the `From:`
+and `Signed-off-by:` lines are replaced by placeholders, because this repository publishes no personal e-mail
+addresses (`build/check-publishable.sh`). Names are unchanged and each patch names the upstream commit that
+carries the address. `packaging/linux-k114s/` and `build/make-stage2.sh` are this repository's own (MIT).
