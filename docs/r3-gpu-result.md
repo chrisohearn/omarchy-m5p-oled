@@ -25,11 +25,11 @@ Evidence labels: owner-observed, agent-run.
 | --- | --- | --- |
 | The tree against this Mac's Apple device tree (`tests/k114s-adt-display-facts.py --dtb`) | every GPU register and interrupt matches | agent-run, before the boot |
 | Loader | admits the GPU: firmware build 26B8125, node `status = "okay"` | agent-run (`/proc/device-tree`) |
-| Kernel | `aurora 2300000000.gpu: GPU firmware: 27.2 (26B8125), G17S`, `M5 primary/secondary initdata acknowledged`, `[drm] Initialized aurora 1.0.0`; `/dev/dri/renderD128` | agent-run (`dmesg`), four boots |
+| Kernel | `aurora 2300000000.gpu: GPU firmware: 27.2 (26B8125), G17S`, `M5 primary/secondary initdata acknowledged`, `[drm] Initialized aurora 1.0.0`; `/dev/dri/renderD128` | agent-run (`dmesg`), two GPU boots on 2026-11-14 and the re-armed boot of 2026-11-15 |
 | Off-screen probe | OpenGL renderer `Apple M5 Pro (G17S B1)`; Vulkan device `Apple M5 Pro (G17S B1)`; through zink: `zink Vulkan 1.4(Apple M5 Pro (G17S B1) (AURORA_BOREALIS))` | agent-run |
 | Nested Hyprland on the native OpenGL driver | ran 40 s, three clients on the GPU's DRM device, about 4 % of a core, no kernel messages | agent-run |
 | Desktop session on the native OpenGL driver | Omarchy's renderer check reports `Apple M5 Pro (G17S B1)`; Hyprland about 6 % of a core, against about 300 % on llvmpipe; animations, blur and shadows back on | agent-run; "worked" owner-observed |
-| Kernel log during all of it | no GPU fault, timeout or error line | agent-run |
+| Kernel log during all of it | no GPU fault or timeout line. Every GPU boot first logs `unsupported GPU firmware build ... GPU firmware image not admitted: EINVAL` for the 26C5035r candidate: that refusal is expected without aura #230 (`patches/aura/0002`), and 26B8125 is admitted on the next line | agent-run |
 
 Not tested: suspend (blocked on purpose, see below), sustained GPU load, power and thermals,
 video decode, Vulkan clients, external displays.
@@ -38,9 +38,11 @@ video decode, Vulkan clients, external displays.
 
 The installed loader has a one-boot trial: a file `aura-try` at the root of the EFI partition
 holding `armed\n<path>\n` makes the first loader stage boot `<path>` once in place of the
-configured Stage 2. It marks the file `spent` before it reads the image, runs the trial under its
-178-second watchdog and tells Linux through `chosen/aurora,trial`. A trial that hangs is reset onto
-the configured image. So the proven `m1n1/boot-ctxr.bin` (sha256 `45a5dbef…`) was never
+configured Stage 2. It marks the file `spent` before it reads the image and tells Linux through
+`chosen/aurora,trial`. The aura source arms a 178-second trial watchdog, but on this Mac the loader
+logged `WDT: could not arm the trial watchdog` (agent-run, `/dev/mtd1ro`), so a trial that hangs
+may need a forced power-off (hold the power button). Because the file is already `spent`, the next
+boot then uses the proven Stage 2. So the proven `m1n1/boot-ctxr.bin` (sha256 `45a5dbef…`) was never
 overwritten: the candidate sits beside it as `m1n1/boot-ctxr-r3-gpu.bin`.
 
 `linux/gpu-desktop/stage2-rearm` (with `k114s-stage2-rearm.service`) re-arms the trial at every
@@ -81,14 +83,25 @@ with a correct environment. The native driver is what runs now.
 - **No suspend.** `suspend.target`, `hibernate.target`, `hybrid-sleep.target` and
   `suspend-then-hibernate.target` are masked. Without the mailbox-interrupt patches (#1844) a
   suspend with the GPU active is expected to hang or panic, and the refusal that stops suspend on
-  this Mac today comes too late to protect the GPU.
+  this Mac today comes too late to protect the GPU (inference from the source, not observed).
+  With suspend masked, closing the lid does not sleep: shut down before packing the Mac.
 - The proven Stage 2 stays the configured one.
 - The driver prints "Experimental M5 HAL300 integration enabled; general rendering is
   unqualified". Treat rendering faults as possible.
+- The panel is an OLED on the boot framebuffer with no brightness control: avoid leaving a static
+  image on screen for long (see docs/r3-display-gpu.md on burn-in).
 
-## Install (root), as done on the machine
+## Install (root)
+
+This is a one-owner, one-machine result on an experimental, unqualified driver. The scripts here are
+the generalised form of what ran on the Mac. The Stage 2 candidate is valid only for loader
+`1.0.0b13-g22b71758-dirty` on Apple firmware 27.2 (26B8125). Build it from the loader prefix of the
+proven Stage 2 (the first 3,997,696 bytes, as `stage2_split` in `macos/tools/k114s_repair.py`
+reads it), the built `t6050-k114s-r3-gpu.dtb`, and the gzip U-Boot trailer of the live `boot.bin`;
+on this Mac the result was 4,440,237 bytes, sha256 `9825a10317866865b49d26bc1df2d0d04a818d385ca62c1a3ce81d96f3d6b8fc`.
 
 ```sh
+install -d /etc/systemd/user-environment-generators /etc/omarchy-k114s /var/lib/k114s-recovery /usr/local/lib/omarchy-k114s
 install -m 755 linux/gpu-desktop/70-k114s-gpu-desktop /etc/systemd/user-environment-generators/
 install -m 644 linux/gpu-desktop/70-k114s-greeter-software.conf /etc/sddm.conf.d/
 install -m 755 linux/gpu-desktop/stage2-rearm linux/gpu-desktop/gpu-desktop-restart /usr/local/lib/omarchy-k114s/
@@ -97,14 +110,34 @@ systemctl daemon-reload && systemctl enable --now k114s-stage2-rearm.service
 systemctl mask suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
 # the Stage 2 candidate next to the proven one, then the trial:
 cp boot-ctxr-r3-gpu.bin /boot/efi/m1n1/ && sha256sum /boot/efi/m1n1/boot-ctxr-r3-gpu.bin
-printf '%s\n%s\n' m1n1/boot-ctxr-r3-gpu.bin <sha256> > /etc/omarchy-k114s/stage2-trial
+printf '%s\n%s\n' m1n1/boot-ctxr-r3-gpu.bin "$(sha256sum < /boot/efi/m1n1/boot-ctxr-r3-gpu.bin | cut -c1-64)" > /etc/omarchy-k114s/stage2-trial
 printf 'armed\nm1n1/boot-ctxr-r3-gpu.bin\n' > /boot/efi/aura-try && sync -f /boot/efi
 ```
 
-After the GPU boot: `touch ~/.config/k114s-gpu-desktop`, then `gpu-desktop-restart` as root.
+After the GPU boot: `touch ~/.config/k114s-gpu-desktop`, then restart the desktop from outside the
+session, because the restart ends every process of the user (save your work first):
+
+```sh
+sudo systemd-run --no-block /usr/local/lib/omarchy-k114s/gpu-desktop-restart
+```
+
+On the Mac it ran this way with a timed fallback beside it
+(`sudo systemd-run --on-active=230 /usr/local/lib/omarchy-k114s/gpu-desktop-revert`, which moved the
+opt-in aside unless the owner confirmed in time). If the desktop is black, switch to a text console
+(Ctrl+Option+Fn+F2), log in, `rm ~/.config/k114s-gpu-desktop`, and run the restart command above.
 Check with `omarchy-hw-software-rendering --print` (exit status 1 and an "Apple M5 Pro" renderer
 mean the GPU). Remove `70-k114s-greeter-software.conf` before the display coprocessor step, whose
 greeter must use the GPU.
+
+### Undo
+
+```sh
+rm -f /etc/omarchy-k114s/stage2-trial /boot/efi/aura-try && sync -f /boot/efi   # next boot: the proven Stage 2
+systemctl disable k114s-stage2-rearm.service
+rm -f /etc/systemd/user-environment-generators/70-k114s-gpu-desktop /etc/sddm.conf.d/70-k114s-greeter-software.conf
+systemctl unmask suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+rm -f ~cohearn/.config/k114s-gpu-desktop   # as the user: rm ~/.config/k114s-gpu-desktop
+```
 
 ## Still to do
 

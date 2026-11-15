@@ -26,8 +26,9 @@ and keep their authors and licenses.
 | `build/make_k114s_ftab.py` | calls betizzel/omarchy-m5's `omarchy_centauri.py` unchanged | this repository | MIT |
 
 In `patches/linux/display-gpu/`, three authors' e-mail addresses in the `From:` and `Signed-off-by:`
-lines are replaced by `address-in-upstream-commit@localhost`, because this repository publishes no
-personal e-mail addresses (`build/check-publishable.sh`). The names are unchanged and each patch
+lines are replaced by `address-in-upstream-commit@localhost`, the addresses the publish check
+(`build/check-publishable.sh`) matches. Some upstream kernel authors' addresses that it does not
+match stay as they appear in their public upstream commits. The names are unchanged and each patch
 names the upstream commit that carries the address.
 
 Nothing of Apple's is in this repository. Firmware is read from Apple's own restore image on the

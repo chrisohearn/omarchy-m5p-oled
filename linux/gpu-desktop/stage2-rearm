@@ -1,7 +1,7 @@
 #!/bin/sh
-# K114s: keep booting a Stage 2 candidate as a watchdog-protected one-boot trial (aura-try), boot after boot,
+# K114s: keep booting a Stage 2 candidate as a one-boot trial (aura-try), boot after boot,
 # for as long as each trial boot succeeds. Runs at shutdown. A boot that did not come up through the trial
-# (the trial hung and the watchdog fell back, or the owner forced power off) is NOT re-armed: the Mac then
+# (the trial hung and the owner forced power off; the loader marks the file spent before it boots) is NOT re-armed: the Mac then
 # stays on the configured, proven Stage 2 until someone arms it again.
 C=/etc/omarchy-k114s/stage2-trial; E=/boot/efi; L=/var/lib/k114s-recovery/stage2-trial.log
 [ -s "$C" ] || exit 0

@@ -4,7 +4,13 @@ Worker notes for branch `r3/display-gpu`, 2026-11-14. Scope: move the K114s pane
 framebuffer to the display coprocessor (DCP: native mode, 120 Hz, `apple-drm`) and turn on the GPU
 (AGX G17S), both at the level the 16-inch twin (K116s) has upstream.
 
-**Nothing in this branch has run on a K114s.** Everything below is source review, compilation and
+> **Status (2026-11-15).** Step 2 (the GPU tree on the installed loader and the running kernel)
+> has run on the K114s and works: see [r3-gpu-result.md](r3-gpu-result.md). Steps 1, 3 and 4, both
+> patch series and the r3 loader are an **untested design**. Do not run step 3 or 4 as written:
+> their macOS rollback for loader variants is not implemented, and the loader's one-boot trial
+> (`aura-try`) is the intended route. The text below is the design as written before step 2 ran.
+
+**When this was written, nothing in this branch had run on a K114s.** Everything below is source review, compilation and
 replica tests, plus read-only observations on the running machine. Evidence labels: *owner-observed*,
 *agent-run* (a command the agent ran on this Mac or in its build area), *replica* (software test with
 no Apple hardware or data behind it).
@@ -305,7 +311,7 @@ Notes on the steps:
 - Stop conditions: any `refused` in step 4, `RTKit: co-processor has crashed`, `DCP has crashed`, an
   SError or Oops. Roll back one step and keep the log.
 
-## Root steps for the lead
+## Maintainer procedure (design, not yet run)
 
 Read-only, now:
 

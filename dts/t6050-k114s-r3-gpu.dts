@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0+ OR MIT
 /*
  * K114s candidate r3, GPU step: r1 plus the GPU only. The panel stays the boot framebuffer.
- * Not booted on a K114s. See docs/r3-display-gpu.md.
+ * Booted on a K114s through aura-try since 2026-11-14: see docs/r3-gpu-result.md.
  */
 #define K114S_R1_N1
 #define K114S_R1_USB
