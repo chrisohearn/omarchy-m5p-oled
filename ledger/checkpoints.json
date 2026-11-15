@@ -92,12 +92,6 @@
       "note": "docs/r3-gpu-result.md. Suspend stays masked until the mailbox-interrupt patches are in"
     },
     {
-      "id": "keyfile-unlock",
-      "what": "LUKS key file on the ESP so reboots need no passphrase (owner's decision 2026-11-14); passphrase slot kept; fstab nofail for /boot/efi; tries=4",
-      "applied": "2026-11-14 17:25 MST",
-      "hardware_verified": "2026-11-15 02:14 MST: unlocked with no prompt, key mount released, /boot/efi mounted (agent-run)"
-    },
-    {
       "id": "r3a",
       "what": "Next kernel: Bluetooth RFCOMM, ip6 netfilter matches, tipd async probe, #1647 s2idle + apple,k114s, #1688, #1868 120 Hz gate, #1844 0009, sound kernel bits",
       "evaluated": "2026-11-14",

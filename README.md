@@ -22,7 +22,6 @@ on the Mac by the AI agent). States not yet on the Mac (*integrated*, *built*, *
 | Bluetooth controller | up (agent-run); hands-free profiles need the r3a kernel (built, not booted) |
 | GPU (G17S): OpenGL, Hyprland on the GPU | working (owner-observed, agent-run); Vulkan device enumerates, Vulkan clients not tested: [docs/r3-gpu-result.md](docs/r3-gpu-result.md) |
 | Battery, voltages | reading (agent-run); the fans read 0 RPM at idle and have not been read spinning yet |
-| Disk unlock without a passphrase | working (agent-run): the owner's choice, a key file on the unencrypted EFI partition, so the disk encryption no longer protects against someone holding the Mac; the passphrase slot is kept |
 | Updates on Omarchy's Edge channel | guarded after one bad refresh, and paused for now: the space guard refuses every package change while the EFI partition has less than 88 MB free (87 MB today) (agent-run): [incident](docs/incident-2026-11-14-edge-refresh.md) |
 | Headphone jack, microphones | integrated (on main, not installed; goes in with the r3a kernel) |
 | Native panel mode, 120 Hz, brightness | designed, not run (display coprocessor step: [docs/r3-display-gpu.md](docs/r3-display-gpu.md)) |
