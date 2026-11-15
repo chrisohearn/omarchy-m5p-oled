@@ -86,9 +86,14 @@ for t in t6050-k114s-r3-sound t6050-k114s-r3-sound-nomics; do
   expect "dts: $t compiles against the base tree" build "$t" "$here/dts"
   expect "lint: $t passes the speaker-safety lint" python3 "$here/tests/lint-sound-dtb.py" "$W/$t.dtb"
 done
+# KTREE may itself hold this Mac's generated PMP file (the audio kernel tree does): run the refusal against
+# a symlink copy of the apple dts directory without it, so the test does not depend on KTREE's contents
 mv "$W/t6050-k114s-pmp-tunables.dtsi" "$W/pmp.keep"
+mkdir "$W/apple-nopmp"; for f in "$A"/*; do [ "$(basename "$f")" = t6050-k114s-pmp-tunables.dtsi ] || ln -s "$f" "$W/apple-nopmp/"; done
+A_REAL=$A; A=$W/apple-nopmp
 refuse "dts: the sound tree does not compile without this Mac's PMP file" build t6050-k114s-r3-sound "$here/dts"
-mv "$W/pmp.keep" "$W/t6050-k114s-pmp-tunables.dtsi"
+grep -q 'k114s-pmp-tunables' "$W/out" && ok "dts: ... and the refusal names the missing PMP file" || { no "dts: the refusal is not about the PMP file"; sed 's/^/     /' "$W/out"; }
+A=$A_REAL; mv "$W/pmp.keep" "$W/t6050-k114s-pmp-tunables.dtsi"
 build t6050-k114s-r3-sound "$here/dts" >/dev/null 2>&1   # the gate check below reads this tree again
 
 mkdir "$W/bad"
@@ -199,7 +204,7 @@ else:
 PY
   expect "gate: speakerguardd v2's own reader finds no speaker card in the tree" python3 -I "$W/gate.py" "$gatelib" "$W/t6050-k114s-r3-sound.dtb" "$W/dt"
   [ -d "$W/dt/sound" ] && [ ! -e "$W/dt/sound/dai-link@1" ] &&
-    ok "gate: /sound exists and /sound/dai-link@1 does not (the unit condition linux/audio installs)" || no "gate: unit condition paths"
+    ok "gate: /sound exists and /sound/dai-link@1 does not (what the gate and tree-check read)" || no "gate: unit condition paths"
   mkdir -p "$W/dtroot/proc"; ln -s "$W/dt" "$W/dtroot/proc/device-tree"
   expect "guard: tree-check (what WirePlumber runs) accepts the compiled Stage A tree" bash "$here/linux/audio/tree-check" --root "$W/dtroot"
 else
