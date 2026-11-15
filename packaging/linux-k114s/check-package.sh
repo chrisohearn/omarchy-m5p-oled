@@ -1,13 +1,17 @@
 #!/bin/bash
 # Checks of a built linux-k114s package that need no root and change nothing:
 #   - one release directory under usr/lib/modules, ending in -ARCH, different from linux-aurora's
-#   - vmlinuz, pkgbase (= linux-k114s), modules.dep, dtbs/t6050-k114s.dtb present; no build/source links
+#   - the package name matches the candidate of the release (linux-k114s for -k114s-r3a-ARCH, linux-k114s-r3b
+#     for -k114s-r3b-ARCH); pkgbase in .PKGINFO and the module directory's pkgbase file equal it, and the
+#     config lies under usr/share/<that name>/
+#   - vmlinuz, modules.dep, dtbs/t6050-k114s.dtb present; no build/source links
 #   - dtbs are exactly the names in dtbs.list (update-m1n1 puts all of them into m1n1/boot.bin)
 #   - every .ko has the vermagic of the release; modinfo reads it with the package's own depmod data
 #   - depmod -a over the package tree reports no error and no unresolved symbol (-e)
 #   - no file in common with an installed package of the other kernel (pacman -Qlq linux-aurora), only directories
 #   - the kernel inside vmlinuz carries the same release string
 # usage: check-package.sh PACKAGE.pkg.tar.zst [OTHER-KERNEL-PACKAGE=linux-aurora] [Module.symvers]
+# Run it once per other kernel (linux-aurora, and linux-k114s for an r3b package): each must be installed.
 # The symbol check needs the build's Module.symvers (default $K114S_BUILD_ROOT/build/${K114S_CAND:-r3a}/Module.symvers); without it only plain depmod -a runs.
 set -u
 pkg=${1:?usage: check-package.sh PACKAGE.pkg.tar.zst [other kernel package] [Module.symvers]}; other=${2:-linux-aurora}
@@ -25,7 +29,18 @@ if pacman -Q "$other" >/dev/null 2>&1; then
   [ ! -s "$w/common" ] && ok "no file in common with $other" || { no "files in common with $other:"; head "$w/common"; }
 fi
 [ -f "$m/vmlinuz" ] && ok "vmlinuz $(stat -c %s "$m/vmlinuz") bytes" || no "no vmlinuz"
-[ "$(cat "$m/pkgbase" 2>/dev/null)" = linux-k114s ] && ok "pkgbase is linux-k114s" || no "pkgbase"
+info() { sed -n "s/^$1 = //p" "$w/.PKGINFO"; }
+case $rel in
+  *-k114s-r3b-ARCH) want=linux-k114s-r3b ;;
+  *-k114s-r3a-ARCH) want=linux-k114s ;;
+  *) want= ;;
+esac
+name=$(info pkgname); base=$(info pkgbase)
+[ -n "$want" ] && [ "$name" = "$want" ] && ok "package name $name fits release $rel" || no "package name '$name' for release $rel (want '${want:-a k114s r3a or r3b release}')"
+[ "$base" = "$name" ] && ok "pkgbase $base equals the package name" || no "pkgbase '$base' is not the package name '$name'"
+[ "$(cat "$m/pkgbase" 2>/dev/null)" = "$name" ] && ok "module directory pkgbase file is $name" || no "module directory pkgbase file is '$(cat "$m/pkgbase" 2>/dev/null)', not '$name'"
+[ -f "$w/usr/share/$name/config-$rel" ] && [ "$(ls "$w/usr/share")" = "$name" ] && ok "config at usr/share/$name/config-$rel" || no "config not (only) at usr/share/$name/config-$rel"
+[ "$other" != "$name" ] || no "the other kernel package is this package's own name ($name)"
 [ -s "$m/modules.dep" ] && [ -s "$m/modules.builtin" ] && ok "modules.dep and modules.builtin present" || no "modules.dep / modules.builtin"
 [ -z "$(find "$w" -type l)" ] && ok "no symbolic links (no build/source)" || { no "symbolic links:"; find "$w" -type l; }
 diff <(ls "$m/dtbs") "$here/dtbs.list" >/dev/null && ok "dtbs are exactly dtbs.list ($(wc -l < "$here/dtbs.list"))" || no "dtbs differ from dtbs.list"

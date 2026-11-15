@@ -12,6 +12,7 @@ has() { if printf '%s' "$2" | grep -q -- "$3"; then pass=$((pass+1)); echo "PASS
 sum() { (cd "$1" && find . -type f -exec sha256sum {} + | sort -k2 | sha256sum | cut -c1-16); }
 B=$W/bundle; E=$W/esp
 mkesp() { # $1: before (repair entry still first, default the path) | after (promoted: no repair) | aurora (after, plus the hook's linux-aurora entry in front)
+  #         | window (the display window of docs/r3-display-plan.md 4.4: after, plus the r3b image and its entry behind r3a's)
   rm -rf "$B" "$E"; mkdir -p "$B/tools" "$B/payload" "$E/EFI/Linux" "$E/m1n1" "$E/vendorfw" "$E/k114s-repair/backup-before-r1/m1n1"
   cp "$H"/../../macos/tools/k114s_repair.py "$H"/../../macos/tools/k114s_esp_tool.py "$B/tools/"; cp -r "$H"/../../macos/tools/asahi_firmware "$B/tools/"
   python3 -I - "$B" "$E" "$1" <<'PY'
@@ -49,7 +50,11 @@ aur = ""
 if layout == "aurora":
     a = b"the hook-built linux-aurora image stand-in"; w(E + "/EFI/Linux/omarchy_linux-aurora.efi", a)
     aur = "  //linux-aurora\n  protocol: efi\n  path: boot():/EFI/Linux/omarchy_linux-aurora.efi#%s\n" % hashlib.blake2b(a).hexdigest()
-folder = "/+Omarchy\ncomment: Omarchy\n" + aur + "  //linux-k114s\n  protocol: efi\n  path: boot():/EFI/Linux/omarchy_linux-k114s.efi#%s\n" % kh
+r3b = ""
+if layout == "window":
+    b = b"the r3b image stand-in"; w(E + "/EFI/Linux/omarchy_linux-k114s-r3b.efi", b)
+    r3b = "  //linux-k114s-r3b\n  protocol: efi\n  path: boot():/EFI/Linux/omarchy_linux-k114s-r3b.efi#%s\n" % hashlib.blake2b(b).hexdigest()
+folder = "/+Omarchy\ncomment: Omarchy\n" + aur + "  //linux-k114s\n  protocol: efi\n  path: boot():/EFI/Linux/omarchy_linux-k114s.efi#%s\n" % kh + r3b
 if layout == "before":
     w(E + "/EFI/Linux/omarchy_linux-aurora-k114s.efi", ri)
     w(E + "/limine.conf", (head + repair + folder).encode())
@@ -169,6 +174,43 @@ for bad in 's#omarchy_linux-aurora-k114s.efi#omarchy_linux-k114s.efi#' '/cmdline
 done
 mkesp aurora; rm "$E/k114s-repair/r2c/repair-uki.txt"; out=$($R restore-repair --esp-dir "$E" 2>&1)
 has "no record of the repair image on the ESP: stops" "$out" "cannot be checked"
+
+# --- the display window (docs/r3-display-plan.md 4.3 and 4.4): linux-aurora's image removed, r3b's beside r3a's ---------
+# The real ESP then has about 110.8 MB free against the 111.8 MB image plus the reserve: short, and no linux-aurora image
+# to make room. The synthetic image is a few bytes, so "short" is faked as 1 MB free (below the 8 MiB reserve alone).
+WINDOW_FREE=1000000
+mkesp window; before=$(sum "$E")
+out=$($R status --esp-dir "$E" 2>&1)
+has "window: status reads the path default, r3a" "$out" "Limine default entry:  Omarchy/linux-k114s -> linux-k114s (entry 2)"
+has "window: status says the r3a image is the Linux image" "$out" "omarchy_linux-k114s.efi is"
+ok "window: status wrote nothing" "$(sum "$E")" "$before"
+out=$(RF $WINDOW_FREE restore-repair --check --esp-dir "$E" 2>&1)
+has "window: --check reads the space as short, with nothing to remove" "$out" "NOT ENOUGH, and no omarchy_linux-aurora.efi to remove"
+has "window: --check ends short of space" "$out" "restore-repair check: short of space."
+ok "window: --check wrote nothing" "$(sum "$E")" "$before"
+out=$(RF $WINDOW_FREE restore-repair --esp-dir "$E" 2>&1)
+has "window: restore-repair refuses" "$out" "no omarchy_linux-aurora.efi to remove; nothing written"
+ok "window: the refusal wrote nothing" "$(sum "$E")" "$before"
+out=$($R default aurora --esp-dir "$E" 2>&1); has "window: default aurora stops (no such entry)" "$out" "has no entry Omarchy/linux-aurora"
+ok "window: default aurora wrote nothing" "$(sum "$E")" "$before"
+out=$($R stage2 r1 --esp-dir "$E" 2>&1); has "window: stage2 r1 works (Stage 2 suspect)" "$out" "Stage 2 is now: r1"
+# the manual edit of 4.3 (r3a image suspect only): the default points at r3b by hand
+mkesp window; sed -i 's#^default_entry: .*#default_entry: Omarchy/linux-k114s-r3b#' "$E/limine.conf"
+out=$($R status --esp-dir "$E" 2>&1)
+has "window, default edited to r3b: status reads the r3b entry" "$out" "Omarchy/linux-k114s-r3b -> linux-k114s-r3b (entry 3)"
+out=$($R default k114s --esp-dir "$E" 2>&1); ok "window: default k114s puts r3a back" "$(def)" "Omarchy/linux-k114s"
+# both suspect: the r3b image comes off first (its entry stays, dangling), then restore-repair has room (about 181 MB)
+mkesp window; rm "$E/EFI/Linux/omarchy_linux-k114s-r3b.efi"; cp "$E/limine.conf" "$W/conf.win"
+out=$(RF 181000000 restore-repair --check --esp-dir "$E" 2>&1)
+has "window, r3b image removed: --check passes" "$out" "restore-repair check passed."
+out=$(RF 181000000 restore-repair --esp-dir "$E" 2>&1)
+has "window, r3b image removed: restore-repair done" "$out" "Restored the repair entry as entry 1"
+ok "it put the bundle's repair image on the ESP" "$(cmp -s "$rimg" "$E/EFI/Linux/omarchy_linux-aurora-k114s.efi"; echo $?)" 0
+ok "the menu gains the saved block and default_entry 1; the dangling r3b entry stays" \
+  "$(diff "$W/conf.win" "$E/limine.conf" | grep -c '^<') $(def) $(grep -c '//linux-k114s-r3b' "$E/limine.conf")" "1 1 1"
+out=$($R status --esp-dir "$E" 2>&1)
+has "window, after restore-repair: status reads entry 1, the repair entry (as after P4b's restore)" "$out" "Limine default entry:  1 -> Omarchy K114s repair r1 (trackpad fix B) (entry 1)"
+has "window, after restore-repair: the repair entry is back" "$out" "Limine repair entry: yes"
 
 # --- the tool the Mac has before this change (911d43e9, commit 364598e) does not find the promoted ESP ----------------
 if O=$(git -C "$H" show 364598e:macos/tools/k114s_repair.py 2>/dev/null); then

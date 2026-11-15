@@ -47,7 +47,7 @@ def reg(*pairs):
     return b"".join(struct.pack("<QQ", addr - ARM_IO_OFFSET, size) for addr, size in pairs)
 
 
-def build(dtb, uuid=facts.R3_IMAGE, vm_size=0x300_0000_0000, drop_nits=False):
+def build(dtb, uuid=facts.R3_IMAGE, vm_size=0x300_0000_0000, drop_nits=False, swap_dcp_irqs=False):
     nodes = facts.parse_fdt(dtb)
     aliases = {k: v.split(b"\0", 1)[0].decode() for k, v in nodes["/aliases"].items()}
     dcp = aliases["dcp"]
@@ -60,6 +60,13 @@ def build(dtb, uuid=facts.R3_IMAGE, vm_size=0x300_0000_0000, drop_nits=False):
     mb = [facts.fdt_reg(nodes, n) for n in ("/soc/mailbox@2302600000", "/soc/mailbox@2302e00000")]
     irq = [facts.fdt_cells(nodes[n]["interrupts"]) for n in ("/soc/mailbox@2302600000", "/soc/mailbox@2302e00000")]
     coproc = dreg["coproc"]
+    # the ADT order of an ASC's mailbox interrupts: send-not-empty, send-empty, recv-not-empty, recv-empty,
+    # then the coprocessor's others
+    mbox = by_phandle[facts.fdt_cells(nodes[dcp]["mboxes"])[0]]
+    mirq = dict(zip(facts.strs_of(nodes[mbox]["interrupt-names"]), facts.fdt_cells(nodes[mbox]["interrupts"])[2::4]))
+    dcp_irqs = [mirq["send-not-empty"], mirq["send-empty"], mirq["recv-not-empty"], mirq["recv-empty"], 1040, 1041]
+    if swap_dcp_irqs:
+        dcp_irqs[0], dcp_irqs[1] = dcp_irqs[1], dcp_irqs[0]
 
     def dart(name, base, streams):
         return node(name, [("reg", reg(base)), ("vm-base", struct.pack("<Q", 0x100_0000_0000)),
@@ -79,7 +86,8 @@ def build(dtb, uuid=facts.R3_IMAGE, vm_size=0x300_0000_0000, drop_nits=False):
         ("#address-cells", cells(2)), ("#size-cells", cells(2)),
         ("ranges", struct.pack("<QQQ", 0, ARM_IO_OFFSET, 0x100_0000_0000)),
     ], [
-        node("dcp", [("reg", reg((coproc[0], 0x100000), dreg["iop-vbar"]))], [nub("dcp", uuid)]),
+        node("dcp", [("reg", reg((coproc[0], 0x100000), dreg["iop-vbar"])), ("interrupts", cells(*dcp_irqs))],
+             [nub("dcp", uuid)]),
         node("disp0", [("reg", reg(*(dreg["disp-%d" % i] for i in range(5)))), ("clock-ids", cells(361, 458))]),
         node("dcpext0", [("reg", reg((0x2_b2e0_0000, 0x4000)))], [nub("dcpext0", uuid)]),
         dart("dart-dcp", dart_dcp, (23,)),
@@ -126,7 +134,7 @@ def main():
             print(output)
 
     code, text = run(build(dtb), dtb_path)
-    expect("matching ADT: every comparison passes", code == 0 and "FAIL" not in text and text.count("  PASS  ") == 16, text)
+    expect("matching ADT: every comparison passes", code == 0 and "FAIL" not in text and text.count("  PASS  ") == 17, text)
     expect("matching ADT: the K116s image is reported as admitted", "the r3 loader (aura + pull request 226) admits it" in text, text)
     expect("matching ADT: translated through the arm-io ranges", re.search(r"coproc \(dcp reg\[0\]\)\s+0x48ae00000 \+", text) is not None, text)
     expect("matching ADT: brightness scale read", "1000 nits" in text, text)
@@ -143,6 +151,10 @@ def main():
     code, text = run(build(dtb, vm_size=0x10_0000_0000), dtb_path)
     expect("different DART window: comparison fails, exit 1", code == 1 and text.count("  FAIL  ") == 3, text)
 
+    code, text = run(build(dtb, swap_dcp_irqs=True), dtb_path)
+    expect("swapped dcp mailbox interrupts: one comparison fails, exit 1",
+           code == 1 and text.count("  FAIL  ") == 1 and "FAIL  dcp mailbox interrupts" in text, text)
+
     code, text = run(build(dtb, drop_nits=True), dtb_path)
     expect("no brightness scale: said so", "the loader refuses the hand-off without it" in text, text)
 
@@ -156,7 +168,7 @@ def main():
     code, text = run(broken, dtb_path)
     expect("unparsable ADT: falls back to a UUID scan", code == 1 and facts.R3_IMAGE in text, text)
 
-    print("ADT reader replica test:", "FAILED" if failures else "passed", "(%d checks)" % 14)
+    print("ADT reader replica test:", "FAILED" if failures else "passed", "(%d checks)" % 15)
     return 1 if failures else 0
 
 

@@ -7,7 +7,12 @@
 # running kernel's module directory stays package-owned (linux-modules-cleanup.service leaves it alone).
 # The layout is Arch's: vmlinuz (the raw arm64 Image), pkgbase, modules.*, kernel/, dtbs/ (flat).
 # The system's hooks do the rest: pkgbase names the mkinitcpio preset, and the Limine hook builds
-# omarchy_linux-k114s.efi for it.
+# omarchy_<pkgbase>.efi for it.
+#
+# Package names: r3a is linux-k114s (the installed default). r3b is linux-k114s-r3b, so pacman installs it
+# beside r3a instead of replacing it: its own pkgbase file (preset, UKI omarchy_linux-k114s-r3b.efi, Limine
+# entry Omarchy/linux-k114s-r3b) and its config under /usr/share/linux-k114s-r3b/ (docs/r3-display-plan.md
+# section 3.1). The two share no file.
 #
 # This file does not compile anything. It packages a finished build:
 #   K114S_CAND  the candidate, r3a or r3b   (default r3a, the one the runbook docs/r3-integration.md names;
@@ -18,12 +23,16 @@
 #   source ~/k114s-build/env.sh; cd packaging/linux-k114s
 #   BUILDDIR=... PKGDEST=... makepkg -f --nodeps --skipinteg      (no root; takes about a minute)
 
-pkgname=linux-k114s
 _cand=${K114S_CAND:-r3a}
-case $_cand in r3a) _rel=2 ;; r3b) _rel=1 ;; *) echo "K114S_CAND must be r3a or r3b" >&2; exit 1 ;; esac
+case $_cand in
+  r3a) pkgname=linux-k114s; _rel=2 ;;
+  r3b) pkgname=linux-k114s-r3b; _rel=1 ;;
+  *) echo "K114S_CAND must be r3a or r3b" >&2; exit 1 ;;
+esac
+pkgbase=$pkgname
 pkgver=7.3.0.$_cand
 pkgrel=$_rel
-pkgdesc="K114s (MacBook Pro 14-inch, M5 Pro) kernel candidate $_cand and its modules; installs beside linux-aurora"
+pkgdesc="K114s (MacBook Pro 14-inch, M5 Pro) kernel candidate $_cand and its modules; installs beside linux-aurora and the other K114s kernel"
 arch=('aarch64')
 url='https://github.com/chrisohearn/omarchy-m5p-oled'
 license=('GPL-2.0-only')
@@ -64,8 +73,8 @@ package() {
     install -m644 "$_out/arch/arm64/boot/dts/apple/$dtb" "$modpath/dtbs/$dtb"
   done < "$startdir/dtbs.list"
 
-  # names the mkinitcpio preset and the Limine entry (the UKI becomes omarchy_linux-k114s.efi)
-  echo "$pkgname" | install -Dm644 /dev/stdin "$modpath/pkgbase"
+  # names the mkinitcpio preset and the Limine entry (the UKI becomes omarchy_<pkgbase>.efi)
+  echo "$pkgbase" | install -Dm644 /dev/stdin "$modpath/pkgbase"
 
   # the file the kernel and modules were built from, for the record
   install -Dm644 "$_out/.config" "$pkgdir/usr/share/$pkgname/config-$kernel_release"

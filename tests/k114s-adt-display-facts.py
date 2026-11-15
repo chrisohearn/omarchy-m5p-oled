@@ -17,7 +17,8 @@ What it answers:
   1. Which display coprocessor (DCP) image did iBoot load? The loader hands the panel over only
      for an image it pins. Pull request 226 of aurora-silicon/aura pins the K116s image.
   2. Do the registers, streams and DART windows of the K114s tree match this machine's ADT?
-     (--dtb; the loader makes the same comparison at boot and refuses on a mismatch.)
+     (--dtb; the loader makes the same comparison at boot and refuses on a mismatch.) And the
+     display mailbox's four interrupts, which the loader does not compare?
   3. What does the ADT say about the panel (size, brightness scale, gamut)?
   4. Does the ADT carry the GPU ranges the loader fills in?
 
@@ -166,6 +167,10 @@ def fdt_cells(value):
     return list(struct.unpack(">%dI" % (len(value) // 4), value)) if value else []
 
 
+def strs_of(value):
+    return value.decode().rstrip("\0").split("\0") if value else []
+
+
 def fdt_reg(nodes, node):
     c = fdt_cells(nodes.get(node, {}).get("reg"))
     return [(c[i] << 32 | c[i + 1], c[i + 2] << 32 | c[i + 3]) for i in range(0, len(c) - 3, 4)]
@@ -244,6 +249,9 @@ def report(root, dtb, out):
         out.fact(path, "%s, vm-base %s vm-size %s, %s" % (
             hexpair(base), hex(vm_base) if vm_base is not None else "missing",
             hex(vm_size) if vm_size is not None else "missing", ", ".join(roots)))
+    dcp_trail = find(root, "/arm-io/dcp")
+    dcp_irqs = u32s(dcp_trail[-1].props.get("interrupts", b"")) if dcp_trail else []
+    out.fact("dcp interrupts (first four)", dcp_irqs[:4] if dcp_irqs else "missing")
     vram = find(root, "/vram")
     out.fact("/vram", hexpair(get_reg(vram, 0)) if vram else "missing")
 
@@ -318,6 +326,20 @@ def report(root, dtb, out):
         coproc = regs.get("coproc")
         out.check(bool(mbox and coproc and fdt_reg(nodes, mbox) and fdt_reg(nodes, mbox)[0][0] == coproc[0] + 0x8000),
                   "dcp mailbox at coproc + 0x8000")
+        # The loader checks the mailbox's register but not its interrupts, so a wrong number here would
+        # only show as a DCP that never answers. The ADT lists the ASC's four mailbox interrupts first,
+        # in the order the GPU mailboxes show (gfx-asc above): [send-not-empty, send-empty,
+        # recv-not-empty, recv-empty]. The tree names each one; compare by name.
+        names = strs_of(nodes.get(mbox, {}).get("interrupt-names")) if mbox else []
+        tree = fdt_cells(nodes.get(mbox, {}).get("interrupts")) if mbox else []
+        tree_by_name = {n: tree[4 * i + 2] for i, n in enumerate(names) if 4 * i + 3 < len(tree)} \
+            if len(tree) == 4 * len(names) else {}
+        adt_by_name = dict(zip(("send-not-empty", "send-empty", "recv-not-empty", "recv-empty"), dcp_irqs[:4])) \
+            if len(dcp_irqs) >= 4 else {}
+        ok = bool(adt_by_name) and len(tree_by_name) == 4 and tree_by_name == adt_by_name
+        out.check(ok, "dcp mailbox interrupts: tree %s, ADT %s" % (
+            ", ".join("%s %s" % (n, tree_by_name[n]) for n in sorted(tree_by_name)) or "missing",
+            ", ".join("%s %s" % (n, adt_by_name[n]) for n in sorted(adt_by_name)) or "missing"))
     else:
         print("  the tree has no dcp alias: no panel hand-off is described")
     gpu = aliases.get("gpu")

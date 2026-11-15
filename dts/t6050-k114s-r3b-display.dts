@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s display tree for the r3 display trials (docs/r3-display-plan.md, D2 to D4): the promoted
+ * GPU tree (t6050-k114s-r3-gpu.dts, r1 plus the GPU) plus the internal panel on the display
+ * coprocessor (K114S_R3_DISPLAY). No eDP property and no external display engines. Not booted
+ * on a K114s.
+ *
+ * Every display node stays "disabled" here. Only a loader that admits this Mac's DCP image (the
+ * r3 loader, aura pull request 226) checks them against the Apple device tree and enables them;
+ * the installed loader refuses and the boot framebuffer keeps the panel.
+ *
+ * K114S_D0_DISPLAY_OFF exists for one check only: built with it defined (build/build-dtb.sh,
+ * K114S_DTS_DEFINES), this file must give the promoted GPU tree byte for byte, so the display
+ * trials differ from the proven configuration by the display section alone.
+ */
+#define K114S_R1_N1
+#define K114S_R1_USB
+#include "t6050-k114s-common.dtsi"
+#define K114S_R3_GPU
+#ifndef K114S_D0_DISPLAY_OFF
+#define K114S_R3_DISPLAY
+#endif
+#include "t6050-k114s-display-gpu.dtsi"
