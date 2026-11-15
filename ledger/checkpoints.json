@@ -122,6 +122,17 @@
       "applied": "2026-11-14 (linux/omarchy-patches-install on Omarchy Edge 4.0.0.r7859.g9ac0883; no reboot needed)",
       "awaiting_reboot": null,
       "hardware_verified": null
+    },
+    {
+      "id": "omarchy-patches-0002",
+      "what": "Agents panel: limit meters read as room left with a T3 Code-style pace line; Fable Weekly and other model-scoped windows get their own row (patches/omarchy/0002, docs/omarchy-patches.md)",
+      "evaluated": "2026-11-14",
+      "integrated": "2026-11-14",
+      "built_tested": "2026-11-14",
+      "staged": "2026-11-15",
+      "applied": "2026-11-15 (linux/omarchy-patches-install on Omarchy Edge 4.0.0.r7859.g9ac0883; shell restart needed to load the panel, checked on screen)",
+      "awaiting_reboot": null,
+      "hardware_verified": null
     }
   ],
   "owner_decisions": {

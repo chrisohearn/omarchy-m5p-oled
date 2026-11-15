@@ -1,0 +1,177 @@
+Agents panel: limit meters read as room left, with a pace line, and a
+model-scoped window (Fable Weekly) gets its own row.
+
+Local change for this machine, not an upstream fix. The owner wants every
+provider's limit bars to drain the same way and to show pace the way T3 Code's
+usage view does: the bar is the share left, a hairline marks the share of the
+window's time left (even pace), and the tooltip says ahead of, on or under pace
+within 5 points. The usage records keep the share used; only the display
+changes. Strings use I18n.t fallbacks, so no translation file is touched.
+
+Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shell).
+
+--- a/share/omarchy/shell/plugins/agents/Panel.qml	2026-11-14 18:11:50.423213038 -0700
++++ b/share/omarchy/shell/plugins/agents/Panel.qml	2026-11-14 18:17:13.082935168 -0700
+@@ -973,10 +973,23 @@
+     return {
+       title: String(title || "") !== "" ? String(title) : windowTitle(label),
+       percent: expired ? 0 : Number(percent),
+-      resetAt: expired ? "" : String(resetAt || "")
++      resetAt: expired ? "" : String(resetAt || ""),
++      span: windowTitleSpanMs(String(title || "") !== "" ? String(title) : windowTitle(label), label)
+     }
+   }
+ 
++  // K114s local change: how long a window runs, for its pace line. The title
++  // decides where it can (a model name like "Opus 5 (1M context)" must not
++  // be read as a one-minute window). A model-scoped Session window takes its
++  // base window's span in displayWindows(); nothing known means no pace line.
++  function windowTitleSpanMs(title, label) {
++    var part = scopedPart(title)
++    var base = part ? part.window : String(title || "")
++    if (base === "Weekly") return 7 * 24 * 3600 * 1000
++    if (base === "Monthly") return 30 * 24 * 3600 * 1000
++    return part ? 0 : windowSpanMs(label)
++  }
++
+   function limitWindows(p) {
+     if (!p) return []
+     var out = []
+@@ -998,27 +1011,31 @@
+     return match ? { model: match[1], window: match[2] } : null
+   }
+ 
++  // K114s local change: a model-scoped window gets a row of its own, right
++  // after the window whose clock it runs on, so its room left and pace show
++  // without hovering. One with nothing to follow goes last.
+   function displayWindows(p) {
+     var windows = limitWindows(p)
+     var out = []
+-    var byTitle = {}
++    var placed = []
+     for (var i = 0; i < windows.length; i++) {
+       if (scopedPart(windows[i].title)) continue
+       windows[i].scoped = []
+       out.push(windows[i])
+-      byTitle[windows[i].title] = windows[i]
+-    }
+-    for (var j = 0; j < windows.length; j++) {
+-      var part = scopedPart(windows[j].title)
+-      if (!part) continue
+-      var base = byTitle[part.window]
+-      if (base) {
+-        base.scoped.push({ title: part.model, percent: windows[j].percent, resetAt: windows[j].resetAt })
+-      } else {
++      for (var j = 0; j < windows.length; j++) {
++        var part = scopedPart(windows[j].title)
++        if (!part || part.window !== windows[i].title) continue
+         windows[j].scoped = []
++        if (!(windows[j].span > 0)) windows[j].span = windows[i].span
+         out.push(windows[j])
++        placed.push(j)
+       }
+     }
++    for (var k = 0; k < windows.length; k++) {
++      if (!scopedPart(windows[k].title) || placed.indexOf(k) >= 0) continue
++      windows[k].scoped = []
++      out.push(windows[k])
++    }
+     return out
+   }
+ 
+@@ -1039,6 +1056,30 @@
+     return isFinite(ms) ? ms - root.nowMs : -1
+   }
+ 
++  // K114s local change: limit meters read as room left, as T3 Code's do, so
++  // every provider's bar drains the same way. Records keep the share used.
++  function leftShare(w) {
++    return w ? 1 - root.clamp(Number(w.percent), 0, 1) : -1
++  }
++
++  // Even pace on a room-left meter is the share of the window's time left.
++  function paceLeftShare(w) {
++    if (!w || !(Number(w.span) > 0)) return -1
++    var ms = resetMsFor(w)
++    if (!(ms > 0)) return -1
++    return root.clamp(ms / Number(w.span), 0, 1)
++  }
++
++  // Ahead of pace: more used than the time gone (T3 Code's 5-point margin).
++  function paceText(w) {
++    var pace = paceLeftShare(w)
++    if (pace < 0) return ""
++    var gap = Number(w.percent) - (1 - pace)
++    if (gap > 0.05) return Commons.I18n.t("agents.paceAhead", "Ahead of pace")
++    if (gap < -0.05) return Commons.I18n.t("agents.paceUnder", "Under pace")
++    return Commons.I18n.t("agents.paceOn", "On pace")
++  }
++
+   function formatDuration(ms) {
+     if (!(ms > 0)) return Commons.I18n.t("agents.durationNow")
+     var minutes = Math.floor(ms / 60000)
+@@ -3046,10 +3087,12 @@
+         var lines = []
+         if (compact.window) {
+           var windowName = root.windowDisplayTitle(compact.window.title)
+-          var used = Commons.I18n.formatNumber(Math.round(compact.window.percent * 100))
++          var left = Commons.I18n.formatNumber(Math.round(root.leftShare(compact.window) * 100))
+           lines.push(compact.resetMs > 0
+-            ? Commons.I18n.t("agents.windowUsedResets").arg(windowName).arg(used).arg(root.formatDuration(compact.resetMs))
+-            : Commons.I18n.t("agents.windowUsed").arg(windowName).arg(used))
++            ? Commons.I18n.t("agents.windowLeftResets", "%1: %2% left · resets in %3").arg(windowName).arg(left).arg(root.formatDuration(compact.resetMs))
++            : Commons.I18n.t("agents.windowLeft", "%1: %2% left").arg(windowName).arg(left))
++          var pace = root.paceText(compact.window)
++          if (pace !== "") lines.push(pace)
+         }
+         if (compact.stale)
+           lines.push(compact.fetchedAt > 0 && root.nowMs - compact.fetchedAt > 60000
+@@ -3078,7 +3121,8 @@
+       anchors.right: compactValue.left
+       anchors.rightMargin: Style.space(20)
+       anchors.verticalCenter: parent.verticalCenter
+-      value: compact.window ? compact.window.percent : -1
++      value: compact.window ? root.leftShare(compact.window) : -1
++      pace: root.paceLeftShare(compact.window)
+       alarming: compact.alarming
+       markers: compact.scoped
+     }
+@@ -3108,7 +3152,8 @@
+     }
+   }
+ 
+-  // Rounded track showing the percentage of the allowance used.
++  // Rounded track showing a share of the allowance: room left on the limit
++  // rows (K114s local change), the amount on the others.
+   component Meter: Item {
+     id: meter
+     property real value: -1
+@@ -3118,6 +3163,10 @@
+     // Other allowances on the same clock, drawn as ticks across the track.
+     property var markers: []
+ 
++    // K114s local change: where the meter would stand at an even pace, as a
++    // hairline across the track like T3 Code's; below zero draws none.
++    property real pace: -1
++
+     implicitHeight: thickness
+ 
+     Rectangle {
+@@ -3156,5 +3205,17 @@
+         color: meter.alarming ? root.urgent : root.foreground
+       }
+     }
++
++    Rectangle {
++      visible: meter.pace >= 0
++      width: Math.max(1, Math.round(meter.thickness * 0.3))
++      height: meter.thickness * 3
++      radius: width / 2
++      anchors.verticalCenter: meterTrack.verticalCenter
++      readonly property real along: root.clamp(meterTrack.width * root.clamp(meter.pace, 0, 1) - width / 2, 0, meterTrack.width - width)
++      x: LayoutMirroring.enabled ? meterTrack.width - width - along : along
++      color: root.foreground
++      opacity: 0.6
++    }
+   }
+ }

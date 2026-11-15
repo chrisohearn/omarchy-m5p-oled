@@ -3,7 +3,8 @@
 
 have_patch() { command -v patch >/dev/null 2>&1; }
 
-# Patches are against Omarchy's tree (a/bin/omarchy-...); its bin/ is installed as /usr/bin.
+# Patch paths are relative to /usr: a/bin/omarchy-... for Omarchy's bin/, and
+# a/share/omarchy/shell/... for its shell/, which installs as /usr/share/omarchy/shell.
 # Whole patch or nothing, no fuzz, no .orig or .rej files.
 run_patch() {
   local p=$1
