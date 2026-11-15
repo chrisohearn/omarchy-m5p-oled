@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 12 Nov 2026 12:19:50 -0700
+Subject: [PATCH 08/10] arm64: dts: apple: t6050: keep the PMP's power domains
+ on
+
+The PMP's firmware runs from the moment its driver starts it, and in a
+suspend-to-idle the driver leaves it running: only a firmware-driven sleep
+stops it. Its three power states were ordinary genpd domains, though, so
+at the noirq phase of every s2idle genpd gated the PMP's core (pmp) and
+its SRAM (pms-sram) under the running firmware and then tried their parent
+(pms), which the PMGR refuses:
+
+  PS pms: Failed to reach power state 0x0 (requested 0xf0000f0, now: 0x1f0002ff)
+
+With power back at the wake the firmware usually takes a translation fault
+within the first moments (PC 0x10178b4, 0x1025498 or 0, every register
+zero) and reports a crash; it stays down until reboot, and prints its
+crash log again at each later wake. On the K116s that was 3 of the 4
+suspends that reached the noirq phase with a live PMP.
+
+Mark all three always-on, as the ADT's "critical" flag on PMP asks.
+Every other SoC description with a pms domain keeps it on, and those
+whose PMP Linux runs (T6030, T604x, T8122, T8132, T8140 and the T8142
+J813, which gained it for the same crash) keep pmp on. The PMP then
+keeps running through s2idle as it does under macOS, and the pms
+message goes away with the power-off request.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+[thomas: name the SoCs that keep pms and pmp on]
+Signed-off-by: Thomas Glanzmann <thomas@glanzmann.de>
+
+(cherry picked from commit f61eb4550a95208ea2acd3a5bc614944735a4ff9)
+[k114s: from aurora-silicon/linux pull request 1789 (open), unchanged]
+---
+ arch/arm64/boot/dts/apple/t6050-peripherals.dtsi | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-peripherals.dtsi b/arch/arm64/boot/dts/apple/t6050-peripherals.dtsi
+index 2f4da05c2..6d2bd0047 100644
+--- a/arch/arm64/boot/dts/apple/t6050-peripherals.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-peripherals.dtsi
+@@ -94,6 +94,12 @@ ps_pms: power-controller@100 {
+ 		#power-domain-cells = <0>;
+ 		#reset-cells = <0>;
+ 		label = "pms";
++		/*
++		 * The PMP's firmware runs from boot until a real sleep stops it, on its own
++		 * core (pmp, "critical" in the ADT) and out of its own SRAM (pms-sram): none
++		 * of the three may be gated under it, s2idle included.
++		 */
++		apple,always-on;
+ 		status = "disabled";
+ 	};
+ 	ps_pmp: power-controller@128 {
+@@ -103,6 +109,7 @@ ps_pmp: power-controller@128 {
+ 		#reset-cells = <0>;
+ 		label = "pmp";
+ 		power-domains = <&ps_pms>;
++		apple,always-on;
+ 		status = "disabled";
+ 	};
+ 	ps_pms_sram: power-controller@130 {
+@@ -112,6 +119,7 @@ ps_pms_sram: power-controller@130 {
+ 		#reset-cells = <0>;
+ 		label = "pms-sram";
+ 		power-domains = <&ps_pms>;
++		apple,always-on;
+ 		status = "disabled";
+ 	};
+ 	ps_fab0_piogw: power-controller@1d8 {

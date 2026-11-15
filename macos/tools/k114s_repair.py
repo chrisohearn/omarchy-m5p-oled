@@ -17,6 +17,11 @@ Linux-side files go to k114s-repair/r2c.
   rollback    restore from the ESP backup:  rollback stage2  (device tree only)
               or  rollback all  (limine.conf and Stage 2; removes the repair kernel)
 
+If the original kernel image (EFI/Linux/omarchy_linux-aurora.efi) was removed from the ESP to make room
+(the r3a kernel trial, docs/r3-integration.md), status, stage2, default repair and rollback stage2 keep
+working; kernel, default original, rollback all and apply stop with a message and write nothing,
+because each would need that image.
+
 Options: --kernel r1|r1a              which repair kernel apply installs (default r1)
          --stage2 r1|wifi|gp1c|keep   which device tree the Stage 2 gets at apply (default r1)
          --yes                   skip the typed confirmation
@@ -116,7 +121,10 @@ def run(*command):
 
 
 def is_omarchy_esp(mount):
-    return all(os.path.isfile(os.path.join(mount, p)) for p in (UKI, STAGE2, LIMINE, "m1n1/boot.bin")) \
+    have = lambda p: os.path.isfile(os.path.join(mount, p))
+    # The original kernel image may be gone on purpose (the r3a slot swap, docs/r3-integration.md); the
+    # repair image then stands in for it.
+    return (have(UKI) or have(REPAIR_UKI)) and all(have(p) for p in (STAGE2, LIMINE, "m1n1/boot.bin")) \
         and os.path.isdir(os.path.join(mount, "vendorfw"))
 
 
@@ -294,12 +302,17 @@ def live_state(esp, m):
     state = {"device": esp.device, "files": {}}
     for rel in (UKI, STAGE2, LIMINE, "m1n1/boot.bin") + VENDORFW:
         if not esp.has(rel):
+            if rel == UKI and esp.has(REPAIR_UKI):
+                continue   # removed on purpose to make room (docs/r3-integration.md); not an error
             raise Stop("the ESP has no " + rel)
         state["files"][rel] = sha(esp.get(rel))
-    uki = tool.Uki(esp.get(UKI))
-    state["uki_uname"] = uki.content(".uname").rstrip(b"\0").decode()
-    state["uki_linux_sha256"] = sha(uki.content(".linux"))
-    state["kernel"] = {m["original_kernel_sha256"]: "original v272-4"}.get(state["uki_linux_sha256"], "unknown")
+    if UKI in state["files"]:
+        uki = tool.Uki(esp.get(UKI))
+        state["uki_uname"] = uki.content(".uname").rstrip(b"\0").decode()
+        state["uki_linux_sha256"] = sha(uki.content(".linux"))
+        state["kernel"] = {m["original_kernel_sha256"]: "original v272-4"}.get(state["uki_linux_sha256"], "unknown")
+    else:
+        state["uki_uname"], state["uki_linux_sha256"], state["kernel"] = None, None, "removed"
     state["stage2"] = stage2_state(esp.get(STAGE2), m)
     state["boot_bin"] = "image combined" if state["files"]["m1n1/boot.bin"] == m["stage2_sha256"]["image-combined"] else "other"
     names = [n for n, _ in tar_files(esp.get(VENDORFW[1]))]
@@ -324,7 +337,10 @@ def live_state(esp, m):
 
 def show(state):
     say("  ESP device:            %s" % state["device"])
-    say("  installed kernel UKI:  %s (%s)" % (state["kernel"], state["uki_uname"]))
+    if state["kernel"] == "removed":
+        say("  installed kernel UKI:  REMOVED (the original image is not on the ESP; the repair image is the only Linux image)")
+    else:
+        say("  installed kernel UKI:  %s (%s)" % (state["kernel"], state["uki_uname"]))
     say("  Stage 2 (boot-ctxr):   %s" % state["stage2"])
     say("  vendor firmware:       %d files; trackpad firmware %s; N1 firmware %s" % (
         state["vendorfw_files"], "present" if state["vendorfw_has_tpmtfw"] else "MISSING",
@@ -430,6 +446,8 @@ def space_plan(esp, steps, free, cluster, new_dirs):
 
 def plan(esp, m, stage2_choice, variant, work):
     state = live_state(esp, m)
+    if state["kernel"] == "removed":
+        raise Stop("the original kernel image is not on the ESP; apply needs it. Nothing written")
     if state["uki_uname"] != KVER:
         raise Stop("the installed kernel is %s, not %s: this repair is built for that exact kernel"
                    % (state["uki_uname"], KVER))
@@ -572,6 +590,10 @@ def rollback(esp, m, what):
         record = json.loads(esp.get(BACKUP_DIR + "/backup.json").decode())
         if what not in ("stage2", "all"):
             raise Stop("rollback takes  stage2  or  all")
+        if what == "all" and not esp.has(UKI):
+            raise Stop("the original kernel image (%s) is not on the ESP. rollback all would restore a menu that points "
+                       "at it and delete the repair image, leaving no Linux entry that starts. Nothing written. "
+                       "Use  rollback stage2  and  default repair  instead" % UKI)
         wanted = [STAGE2] if what == "stage2" else [r for r in [LIMINE, STAGE2] + list(VENDORFW) if r in record["files"]]
         for rel in wanted:
             data = esp.get(BACKUP_DIR + "/" + rel)
@@ -633,6 +655,8 @@ def switch_kernel(esp, m, variant):
         text = esp.get(LIMINE).decode("utf-8")
         if current is None or REPAIR_UKI not in text or not esp.has(APPLIED):
             raise Stop("apply the repair first (no repair kernel of this bundle on the ESP)")
+        if not esp.has(UKI):
+            raise Stop("the repair kernel is built from the original kernel image, which is not on the ESP. Nothing written")
         if current == variant:
             raise Stop("the repair kernel is already %s" % variant)
         uki, record = build_repair_uki(esp.get(UKI), variant, m)
@@ -678,6 +702,9 @@ def switch_default(esp, m, choice):
         if choice in ("repair", "r1", "r1a"):
             index = 1
         elif choice == "original":
+            if not esp.has(UKI):
+                raise Stop("the original kernel image is not on the ESP, so that entry cannot start. Nothing written. "
+                           "Use  default repair")
             old = esp.get(BACKUP_DIR + "/" + LIMINE).decode("utf-8")
             value = [l.split(":", 1)[1].strip() for l in old.split("\n") if l.startswith("default_entry")]
             index = (int(value[0]) if value and value[0].isdigit() else 1) + 1

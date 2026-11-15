@@ -1,0 +1,209 @@
+#!/bin/sh
+# K114s (omarchy-m5p-oled): boot ONE other Limine entry once, and fall back to the default by itself.
+#
+#   k114s-boot-once entries            list the menu: index, Limine's entry id, and what each entry boots
+#   k114s-boot-once check              the safety state the trial relies on (default entry, repair entry, sleep)
+#   k114s-boot-once arm ENTRY [--with-stage2-trial]
+#                                      next boot starts ENTRY (a path such as  Omarchy/linux-k114s ) once
+#   k114s-boot-once status             the one-shot variable in efivarfs and in U-Boot's variable file
+#   k114s-boot-once clear              take the request back (does not touch the not-durable marker)
+#   k114s-boot-once mark-not-durable   record that the durability check failed: arm then refuses every real target for good
+#
+# How it works, read from Limine 12.9.6 (common/lib/bli.c, common/menu.c): Limine reads the Boot Loader
+# Interface variable LoaderEntryOneShot and ERASES it in the same call, before it boots anything. The value
+# is the entry id, UTF-16. So a kernel that hangs before the root filesystem leaves nothing behind, and the
+# next boot takes default_entry, which this tool never changes. A boot-time erase of a non-volatile variable
+# reaches U-Boot's variable file at once (LimineLastBootedEntry is in it with the mtime of the boot).
+# Setting the variable from Linux needs the second step the J604 project measured: U-Boot keeps runtime writes
+# in RAM, so omarchy-mac-efi-vars' efi-vars-save is run right away instead of waiting for shutdown.
+#
+# arm refuses unless (a hard check, not advice):
+#   - limine.conf has default_entry 1 and entry 1 is the repair entry (the proven one stays the default)
+#   - the target exists in limine.conf, boots an EFI file that is on the ESP and matches its #hash
+#   - no Stage 2 trial is armed or configured, so the new kernel runs on the configured, proven tree
+#     (--with-stage2-trial lifts only this check, for the GPU step and for the self-test)
+#   - the suspend, hibernate, hybrid-sleep and suspend-then-hibernate targets are masked
+# and it checks, after saving, that U-Boot's variable file holds the request; if not it takes it back.
+#
+# Self-test gate: nothing shows that U-Boot saves a boot-time erase, so arm refuses every target except entry 1 (the
+# repair entry itself, a request that changes nothing) until `status`, run in the boot right after such a request,
+# has measured that the request is gone from U-Boot's file before any shutdown save, and wrote
+# $STATE/boot-once-selftest-ok. A failed measurement removes that marker.
+# $STATE/boot-once-not-durable (written by mark-not-durable, after a failed power-cut check) is sticky: arm refuses every
+# real target while it exists, status never measures or writes the self-test marker, and clear leaves it alone. Only the
+# lead removing the file by hand (after a new decision) lifts it.
+#
+# Test hooks (environment): K114S_EFIVARS K114S_ESP K114S_ETC K114S_SAVE K114S_SYSTEMCTL K114S_REPAIR_UKI
+# K114S_STATE K114S_BOOTID K114S_PREVBOOT K114S_BOOT_EPOCH.
+set -u
+EFIVARS=${K114S_EFIVARS:-/sys/firmware/efi/efivars}
+ESP=${K114S_ESP:-/boot/efi}
+ETC=${K114S_ETC:-/etc/omarchy-k114s}
+SAVE=${K114S_SAVE:-/usr/lib/omarchy/mac-boot/efi-vars-save}
+SYSTEMCTL=${K114S_SYSTEMCTL:-systemctl}
+STATE=${K114S_STATE:-/var/lib/k114s-recovery}
+BOOTID=${K114S_BOOTID:-$(tr -d - </proc/sys/kernel/random/boot_id 2>/dev/null)}
+REPAIR_UKI=${K114S_REPAIR_UKI:-EFI/Linux/omarchy_linux-aurora-k114s.efi}
+BLI=4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+RT=b2ac5fc9-92b7-4acd-aeac-11e818c3130c
+VAR=$EFIVARS/LoaderEntryOneShot-$BLI
+CONF=$ESP/limine.conf
+die() { echo "k114s-boot-once: $*" >&2; exit 1; }
+
+# Limine's entry id: the entry path with '/' as '.', any byte outside [A-Za-z0-9+_.@-] as '-'.
+entry_id() { printf '%s' "$1" | sed 's#/#.#g; s#[^A-Za-z0-9+_.@-]#-#g'; }
+
+# One line per entry in menu order: INDEX<TAB>PATH<TAB>BOOT-PATH ("" for a directory). Depth is the number of
+# leading slashes; a '+' or '-' after them marks a directory as expanded or collapsed and is not part of the name.
+# shortcut: the index counts every entry line, which is Limine's own count for expanded directories only;
+# collapsed ones (/-Name) would hide their children from it. The live file uses /+Omarchy.
+list_entries() {
+  awk '
+    function flush() { if (n) print n "\t" p "\t" bp; }
+    { line = $0; sub(/^[ \t]+/, "", line) }
+    line ~ /^\/+/ {
+      flush(); match(line, /^\/+/); d = RLENGTH; name = substr(line, d + 1); sub(/^[+-]/, "", name); sub(/[ \t]+$/, "", name)
+      nm[d] = name; p = nm[1]; for (i = 2; i <= d; i++) p = p "/" nm[i]; n++; bp = ""; next
+    }
+    n && line ~ /^path:/ { bp = substr(line, 6); sub(/^[ \t]+/, "", bp); sub(/[ \t]+$/, "", bp) }
+    END { flush() }
+  ' "$CONF"
+}
+
+cmd_entries() {
+  [ -r "$CONF" ] || die "cannot read $CONF"
+  grep -E '^default_entry' "$CONF"
+  list_entries | while IFS="$(printf '\t')" read -r i p bp; do printf '%2s  %-44s  %s\n' "$i" "$(entry_id "$p")" "${bp:-(directory)}"; done
+}
+
+# the EFI file an entry boots, and the hash Limine will check, from 'boot():/EFI/Linux/x.efi#<b2sum>'
+check_boot_file() {
+  bp=$1; f=${bp#boot\(\):}; h=
+  case $f in *'#'*) h=${f#*#}; f=${f%%#*} ;; esac
+  [ -f "$ESP$f" ] || { echo "the EFI file $f is not on the ESP"; return 1; }
+  if [ -n "$h" ]; then
+    have=$(b2sum "$ESP$f" | cut -d' ' -f1)
+    [ "$have" = "$h" ] || { echo "$f does not match the hash in limine.conf"; return 1; }
+  fi
+  return 0
+}
+
+cmd_check() {
+  rc=0; bad() { echo "BAD   $*"; rc=1; }
+  [ -r "$CONF" ] || die "cannot read $CONF"
+  d=$(sed -n 's/^default_entry:[ \t]*//p' "$CONF" | head -1)
+  [ "$d" = 1 ] && echo "ok    default_entry is 1" || bad "default_entry is '$d', not 1"
+  first=$(list_entries | head -1); fp=$(printf '%s' "$first" | cut -f3)
+  case $fp in *"$REPAIR_UKI"*) echo "ok    entry 1 boots the repair image ($(printf '%s' "$first" | cut -f2))" ;; *) bad "entry 1 does not boot $REPAIR_UKI: $fp" ;; esac
+  if [ -f "$ESP/$REPAIR_UKI" ]; then echo "info  repair image sha256 $(sha256sum "$ESP/$REPAIR_UKI" | cut -c1-64)"; else bad "$REPAIR_UKI is not on the ESP"; fi
+  [ -n "$fp" ] && { m=$(check_boot_file "$fp") && echo "ok    entry 1's file matches limine.conf" || bad "$m"; }
+  for t in suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target; do
+    s=$($SYSTEMCTL is-enabled "$t" 2>/dev/null); [ "$s" = masked ] || bad "$t is '$s', not masked"
+  done
+  [ $rc = 0 ] && echo "ok    the sleep targets are masked"
+  grep -qiE '^[ \t]*remember_last_entry:[ \t]*yes' "$CONF" && bad "remember_last_entry is yes: Limine would boot the last booted entry ahead of default_entry, pinning later boots to a trial entry"
+  [ "$(sed -n 1p "$ESP/aura-try" 2>/dev/null)" = armed ] && echo "info  a Stage 2 trial is armed: $(sed -n 2p "$ESP/aura-try")" || echo "ok    no Stage 2 trial is armed"
+  [ -s "$ETC/stage2-trial" ] && echo "info  a Stage 2 trial is configured to re-arm: $(sed -n 1p "$ETC/stage2-trial")" || echo "ok    no Stage 2 trial is configured to re-arm"
+  return $rc
+}
+
+# U-Boot's variable file on the ESP, named by RTStorageVolatile (as efi-vars-save reads it)
+store_file() {
+  r=$EFIVARS/RTStorageVolatile-$RT; [ -e "$r" ] || return 1
+  n=$(tail -c +5 "$r" | tr -d '\0'); n=${n#/}; [ -n "$n" ] && printf '%s/%s' "$ESP" "$n"
+}
+# Does U-Boot's file hold this id as a UTF-16 string?  (strings -e l = little-endian 16-bit)
+# The id must be the value of LoaderEntryOneShot: the line straight after the name, not the id anywhere in the file.
+store_has() { f=$(store_file) || return 2; [ -r "$f" ] || return 2; strings -a -e l "$f" | grep -A1 -xF LoaderEntryOneShot | grep -qxF -- "$1"; }
+
+cmd_status() {
+  if [ -e "$VAR" ]; then printf 'efivarfs: LoaderEntryOneShot = %s\n' "$(tail -c +5 "$VAR" | iconv -f UTF-16LE -t UTF-8 2>/dev/null | tr -d '\0')"; else echo "efivarfs: no LoaderEntryOneShot (none requested, or Limine consumed it)"; fi
+  f=$(store_file) && { if strings -a -e l "$f" 2>/dev/null | grep -qxF LoaderEntryOneShot; then echo "U-Boot file $f: holds LoaderEntryOneShot"; else echo "U-Boot file $f: no LoaderEntryOneShot"; fi; } || echo "U-Boot names no variable file (nothing to save)"
+  s=$EFIVARS/LoaderEntrySelected-$BLI; [ -e "$s" ] && printf 'this boot started: %s\n' "$(tail -c +5 "$s" | iconv -f UTF-16LE -t UTF-8 2>/dev/null | tr -d '\0')"
+  echo "aura-try: $(sed -n 1,2p "$ESP/aura-try" 2>/dev/null | tr '\n' ' ')"
+  selftest_eval
+}
+
+# The measurement behind the gate. Valid only in the boot right after the request was armed (the journal's previous boot
+# is the arming boot), when this boot started the repair entry, the variable is gone from efivarfs AND from U-Boot's file,
+# and the file was not written during this boot (so no save could have hidden a missing boot-time write).
+selftest_eval() {
+  a=$STATE/boot-once-armed; m=$STATE/boot-once-selftest-ok
+  [ -e "$STATE/boot-once-not-durable" ] && { echo "self-test: not run: $STATE/boot-once-not-durable exists (the durability check failed); real targets stay refused"; return 0; }
+  [ -r "$a" ] || return 0
+  read -r ab aid < "$a"; [ "$ab" != "$BOOTID" ] || return 0
+  first=$(entry_id "$(list_entries | head -1 | cut -f2)"); [ "$aid" = "$first" ] || return 0
+  rm -f "$a"
+  prev=$(prev_boot); [ -n "$prev" ] && [ "$prev" = "$ab" ] || { echo "self-test: NOT MEASURED: this is not the boot right after arming (previous boot '$prev', armed in '$ab'); arm and measure again"; return 0; }
+  sel=$(tail -c +5 "$EFIVARS/LoaderEntrySelected-$BLI" 2>/dev/null | iconv -f UTF-16LE -t UTF-8 2>/dev/null | tr -d '\0')
+  [ "$sel" = "$aid" ] || { echo "self-test: NOT MEASURED: this boot started '$sel', not '$aid'"; return 0; }
+  f=$(store_file) && [ -r "$f" ] || { echo "self-test: NOT MEASURED: no U-Boot variable file"; return 0; }
+  e=${K114S_BOOT_EPOCH:-$(( $(date +%s) - $(cut -d. -f1 /proc/uptime) ))}
+  mt=$(stat -c %Y "$f"); [ "$mt" -le "$e" ] || { echo "self-test: NOT MEASURED: $f was written during this boot (a save ran), or its FAT time is not local time: mtime $mt, boot start $e (epoch seconds; a difference near a whole number of hours is a time-zone offset); arm and measure again"; return 0; }
+  if [ -e "$VAR" ] || strings -a -e l "$f" | grep -qxF LoaderEntryOneShot; then
+    rm -f "$m"; echo "self-test: FAILED: the request survived Limine's erase on disk: the mechanism is not hang-safe; do not arm a kernel trial (run: clear)"; return 1
+  fi
+  mkdir -p "$STATE"; printf 'ok boot=%s id=%s\n' "$BOOTID" "$aid" > "$m"; echo "self-test: PASSED: the request is gone from efivarfs and from U-Boot's file before any shutdown save; marker $m written"
+}
+# previous boot's id (dashless), from the journal
+prev_boot() { [ -n "${K114S_PREVBOOT:-}" ] && { echo "$K114S_PREVBOOT"; return; }; journalctl -b -1 -n1 -o json 2>/dev/null | sed -n 's/.*"_BOOT_ID":"\([0-9a-f]*\)".*/\1/p' | head -1; }
+
+# also voids the self-test's arming record: with the request gone, a later boot of entry 1 proves nothing
+drop_var() { rm -f "$STATE/boot-once-armed"; [ -e "$VAR" ] && { chattr -i "$VAR" 2>/dev/null; rm -f "$VAR"; }; return 0; }
+
+cmd_clear() {
+  drop_var; [ -x "$SAVE" ] && "$SAVE" || echo "k114s-boot-once: no saver ($SAVE); the variable is only gone from this boot's memory" >&2
+  f=$(store_file) && [ -r "$f" ] && strings -a -e l "$f" | grep -qxF LoaderEntryOneShot && die "U-Boot's file still holds LoaderEntryOneShot"
+  echo "cleared"
+}
+
+# the durability check showed the erase does not survive a power cut: sticky, so no later status can re-pass the gate
+cmd_mark_not_durable() {
+  mkdir -p "$STATE" || die "cannot create $STATE"
+  printf 'not-durable boot=%s\n' "$BOOTID" > "$STATE/boot-once-not-durable" || die "cannot write the marker"
+  rm -f "$STATE/boot-once-selftest-ok" "$STATE/boot-once-armed"
+  echo "marked: real targets are refused from now on; run 'clear' if a request is still armed"
+}
+
+cmd_arm() {
+  target=${1:-}; [ $# -gt 0 ] && shift; with_s2=0
+  for a in "$@"; do [ "$a" = --with-stage2-trial ] && with_s2=1; done
+  [ -n "$target" ] || die "arm needs an entry path, for example  Omarchy/linux-k114s  (see: entries)"
+  [ "$(id -u)" = 0 ] || [ -n "${K114S_EFIVARS:-}" ] || die "run as root"
+  cmd_check >/dev/null || { cmd_check; die "the safety state is not met; nothing armed"; }
+  line=$(list_entries | awk -F'\t' -v t="$target" '$2 == t { print; exit }')
+  [ -n "$line" ] || die "no entry '$target' in limine.conf (see: entries)"
+  bp=$(printf '%s' "$line" | cut -f3); [ -n "$bp" ] || die "'$target' is a directory, not an entry that boots"
+  m=$(check_boot_file "$bp") || die "$m; nothing armed"
+  if [ "$(printf '%s' "$line" | cut -f1)" != 1 ] && [ -e "$STATE/boot-once-not-durable" ]; then
+    die "the durability check failed on this Mac ($STATE/boot-once-not-durable exists): only the repair entry (entry 1) can be armed; nothing armed"
+  fi
+  if [ "$(printf '%s' "$line" | cut -f1)" != 1 ] && ! grep -q '^ok ' "$STATE/boot-once-selftest-ok" 2>/dev/null; then
+    die "the one-shot mechanism has not been measured on this Mac ($STATE/boot-once-selftest-ok is missing). Arm the repair entry itself (entry 1), reboot, run 'status' first thing; nothing armed"
+  fi
+  if [ $with_s2 = 0 ]; then
+    [ "$(sed -n 1p "$ESP/aura-try" 2>/dev/null)" = armed ] && die "a Stage 2 trial is armed ($(sed -n 2p "$ESP/aura-try")): the kernel would run on that tree. Write 'spent' to $ESP/aura-try first; nothing armed"
+    [ -s "$ETC/stage2-trial" ] && die "$ETC/stage2-trial would re-arm a Stage 2 trial at shutdown. Park that file first; nothing armed"
+  fi
+  id=$(entry_id "$target")
+  tmp=$(mktemp) || die "no temp file"; trap 'rm -f "$tmp"' EXIT
+  { printf '\007\000\000\000'; printf '%s' "$id" | iconv -f UTF-8 -t UTF-16LE; printf '\000\000'; } > "$tmp"   # attributes NV|BS|RT, then the id
+  drop_var
+  cat "$tmp" > "$VAR" || die "cannot write $VAR"                                                           # one write(2), as efivarfs needs
+  if [ -x "$SAVE" ]; then "$SAVE" || { drop_var; die "efi-vars-save failed: the request would be lost at reset; taken back"; }; else drop_var; die "no $SAVE: U-Boot's file cannot be updated; taken back"; fi
+  store_has "$id"; rc=$?
+  [ $rc = 0 ] || { cmd_clear >/dev/null 2>&1; die "U-Boot's variable file does not hold '$id' after the save (code $rc): not hang-safe; taken back"; }
+  mkdir -p "$STATE" && printf '%s %s\n' "$BOOTID" "$id" > "$STATE/boot-once-armed"
+  echo "armed: the next boot starts '$target' (id $id) once. Limine erases the request when it reads it."
+  echo "       U-Boot's variable file holds it now. default_entry stays 1. A hang before the root filesystem leaves the repair entry as the next boot."
+}
+
+case ${1:-} in
+  entries) cmd_entries ;;
+  check)   cmd_check ;;
+  arm)     shift; cmd_arm "$@" ;;
+  status)  cmd_status ;;
+  clear)   cmd_clear ;;
+  mark-not-durable) cmd_mark_not_durable ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

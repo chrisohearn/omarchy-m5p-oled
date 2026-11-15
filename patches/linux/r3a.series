@@ -1,0 +1,42 @@
+# K114s r3a kernel: patches in the order they are applied to the running kernel's source.
+#
+# Base: aurora-silicon/linux a34d26c2 + betizzel/omarchy-m5 linux-j714s-27.2.patch (19 patches,
+# release omarchy-j714s-3 "v272-4"), the source of the running K114S-R1 kernel, then:
+#
+#   0. patches/linux/pr1568.patch         `patch -Np1 --no-backup-if-mismatch` (git am refuses it: one hunk
+#                                          needs fuzz); this is what the running kernel has
+#   1. localversion.10-pkgrel             the file's content becomes  -17.v272-4-k114s-r3a  (no newline needed)
+#                                          so the release is 7.3.0-17.v272-4-k114s-r3a-ARCH, not the
+#                                          running kernel's 7.3.0-17.v272-4-ARCH
+#   2. the patches below, with `git am`, in this order
+#   3. configuration: the running kernel's config + patches/linux/config/k114s-r3.config, validated
+#      (docs/r3-integration.md, "Kernel")
+#
+# NOT in r3a: sleep-lid/0010 (788441e0, GPU mailboxes by interrupt only). The GPU Stage 2 trial that runs on this Mac
+# receives on those mailboxes by polling, and 0010 removes the polling for an interrupt never seen on a 14-inch T6050
+# (device-tree review, docs/r3-integration.md). It belongs to r3b, after the line is proven on a 0009-only kernel.
+#
+# Order: sleep-lid first (it carries #1688 and #1844, which r3/display-gpu also has: taken once, from here),
+# then the display driver's 120 Hz gate and bindings, then sound, then USB. Every patch applies cleanly
+# in this order (agent-run, git am, no fuzz; 20 patches). The built tree was the 21-patch tree with 0010 reverted
+# (git apply -R), which is the same source.
+sleep-lid/0001-PCI-apple-qualify-the-K116s-for-suspend-to-idle-over.patch
+sleep-lid/0002-PCI-apple-let-devices-below-a-kernel-trained-port-le.patch
+sleep-lid/0003-PCI-apple-qualify-the-K114s-for-suspend-to-idle-over.patch
+sleep-lid/0004-drm-sysfb-simpledrm-eDP-connector-for-an-Apple-built.patch
+sleep-lid/0005-arm64-dts-apple-t6050-k114-k116-report-the-built-in-.patch
+sleep-lid/0006-dt-bindings-display-simple-framebuffer-add-apple-int.patch
+sleep-lid/0007-power-supply-macsmc-skip-an-unreadable-manufacture-d.patch
+sleep-lid/0008-arm64-dts-apple-t6050-keep-the-PMP-s-power-domains-o.patch
+sleep-lid/0009-soc-apple-mailbox-receive-T6050-GPU-mailboxes-by-int.patch
+display-gpu/0003-drm-apple-offer-only-the-120-Hz-mode-on-the-firmware.patch
+display-gpu/0004-drm-apple-test-that-an-external-DCP-keeps-its-60-Hz-.patch
+display-gpu/0005-drm-apple-keep-every-mode-on-an-external-firmware-27.patch
+display-gpu/0006-drm-apple-scope-the-120-Hz-mode-gate-to-the-T6050-in.patch
+display-gpu/0009-dt-bindings-display-apple-dcp-accept-K-board-panel-c.patch
+display-gpu/0010-dt-bindings-gpu-apple-agx-Tell-the-two-G17S-layouts-.patch
+sound/0001-ASoC-apple-macaudio-Add-K116.patch
+sound/0002-ASoC-tas2764-keep-the-bus-quiet-while-the-amp-is-in-.patch
+sound/0003-i2c-pasemi-report-a-NACK-as-a-NACK-while-the-STOP-is.patch
+sound/0004-ASoC-apple-macaudio-Add-K114-with-the-speakers-off.patch
+usb/0001-usb-typec-tipd-sn201202x-probe-asynchronously.patch

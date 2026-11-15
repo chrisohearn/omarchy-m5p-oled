@@ -1,0 +1,30 @@
+#!/bin/sh
+# /etc/systemd/user-environment-generators/70-k114s-gpu-desktop (root-owned, mode 0755). Version 2: r3a.
+# K114s with the GPU's render node present and no display coprocessor card: the desktop stays on
+# the CPU unless the owner opts in. Prints nothing on a boot without the render node (r1), so that
+# boot is exactly as before. Runs after 30-systemd-environment-d-generator, so it overrides
+# /usr/lib/environment.d/90-omarchy-j714s-gpu.conf.
+#   opt in:   touch ~/.config/k114s-gpu-desktop     (then log out and in)
+#   opt out:  rm ~/.config/k114s-gpu-desktop        (then log out and in, or: systemctl restart sddm)
+#   optional: echo zink >~/.config/k114s-gpu-desktop   to run the desktop through zink instead
+# r3a: the r3a kernel (release ...-k114s-r3a-ARCH) has not run on the GPU tree. On that kernel the desktop
+# stays on the CPU even with the opt-in above, until the separate opt-in
+#   touch ~/.config/k114s-gpu-desktop-r3a           (docs/r3-integration.md, the r3a + GPU step)
+# exists. A kernel trial that lands on the GPU tree by accident (a Stage 2 trial left armed) therefore
+# still draws on the CPU.
+drm=${K114S_SYS_ROOT:-/sys}/bus/platform/drivers/aurora
+ls "$drm"/*/drm/renderD* >/dev/null 2>&1 || exit 0
+[ -e /dev/dri/by-path/platform-display-subsystem-card ] && exit 0
+# The user manager runs generators with an almost empty environment: HOME is not set there.
+home=${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}
+opt="${home:-/nonexistent}/.config/k114s-gpu-desktop"
+case ${K114S_UNAME_R:-$(uname -r)} in
+  *-k114s-r3a-ARCH) [ -e "$opt-r3a" ] || opt=/nonexistent/k114s-gpu-desktop ;;
+esac
+if [ -e "$opt" ]; then
+  [ "$(cat "$opt" 2>/dev/null)" = zink ] && echo MESA_LOADER_DRIVER_OVERRIDE=zink
+  exit 0
+fi
+echo LIBGL_ALWAYS_SOFTWARE=1
+echo GBM_ALWAYS_SOFTWARE=1
+echo ASAHI_M5_BRINGUP=0

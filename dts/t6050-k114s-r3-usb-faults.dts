@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s r1 plus the SPMI fault queues of the two port-controller buses, and nothing else: a
+ * diagnostic tree for a plug test that failed with SPMI errors. Not booted on a K114s.
+ */
+#define K114S_R1_N1
+#define K114S_R1_USB
+#include "t6050-k114s-common.dtsi"
+#define K114S_R3_USB_SPMI_FAULTS
+#include "t6050-k114s-usb.dtsi"

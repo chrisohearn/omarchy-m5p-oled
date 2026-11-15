@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s candidate r3a with sound: r3a plus the headphone jack and the microphones (no speakers).
+ * Needs t6050-k114s-pmp-tunables.dtsi next to it at build time (docs/r3-sound.md, "Values that
+ * come from this Mac's Apple device tree"). Not buildable without it, on purpose.
+ */
+#define K114S_R3A_SOUND
+#include "t6050-k114s-r3a.dts"
