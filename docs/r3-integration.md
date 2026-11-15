@@ -331,7 +331,9 @@ the proven r1 file (`45a5dbef19c1...`) byte for byte, which is the check that th
 - **(iii) the r3a kernel on the GPU tree**, once, as step G.
 - **(iv) promotion**, only after (ii) and (iii) boot cleanly twice: copy the configured file to
   `/boot/efi/k114s-repair/known-good/boot-ctxr.bin`, then put the r3a file in place and update the pinned tree
-  (`/boot/efi/k114s-repair/k114s.dtb` and `/usr/local/lib/omarchy-k114s/k114s.dtb`), otherwise the next run of the Stage 2 hook rebuilds the r1 tree. Not part of this runbook.
+  (`/boot/efi/k114s-repair/k114s.dtb` and `/usr/local/lib/omarchy-k114s/k114s.dtb`), otherwise the next run of the Stage 2 hook rebuilds the r1 tree. Not part of this runbook:
+  the promotion that was decided (r3a with the GPU tree, not the r3a tree) is `docs/r3a-promotion.md`. Since that change `k114s-boot-once` no longer requires
+  `default_entry: 1`: the fallback is whatever `default_entry` names (an index or an entry path), checked as described there.
 
 ### Ways back
 

@@ -5,9 +5,16 @@
 # host says SKIPPED and does not count as a failure (see the head of each test for what it needs).
 T=$(cd "$(dirname "$0")" && pwd)
 status=0; total_pass=0; total_fail=0; skipped=0
-for f in "$T"/k114s-syntax.sh "$T"/test-r3-guard.sh "$T"/test-r3-recovery.sh "$T"/test-r3-check.sh "$T"/test-r3-release.sh "$T"/test-r3-install.sh "$T"/test-r3-pacman.sh "$T"/test-r3-pacman-sig.sh "$T"/test-runbook-stop.sh "$T"/test-esp-trim.sh; do
+for f in "$T"/k114s-syntax.sh "$T"/test-r3-guard.sh "$T"/test-r3-recovery.sh "$T"/test-r3-check.sh "$T"/test-r3-release.sh "$T"/test-r3-install.sh "$T"/test-r3-pacman.sh "$T"/test-r3-pacman-sig.sh "$T"/test-runbook-stop.sh "$T"/test-esp-trim.sh \
+    "$T"/test-boot-once.sh "$T"/test-gpu-guard.sh "$T"/test-promotion-runbook.sh; do
   [ -f "$f" ] || continue
-  out=$(bash "$f" "$@" 2>&1); code=$?
+  # the r3a-trial tests take the path of their one file, not LINUX_DIR
+  case ${f##*/} in
+    test-boot-once.sh) args=(${1:+"$1/r3a-trial/k114s-boot-once"}) ;;
+    test-gpu-guard.sh) args=(${1:+"$1/r3a-trial/70-k114s-gpu-desktop"}) ;;
+    *) args=("$@") ;;
+  esac
+  out=$(bash "$f" "${args[@]}" 2>&1); code=$?
   line=$(printf '%s\n' "$out" | tail -n 1)
   printf '%s\n' "$out" | grep '^FAIL' || true
   echo "$line"

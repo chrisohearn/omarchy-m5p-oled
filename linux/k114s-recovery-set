@@ -100,7 +100,7 @@ fi
   conf=$(limine_conf)
   if [[ -f $conf ]]; then
     default=$(limine_default "$conf")
-    echo "default entry   $default: $(limine_title_of "$conf" "${default:-0}")"
+    echo "default entry   $default: $(limine_title_of "$conf" "$(limine_default_index "$conf")")"
   fi
   echo "esp free bytes  $(esp_free)"
   echo "stage2 sha256   $(sum "$ESP/$STAGE2_REL")   ($STAGE2_REL, the configured Stage 2)"

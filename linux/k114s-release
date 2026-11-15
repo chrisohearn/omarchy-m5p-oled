@@ -453,7 +453,8 @@ stage_boot() { # stage_boot PKG...: verdict fixed, classes boot-uki / boot-stage
     note "PROBLEM: the proven boot image $known_uki changed during the transaction. Its copy is $dir/esp. Do not restart before it is back"
   fi
   index=$(limine_entry_of "$conf" "$known_uki")
-  if [[ -n $index && $(limine_default "$conf") != "$index" ]]; then limine_set_default "$conf" "$index" && log "the default boot entry is the proven image again (entry $index)"; fi
+  if [[ -n $index && $(limine_default_index "$conf") != "$index" ]]; then if limine_set_default "$conf" "$index"; then log "the default boot entry is the proven image again (entry $index)"
+    else note "PROBLEM: could not point the default back at the proven entry $index; see $dir/esp/limine.conf"; fi; fi
   [[ -n $index ]] || note "PROBLEM: the boot menu has no entry for the proven image $known_uki any more; see $dir/esp/limine.conf"
   if ((!ok)); then
     if ((drop)) && [[ ! -f $ESP/$std ]]; then cp "$dir/esp/$std" "$ESP/$std" 2>/dev/null || true; fi
@@ -909,7 +910,7 @@ cmd_status() {
     echo "ESP:       $(( $(esp_free) / 1000000 )) MB free"
     if snapper_sync_on; then echo "           limine-snapper-sync is on: snapshot boot files use $(( $(snapshot_bytes) / 1000000 )) MB (limine_history); it limits itself and checks the usage before it writes"; fi
     conf=$(limine_conf)
-    [[ -f $conf ]] && echo "           default entry $(limine_default "$conf"): $(limine_title_of "$conf" "$(limine_default "$conf")")"
+    [[ -f $conf ]] && echo "           default entry $(limine_default "$conf"): $(limine_title_of "$conf" "$(limine_default_index "$conf")")"
     for name in "$ESP"/EFI/Linux/*.efi "$ESP"/m1n1/*.bin; do [[ -f $name ]] && echo "           $(( $(size "$name") / 1000000 )) MB  ${name#"$ESP"/}"; done
   fi
   if [[ -f $VAR/check/verdict.tsv ]]; then

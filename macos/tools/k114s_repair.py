@@ -13,14 +13,24 @@ Linux-side files go to k114s-repair/r2c.
   apply       check, then back up and write (asks for one typed confirmation)
   kernel V    after apply: swap the repair kernel: r1 (trackpad fix B) | r1a (trackpad fix A)
   stage2 V    after apply: switch only the Stage 2 device tree: r1 | wifi | gp1c | trial1
-  default V   after apply: which boot entry starts by default: repair | original
+  default V   after apply: which boot entry starts by default: repair | original, or after the r3a
+              promotion (docs/r3a-promotion.md): k114s | aurora (written as an entry path)
   rollback    restore from the ESP backup:  rollback stage2  (device tree only)
               or  rollback all  (limine.conf and Stage 2; removes the repair kernel)
+  restore-repair [--check] [IMAGE]
+              after the r3a promotion (docs/r3a-promotion.md): put the static repair image back (IMAGE, default
+              promotion/omarchy_linux-aurora-k114s.efi in this bundle, checked against the ESP's record) with the
+              saved repair block as entry 1 and default_entry: 1; removes omarchy_linux-aurora.efi and its entry
+              first when the space needs it. --check verifies everything and writes nothing.
 
 If the original kernel image (EFI/Linux/omarchy_linux-aurora.efi) was removed from the ESP to make room
 (the r3a kernel trial, docs/r3-integration.md), status, stage2, default repair and rollback stage2 keep
 working; kernel, default original, rollback all and apply stop with a message and write nothing,
 because each would need that image.
+After the promotion (the repair image and its entry removed, default_entry the path Omarchy/linux-k114s) the ESP is
+found by the r3a image (EFI/Linux/omarchy_linux-k114s.efi); status, stage2 r1, default k114s and default aurora work;
+default repair, kernel, rollback all and apply stop with a message and write nothing; restore-repair puts the
+repair image and entry back when both hook-built images fail.
 
 Options: --kernel r1|r1a              which repair kernel apply installs (default r1)
          --stage2 r1|wifi|gp1c|keep   which device tree the Stage 2 gets at apply (default r1)
@@ -48,6 +58,13 @@ sys.path.insert(0, HERE)
 import k114s_esp_tool as tool  # noqa: E402
 
 UKI = "EFI/Linux/omarchy_linux-aurora.efi"
+# The hook-built image of the linux-k114s package (r3a), the default after the promotion (docs/r3a-promotion.md).
+K114S_UKI = "EFI/Linux/omarchy_linux-k114s.efi"
+# default V for the promoted layout: the Limine entry path written as default_entry, and the image it must boot.
+PATH_DEFAULTS = {"k114s": ("Omarchy/linux-k114s", K114S_UKI), "aurora": ("Omarchy/linux-aurora", UKI)}
+# Stage 2 files built on this Mac outside the bundle (docs/r3-gpu-result.md, docs/r3-integration.md), named in status.
+LOCAL_STAGE2 = {"9825a10317866865b49d26bc1df2d0d04a818d385ca62c1a3ce81d96f3d6b8fc": "r3-gpu (GPU tree, not in this bundle)",
+                "5164bb1e1be1fba39aee64229863b2f835828edd8b4f90e8cfa91e71a6fd8cd9": "r3a (r3a tree, not in this bundle)"}
 # The one repair kernel image. Whichever variant is installed lives at this path.
 REPAIR_UKI = "EFI/Linux/omarchy_linux-aurora-k114s.efi"
 # Paths bundles r1 and r2 would have used (never applied on this Mac); recognised and removed by rollback.
@@ -123,8 +140,8 @@ def run(*command):
 def is_omarchy_esp(mount):
     have = lambda p: os.path.isfile(os.path.join(mount, p))
     # The original kernel image may be gone on purpose (the r3a slot swap, docs/r3-integration.md); the
-    # repair image then stands in for it.
-    return (have(UKI) or have(REPAIR_UKI)) and all(have(p) for p in (STAGE2, LIMINE, "m1n1/boot.bin")) \
+    # repair image then stands in for it, and after the promotion (docs/r3a-promotion.md) the r3a image does.
+    return (have(UKI) or have(REPAIR_UKI) or have(K114S_UKI)) and all(have(p) for p in (STAGE2, LIMINE, "m1n1/boot.bin")) \
         and os.path.isdir(os.path.join(mount, "vendorfw"))
 
 
@@ -275,6 +292,8 @@ def stage2_state(data, m):
     digest = sha(data)
     if digest in known:
         return known[digest]
+    if digest in LOCAL_STAGE2:
+        return LOCAL_STAGE2[digest]
     try:
         prefix, trees, trailer = tool.stage2_split(data, m["aura_prefix_bytes"])
     except SystemExit:
@@ -302,14 +321,17 @@ def live_state(esp, m):
     state = {"device": esp.device, "files": {}}
     for rel in (UKI, STAGE2, LIMINE, "m1n1/boot.bin") + VENDORFW:
         if not esp.has(rel):
-            if rel == UKI and esp.has(REPAIR_UKI):
+            if rel == UKI and (esp.has(REPAIR_UKI) or esp.has(K114S_UKI)):
                 continue   # removed on purpose to make room (docs/r3-integration.md); not an error
             raise Stop("the ESP has no " + rel)
         state["files"][rel] = sha(esp.get(rel))
     if UKI in state["files"]:
-        uki = tool.Uki(esp.get(UKI))
-        state["uki_uname"] = uki.content(".uname").rstrip(b"\0").decode()
-        state["uki_linux_sha256"] = sha(uki.content(".linux"))
+        try:
+            uki = tool.Uki(esp.get(UKI))
+            state["uki_uname"] = uki.content(".uname").rstrip(b"\0").decode()
+            state["uki_linux_sha256"] = sha(uki.content(".linux"))
+        except SystemExit:   # status must not die on the way back: report it, the commands that need it check "kernel"
+            state["uki_uname"], state["uki_linux_sha256"] = None, None
         state["kernel"] = {m["original_kernel_sha256"]: "original v272-4"}.get(state["uki_linux_sha256"], "unknown")
     else:
         state["uki_uname"], state["uki_linux_sha256"], state["kernel"] = None, None, "removed"
@@ -324,10 +346,8 @@ def live_state(esp, m):
     limine = esp.get(LIMINE).decode("utf-8")
     state["limine_has_repair_entry"] = tool.LIMINE_MARKER in limine or any(
         p in limine for p in (REPAIR_UKI,) + OLD_REPAIR_UKIS)
-    default = [l.split(":", 1)[1].strip() for l in limine.split("\n") if l.startswith("default_entry")]
-    titles = [l.strip() for l in limine.split("\n") if l.lstrip().startswith("/")]
-    state["limine_default"] = "%s -> %s" % (default[0], titles[int(default[0]) - 1].lstrip("/+")) \
-        if default and default[0].isdigit() and 0 < int(default[0]) <= len(titles) else "unset"
+    state["limine_default"] = default_text(limine)
+    state["k114s_uki_present"] = esp.has(K114S_UKI)
     state["backup_present"] = esp.has(BACKUP_DIR + "/backup.json")
     state["linux_revisions"] = [r for r in ("r1", "r2", "r2c") if esp.has(REPAIR_DIR + "/" + r + "/SHA256SUMS")]
     state["free_bytes"] = esp.free()
@@ -335,10 +355,57 @@ def live_state(esp, m):
     return state
 
 
+def limine_entries(text):
+    """[(index, path, efi)] in Limine's numbering (every entry line counts, folders too). The path joins the names
+    with '/'; the '+' of an expanded folder is not part of a name, the name is the rest of the line after blanks, as
+    Limine 12.9.6 reads it (common/lib/config.c). efi is the file of its path: line ('' for a folder)."""
+    out, names = [], {}
+    for raw in text.split("\n"):
+        line = raw.lstrip(" \t")
+        if line.startswith("/"):
+            depth = len(line) - len(line.lstrip("/"))
+            name = line[depth:]
+            name = (name[1:] if name.startswith("+") else name).lstrip(" \t")
+            names[depth] = name
+            out.append([len(out) + 1, "/".join(names[d] for d in range(1, depth + 1)), ""])
+        elif out and line.startswith("path:"):
+            out[-1][2] = line[5:].strip().split("boot():/", 1)[-1]
+    return out
+
+
+def default_value(text):
+    for line in text.split("\n"):
+        if line[:14].lower() == "default_entry:":
+            return line[14:].lstrip(" \t")
+    return None
+
+
+def default_entry(text):
+    """The entry default_entry names, as Limine resolves it, or None."""
+    value, entries = default_value(text), limine_entries(text)
+    if value is None:
+        return None
+    if value.isdigit():
+        return entries[int(value) - 1] if 0 < int(value) <= len(entries) else None
+    return next((e for e in entries if e[1] == value), None)
+
+
+def default_text(text):
+    value, hit = default_value(text), default_entry(text)
+    if value is None:
+        return "unset"
+    if hit is None:
+        return "%s -> NAMES NO ENTRY (Limine would stop at the menu)" % value
+    if not hit[2]:
+        return "%s -> a folder (Limine would stop at the menu)" % value
+    return "%s -> %s (entry %d)" % (value, hit[1].split("/")[-1], hit[0])
+
+
 def show(state):
     say("  ESP device:            %s" % state["device"])
     if state["kernel"] == "removed":
-        say("  installed kernel UKI:  REMOVED (the original image is not on the ESP; the repair image is the only Linux image)")
+        say("  installed kernel UKI:  REMOVED (the original image is not on the ESP; %s)"
+            % ("the r3a image omarchy_linux-k114s.efi is" if state.get("k114s_uki_present") else "the repair image is the only Linux image"))
     else:
         say("  installed kernel UKI:  %s (%s)" % (state["kernel"], state["uki_uname"]))
     say("  Stage 2 (boot-ctxr):   %s" % state["stage2"])
@@ -590,6 +657,10 @@ def rollback(esp, m, what):
         record = json.loads(esp.get(BACKUP_DIR + "/backup.json").decode())
         if what not in ("stage2", "all"):
             raise Stop("rollback takes  stage2  or  all")
+        if what == "all" and REPAIR_UKI not in esp.get(LIMINE).decode("utf-8"):
+            raise Stop("limine.conf has no repair entry (the r3a promotion removed it on purpose). rollback all would put back "
+                       "the menu from before the repair, whose entry names an image that is no longer the one on the ESP. "
+                       "Nothing written. Use  stage2 r1  or  default k114s / default aurora  instead")
         if what == "all" and not esp.has(UKI):
             raise Stop("the original kernel image (%s) is not on the ESP. rollback all would restore a menu that points "
                        "at it and delete the repair image, leaving no Linux entry that starts. Nothing written. "
@@ -697,24 +768,203 @@ def switch_default(esp, m, choice):
     esp.open(True)
     try:
         text = esp.get(LIMINE).decode("utf-8")
-        if REPAIR_UKI not in text:
-            raise Stop("apply the repair first (limine.conf has no repair entry)")
-        if choice in ("repair", "r1", "r1a"):
-            index = 1
-        elif choice == "original":
-            if not esp.has(UKI):
-                raise Stop("the original kernel image is not on the ESP, so that entry cannot start. Nothing written. "
-                           "Use  default repair")
-            old = esp.get(BACKUP_DIR + "/" + LIMINE).decode("utf-8")
-            value = [l.split(":", 1)[1].strip() for l in old.split("\n") if l.startswith("default_entry")]
-            index = (int(value[0]) if value and value[0].isdigit() else 1) + 1
+        if choice in PATH_DEFAULTS:
+            # The promoted layout (docs/r3a-promotion.md): written as an entry path, which keeps naming the same
+            # entry when the Linux hook adds or removes entries in front of it.
+            value, efi = PATH_DEFAULTS[choice]
+            hit = next((e for e in limine_entries(text) if e[1] == value), None)
+            if hit is None or hit[2].split("#", 1)[0] != efi:
+                raise Stop("limine.conf has no entry %s that boots %s; nothing written" % (value, efi))
+            if not esp.has(efi):
+                raise Stop("%s is not on the ESP, so that entry cannot start; nothing written" % efi)
+            if "#" in hit[2] and hashlib.blake2b(esp.get(efi)).hexdigest() != hit[2].split("#", 1)[1]:
+                raise Stop("%s does not match its hash in limine.conf (Limine would wait for a key the keyboard cannot "
+                           "give); nothing written" % efi)
+            lines = text.split("\n")
+            at = [i for i, l in enumerate(lines) if l[:14].lower() == "default_entry:"]
+            if len(at) != 1:
+                raise Stop("limine.conf has %d default_entry lines, not one; nothing written" % len(at))
+            lines[at[0]] = "default_entry: " + value
+            new = "\n".join(lines)
+            if default_entry(new) is None or default_entry(new)[2] != hit[2]:
+                raise Stop("internal: the new default does not resolve; nothing written")
+            esp.put(LIMINE, new.encode("utf-8"))
         else:
-            raise Stop("default must be repair or original")
-        esp.put(LIMINE, tool.limine_default(text, index).encode("utf-8"))
+            if REPAIR_UKI not in text:
+                raise Stop("limine.conf has no repair entry (after the r3a promotion it is gone on purpose); nothing written. "
+                           "Use  default k114s  or  default aurora")
+            titles = [l for l in text.split("\n") if l.lstrip().startswith("/")]
+            if not titles or titles[0] not in ["/" + v[2] for v in VARIANTS.values()]:
+                raise Stop("the repair entry is not the first menu entry; not changing the default")
+            if choice in ("repair", "r1", "r1a"):
+                index = 1
+            elif choice == "original":
+                if not esp.has(UKI):
+                    raise Stop("the original kernel image is not on the ESP, so that entry cannot start. Nothing written. "
+                               "Use  default repair")
+                old = esp.get(BACKUP_DIR + "/" + LIMINE).decode("utf-8")
+                value = [l.split(":", 1)[1].strip() for l in old.split("\n") if l.startswith("default_entry")]
+                index = (int(value[0]) if value and value[0].isdigit() else 1) + 1
+            else:
+                raise Stop("default must be repair, original, k114s or aurora")
+            esp.put(LIMINE, tool.limine_default(text, index).encode("utf-8"))
         state = live_state(esp, m)
     finally:
         esp.close()
     say("Default boot entry changed.")
+    show(state)
+
+
+# --- restore-repair: the static repair image back from macOS after the promotion -------------------------------------
+# docs/r3a-promotion.md: the promotion removes the repair image and its entry from the ESP. Both images left there are
+# built by the Linux hook from the same initramfs state, so one bad update can break both. The owner keeps the repair
+# image in the bundle folder (promotion/, step P4b), and the runbook keeps the exact repair block, command line
+# included, in a root-only file on the ESP (step P0e) and the owner a copy beside the image. This puts them back.
+PROMOTION_DIR = REPAIR_DIR + "/promotion"
+SAVED_BLOCK = PROMOTION_DIR + "/repair-block.conf"
+BUNDLE_PROMOTION = "promotion"
+REPAIR_TITLES = ["/" + v[2] for v in VARIANTS.values()]
+
+
+def repair_record(esp):
+    """(size, sha256) of the repair image as apply wrote it, from the record on the ESP."""
+    rel = LINUX_DIR + "/" + UKI_RECORD
+    if not esp.has(rel):
+        raise Stop("the ESP has no %s, so the repair image cannot be checked; nothing written" % rel)
+    for line in esp.get(rel).decode("utf-8", "replace").split("\n"):
+        words = line.split()
+        if len(words) == 4 and words[0] == "uki" and words[1] == REPAIR_UKI and words[2].isdigit():
+            return int(words[2]), words[3]
+    raise Stop("%s does not name %s; nothing written" % (rel, REPAIR_UKI))
+
+
+def check_repair_block(text):
+    """The saved block must be one flat repair entry, exactly as apply wrote it: the marker, a repair title, one path
+    line naming the repair image, one command line. It is never printed (its command line is this Mac's)."""
+    lines = text.split("\n")
+    if not text.endswith("\n") or lines[0] != tool.LIMINE_MARKER + " (added from macOS; remove this block to undo)":
+        raise Stop("the saved repair block does not start with the repair marker; nothing written")
+    if len(lines) < 2 or lines[1] not in REPAIR_TITLES:
+        raise Stop("the saved repair block's second line is not a repair entry title; nothing written")
+    if [l for l in lines[1:] if l.lstrip().startswith("/")] != [lines[1]] or any(l.startswith("###") for l in lines[1:]):
+        raise Stop("the saved repair block holds more than one entry; nothing written")
+    if [l.strip() for l in lines if l.strip().startswith("path:")] != ["path: boot():/" + REPAIR_UKI]:
+        raise Stop("the saved repair block does not boot exactly %s; nothing written" % REPAIR_UKI)
+    cmd = [l.strip() for l in lines if l.strip().startswith("cmdline:")]
+    if len(cmd) != 1 or not cmd[0][8:].strip():
+        raise Stop("the saved repair block has no command line; nothing written")
+
+
+def saved_repair_block(esp):
+    """The saved block from the ESP and/or the bundle folder; when both exist they must be the same bytes."""
+    found = {}
+    if esp.has(SAVED_BLOCK):
+        found["the ESP's " + SAVED_BLOCK] = esp.get(SAVED_BLOCK)
+    local = os.path.join(BUNDLE, BUNDLE_PROMOTION, "repair-block.conf")
+    if os.path.isfile(local):
+        found["the bundle's " + BUNDLE_PROMOTION + "/repair-block.conf"] = read(local)
+    if not found:
+        raise Stop("no saved repair block (%s on the ESP, or %s/repair-block.conf in the bundle); nothing written"
+                   % (SAVED_BLOCK, BUNDLE_PROMOTION))
+    if len(set(found.values())) != 1:
+        raise Stop("the saved repair blocks differ (%s); nothing written" % ", ".join(sorted(found)))
+    text = next(iter(found.values())).decode("utf-8")
+    check_repair_block(text)
+    return text, sorted(found)
+
+
+def drop_sub_entry(text, name):
+    """TEXT without the sub-entry '//NAME' (its line up to the next entry line)."""
+    out, skip = [], False
+    for line in text.split("\n"):
+        stripped = line.strip(" \t")
+        if stripped.startswith("/"):
+            skip = stripped == "//" + name
+        if not skip:
+            out.append(line)
+    return "\n".join(out)
+
+
+def with_repair_block(text, block):
+    """TEXT with BLOCK as the first menu entry (before any '###' lines directly above the first entry, where the
+    promotion cut it from) and default_entry 1."""
+    lines = text.split("\n")
+    first = next((i for i, l in enumerate(lines) if l.startswith("/")), None)
+    if first is None:
+        raise Stop("limine.conf has no menu entry; nothing written")
+    while first > 0 and lines[first - 1].startswith("###"):
+        first -= 1
+    at = [i for i, l in enumerate(lines[:first]) if l[:14].lower() == "default_entry:"]
+    if len(at) != 1:
+        raise Stop("limine.conf has %d default_entry lines before its first entry, not one; nothing written" % len(at))
+    lines[at[0]] = "default_entry: 1"
+    new = "\n".join(lines[:first] + block.split("\n")[:-1] + lines[first:])
+    hit = default_entry(new)
+    if hit is None or hit[0] != 1 or hit[2] != REPAIR_UKI or new.count(REPAIR_UKI) != 1:
+        raise Stop("internal: the restored menu does not start the repair entry; nothing written")
+    return new
+
+
+def restore_repair(esp, m, image_path, check_only):
+    image_path = image_path or os.path.join(BUNDLE, BUNDLE_PROMOTION, os.path.basename(REPAIR_UKI))
+    if not os.path.isfile(image_path):
+        raise Stop("no repair image at %s (copied there in step P4b of docs/r3a-promotion.md); nothing written" % image_path)
+    image = read(image_path)
+    esp.open(not check_only)
+    try:
+        size, digest = repair_record(esp)
+        if len(image) != size or sha(image) != digest:
+            raise Stop("%s is not the repair image the ESP's record names (%d bytes, sha256 %s...); nothing written"
+                       % (image_path, size, digest[:16]))
+        block, sources = saved_repair_block(esp)
+        text = esp.get(LIMINE).decode("utf-8")
+        present = tool.LIMINE_MARKER in text or REPAIR_UKI in text
+        cluster, free = esp.cluster(), esp.free()
+        have_image = esp.has(REPAIR_UKI) and sha(esp.get(REPAIR_UKI)) == digest
+        need = 0 if have_image else clusters(size, cluster) + RESERVE
+        make_room = free < need
+        if check_only:
+            say("restore-repair check (nothing written):")
+            say("  repair image:   %s matches the ESP's record (%d bytes, sha256 %s...)" % (image_path, size, digest[:16]))
+            say("  saved block:    %s, one repair entry (%s)" % (" and ".join(sources), block.split("\n")[1].lstrip("/")))
+            if present:
+                if block not in text:
+                    raise Stop("limine.conf has a repair entry that is not the saved block: the saved copy is not the one "
+                               "that boots. Make the saved copy again (docs/r3a-promotion.md, P0e)")
+                say("  limine.conf:    the repair entry is in it now and is exactly the saved block (restore-repair is for after P5)")
+            else:
+                say("  limine.conf:    no repair entry; restore-repair would put the saved block first, with default_entry: 1")
+            say("  space:          %.1f MB free, %.1f MB needed; %s" % (free / 1e6, need / 1e6,
+                "omarchy_linux-aurora.efi and its entry would be removed to make room" if make_room and esp.has(UKI) else
+                ("enough as it is" if not make_room else "NOT ENOUGH, and no omarchy_linux-aurora.efi to remove")))
+            say("restore-repair check passed." if not make_room or esp.has(UKI) else "restore-repair check: short of space.")
+            return
+        if present:
+            raise Stop("limine.conf already has a repair entry: use  default repair  instead; nothing written")
+        if make_room and not esp.has(UKI):
+            raise Stop("%.1f MB free, %.1f MB needed, and no omarchy_linux-aurora.efi to remove; nothing written"
+                       % (free / 1e6, need / 1e6))
+        if make_room:
+            # The hook-built linux-aurora image goes first: it is built the same way as the image that failed. Its
+            # entry goes in the menu write below, and a run stopped in between is finished by running this again.
+            esp.remove(UKI)
+            say("removed %s to make room" % UKI)
+        if not have_image:
+            if esp.has(REPAIR_UKI):
+                esp.remove(REPAIR_UKI)   # not named by limine.conf (checked above), and not the recorded image
+            esp.put(REPAIR_UKI, image)
+            if sha(esp.get(REPAIR_UKI)) != digest:
+                raise Stop("%s does not verify after writing; limine.conf is unchanged. Run this again" % REPAIR_UKI)
+        new = text if esp.has(UKI) else drop_sub_entry(text, "linux-aurora")
+        new = with_repair_block(new, block)
+        esp.put(LIMINE, new.encode("utf-8"))
+        if esp.get(LIMINE).decode("utf-8") != new:
+            raise Stop("limine.conf does not read back as written: run this again")
+        state = live_state(esp, m)
+    finally:
+        esp.close()
+    say("Restored the repair entry as entry 1 and the default (default_entry: 1), booting %s." % REPAIR_UKI)
+    say("Start Linux: the repair kernel runs on the configured Stage 2. Then see docs/r3a-promotion.md, section 5.")
     show(state)
 
 
@@ -730,7 +980,7 @@ def main(argv):
                 raise Stop("%s needs a value" % key)
             options[key] = arguments[index + 1]
             del arguments[index:index + 2]
-    if not arguments or arguments[0] not in ("status", "check", "apply", "rollback", "stage2", "default", "kernel"):
+    if not arguments or arguments[0] not in ("status", "check", "apply", "rollback", "stage2", "default", "kernel", "restore-repair"):
         say(__doc__)
         return 2
     if options["--stage2"] not in ("r1", "wifi", "gp1c", "keep"):
@@ -746,6 +996,14 @@ def main(argv):
             show(live_state(esp, m))
         finally:
             esp.close()
+        return 0
+    if command == "restore-repair":
+        rest = arguments[1:]
+        check_only = "--check" in rest
+        rest = [a for a in rest if a != "--check"]
+        if len(rest) > 1:
+            raise Stop("usage: restore-repair [--check] [REPAIR_IMAGE]")
+        restore_repair(esp, m, rest[0] if rest else None, check_only)
         return 0
     if command == "rollback":
         rollback(esp, m, arguments[1] if len(arguments) > 1 else "all")

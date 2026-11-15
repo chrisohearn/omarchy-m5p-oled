@@ -418,4 +418,26 @@ else
   echo "SKIP signature check (no gpg)"
 fi
 
+# --- a default_entry written as an entry path (docs/r3a-promotion.md) ---------------------------------------------
+# forget-image, and every other put-back of the default, keeps a path a path: an entry the hook adds in front later cannot move it
+r=$(mk); stub "$r" EFI/Linux/omarchy_linux-aurora.efi; run "$r" k114s-release mark-known-good >/dev/null
+sed -i 's#^default_entry: 1$#default_entry: Omarchy K114s repair r1 (trackpad fix B)#' "$r/boot/efi/limine.conf"
+out=$(run "$r" k114s-release forget-image EFI/Linux/omarchy_linux-aurora-k114s.efi)
+ok "forget-image with a path default: the default becomes the proven entry's path, not a number" "$? $(sed -n 's/^default_entry: //p' "$r/boot/efi/limine.conf")" "0 Omarchy/linux-aurora"
+lt() { bash -c '. "$1/k114s-lib.sh"; shift; "$@"' _ "$L" "$@"; }
+c=$BASE/limine-path.conf
+printf 'timeout: 5\ndefault_entry: Omarchy/linux-k114s\n/+Omarchy\n  //linux-aurora\n  path: boot():/EFI/Linux/omarchy_linux-aurora.efi\n  //linux-k114s\n  path: boot():/EFI/Linux/omarchy_linux-k114s.efi\n' > "$c"
+ok "limine_default prints a path default as written" "$(lt limine_default "$c")" "Omarchy/linux-k114s"
+ok "limine_default_index resolves the path as Limine numbers entries (the folder counts)" "$(lt limine_default_index "$c")" 3
+ok "limine_path_of gives an entry's path" "$(lt limine_path_of "$c" 2)" "Omarchy/linux-aurora"
+lt limine_set_default "$c" 2; ok "limine_set_default keeps the path form" "$(lt limine_default "$c")" "Omarchy/linux-aurora"
+ok "limine_set_default refuses a number past the last entry, and changes nothing" "$(lt limine_set_default "$c" 9; status) $(lt limine_default "$c")" "1 Omarchy/linux-aurora"
+sed -i 's#^default_entry: .*#default_entry: Omarchy/nothing#' "$c"; ok "limine_default_index: a path that names nothing gives nothing" "$(lt limine_default_index "$c")" ""
+sed -i 's#^default_entry: .*#default_entry: 3#' "$c"; ok "limine_default_index: a number is itself" "$(lt limine_default_index "$c")" 3
+lt limine_set_default "$c" 2; ok "limine_set_default keeps a numeric default numeric" "$(lt limine_default "$c")" 2
+sed -i 's#^default_entry: .*#default_entry: Omarchy/linux-k114s\#1#' "$c"; ok "limine_default_index does not resolve a '#' suffix" "$(lt limine_default_index "$c")" ""
+sed -i 's#^default_entry: .*#Default_Entry: Omarchy/linux-k114s#' "$c"
+ok "limine_default reads the option name in any case, as Limine and k114s-boot-once do" "$(lt limine_default "$c") $(lt limine_default_index "$c")" "Omarchy/linux-k114s 3"
+lt limine_set_default "$c" 2; ok "limine_set_default rewrites a mixed-case default line, keeping the path form" "$(lt limine_default "$c") $(grep -c -i '^default_entry:' "$c")" "Omarchy/linux-aurora 1"
+
 finish "r3 release tests"
