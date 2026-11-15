@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test of patches/omarchy/0003-factory-reset-off-on-k114s-until-qualified.patch against the
+# Test of patches/omarchy/0005-factory-reset-off-on-k114s-until-qualified.patch against the
 # installed omarchy-system-factory-reset (or the file named by $1). No root, no mount, no reset:
 # the patched copy gets a line appended so its own "differs from the installed command" check
 # always stops it, and every case runs with stdin closed.

@@ -291,7 +291,7 @@ boot menu without the repair entry. No part of it is a feature the owner is miss
 
 How, in the style of docs/omarchy-patches.md:
 
-- **Patch** `patches/omarchy/0003-factory-reset-off-on-k114s-until-qualified.patch`. It stops
+- **Patch** `patches/omarchy/0005-factory-reset-off-on-k114s-until-qualified.patch`. It stops
   `omarchy-system-factory-reset` (an `omarchy-dev` file) when `/proc/device-tree/compatible`
   lists `apple,k114s` and `/etc/omarchy-k114s/factory-reset-qualified` does not exist, before sudo,
   before the top-level mount and before any question, with a message and exit 1. Only the K114s is
