@@ -115,6 +115,8 @@ mkrepo() { # mkrepo CHANNEL PACKAGE_FILE...: (re)build the stand-in repository "
   shift
   rm -rf "$d"; mkdir -p "$d"
   [ $# = 0 ] || cp "$@" "$d/"
+  # a stand-in detached signature beside each archive, as the real channel has; the tests' K114S_SIGCHECK accepts it
+  for f in "$d"/*.pkg.tar.zst; do [ -e "$f" ] && echo "stand-in signature" > "$f.sig"; done
   (cd "$d" && LC_ALL=C repo-add -q omarchy.db.tar.gz ./*.pkg.tar.zst >/dev/null 2>&1)
 }
 have() { local c; for c in "$@"; do command -v "$c" >/dev/null 2>&1 || return 1; done; }

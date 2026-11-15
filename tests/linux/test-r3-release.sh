@@ -49,7 +49,7 @@ run() { # run ROOT TOOL ARG...: a tool in the fake root, booted from the image i
   local r=$1 tool=$2; shift 2
   env K114S_ROOT="$r" K114S_EFI_STUB_ID="$r/stub-id" K114S_UNAME_R="${UNAME_R:-$KOLD}" K114S_PROC_VERSION="$(banner "${UNAME_R:-$KOLD}")" \
     K114S_ESP_FREE="${ESP_FREE:-$((300 * MB))}" K114S_ESP_DT="${ESP_DT:-$r/none}" K114S_ESP_PARTUUID="${ESP_UUID:-}" K114S_BOOT_ID="${BOOT_ID:-aaaa0001}" \
-    K114S_DESKTOP="${DESKTOP:-yes}" K114S_SYS="$r/sys" K114S_PROC="$r/proc" K114S_BOOT_WAIT=0 K114S_BOOT_POLL=0 K114S_PACMAN="${PACMAN_STUB:-pacman}" \
+    K114S_DESKTOP="${DESKTOP:-yes}" K114S_SYS="$r/sys" K114S_PROC="$r/proc" K114S_BOOT_WAIT=0 K114S_BOOT_POLL=0 K114S_PACMAN="${PACMAN_STUB:-pacman}" K114S_SIGCHECK="${SIGCHECK_STUB:-true}" \
     bash ${TRACE:+-x} "$(lib "$r")/$tool" "$@" 2>&1
 }
 known() { awk -v k="$2" '$1 == k { print $2 }' "$1/var/lib/omarchy-k114s/release/known-good" 2>/dev/null; }
@@ -113,7 +113,7 @@ cat > "$BASE/pacman-stub" <<'STUB'
 #!/bin/bash
 # stands for pacman: the lists refresh works; the dry-run upgrade fails the way a new LLVM soname against the held Mesa does
 # (STUB_MODE: mesa, the default; ignore: only "ignoring package upgrade" warnings and an unrelated error; lib32: a dependency of lib32-mesa-aurora; kernel: of linux-aurora)
-[ -z "${STUB_LOG:-}" ] || echo "$*" >> "$STUB_LOG"
+[ -z "${STUB_LOG:-}" ] || echo "LC_ALL=${LC_ALL:-} $*" >> "$STUB_LOG"
 # STUB_REAL=1: everything but the dry-run upgrade goes to the real pacman (the release check and the release itself)
 [ -z "${STUB_REAL:-}" ] || case " $* " in *" -Sup "*) ;; *) exec pacman "$@" ;; esac
 case " $* " in
@@ -123,6 +123,9 @@ case " $* " in
       ignore) echo "warning: linux-aurora: ignoring package upgrade (1 => 2)"; echo "warning: mesa-aurora: ignoring package upgrade (1 => 2)"; echo "error: failed to synchronize all databases (unable to lock database)"; exit 1 ;;
       lib32) echo "error: failed to prepare transaction (could not satisfy dependencies)"; echo ":: installing llvm-libs (23.1-2) breaks dependency 'libLLVM.so=23.1-64' required by lib32-mesa-aurora"; exit 1 ;;
       kernel) echo "error: failed to prepare transaction (could not satisfy dependencies)"; echo ":: unable to satisfy dependency 'limine>=12' required by linux-aurora"; exit 1 ;;
+      conflict) echo "error: failed to prepare transaction (could not satisfy dependencies)"; echo ":: hyprland-0.58-1 and hyprland-m5-0.57.2-2 are in conflict. Remove hyprland-m5? [y/N]"; echo "error: unresolvable package conflicts detected"; exit 1 ;;
+      rival) echo "hyprland 0.58-1"; echo "omarchy 2-1"; exit 0 ;;
+      lib32conflict) echo ":: hyprland-0.58-1 and hyprland-m5-extra-0.57.2-2 are in conflict"; exit 1 ;;
       missing) echo "error: failed to prepare transaction (could not satisfy dependencies)"; echo ":: unable to satisfy dependency 'linux-aurora>=8.0' required by omarchy-mac-extra"; exit 1 ;;
     esac
     echo "error: failed to prepare transaction (could not satisfy dependencies)"
@@ -132,7 +135,7 @@ exit 0
 STUB
 chmod 755 "$BASE/pacman-stub"
 r=$(mk); out=$(PACMAN_STUB=$BASE/pacman-stub run "$r" k114s-release preflight)
-ok "preflight: names the held package whose dependency stops the upgrade, and says what to run" "$? $(echo "$out" | grep -c 'would FAIL on a dependency of held package(s): mesa-aurora') $(echo "$out" | grep -c 'mesa-aurora: the channel.s build is not fit yet')" "0 1 1"
+ok "preflight: names the held package whose dependency stops the upgrade, and says what to run" "$? $(echo "$out" | grep -c 'would FAIL on a dependency or conflict of held package(s): mesa-aurora') $(echo "$out" | grep -c 'mesa-aurora: the channel.s build is not fit yet')" "0 1 1"
 ok "preflight: and notifies" "$(notes "$r" | grep -c 'would fail on held mesa-aurora')" 1
 out=$(STUB_OK=1 PACMAN_STUB=$BASE/pacman-stub run "$r" k114s-release preflight); ok "preflight: an upgrade that works is not reported" "$? $(echo "$out" | grep -c 'no held package stands in the way')" "0 1"
 ok "preflight installs nothing and writes no trial or rollback set" "$(test -e "$r/var/lib/omarchy-k114s/release/trial"; status) $(ls "$r/var/lib/omarchy-k114s/rollback" | wc -l | tr -d ' ')" "1 0"
@@ -141,13 +144,21 @@ ok "preflight: its --dbpath (the check's private lists) comes after the one of t
 out=$(STUB_MODE=ignore PACMAN_STUB=$BASE/pacman-stub run "$r" k114s-release preflight)
 ok "preflight: 'ignoring package upgrade' warnings do not blame a held package" "$? $(echo "$out" | grep -c 'not because of a held package') $(echo "$out" | grep -c 'would FAIL')" "0 1 0"
 out=$(STUB_MODE=missing PACMAN_STUB=$BASE/pacman-stub run "$r" k114s-release preflight)
-ok "preflight: a held package that is the MISSING dependency (too old for a non-held package) is blamed" "$? $(echo "$out" | grep -c 'would FAIL on a dependency of held package(s): linux-aurora')" "0 1"
+ok "preflight: a held package that is the MISSING dependency (too old for a non-held package) is blamed" "$? $(echo "$out" | grep -c 'would FAIL on a dependency or conflict of held package(s): linux-aurora')" "0 1"
 out=$(STUB_MODE=lib32 PACMAN_STUB=$BASE/pacman-stub run "$r" k114s-release preflight)
 ok "preflight: a dependency of lib32-mesa-aurora does not blame mesa-aurora (whole names only)" "$? $(echo "$out" | grep -c 'not because of a held package') $(echo "$out" | grep -c 'would FAIL')" "0 1 0"
+out=$(STUB_MODE=conflict PACMAN_STUB=$BASE/pacman-stub run "$r" k114s-release preflight)
+ok "preflight: a failing dry run that names a held package in a conflict line (version suffix and all) blames it" "$? $(echo "$out" | grep -c 'would FAIL on a dependency or conflict of held package(s): hyprland-m5')" "0 1"
+out=$(STUB_MODE=lib32conflict PACMAN_STUB=$BASE/pacman-stub run "$r" k114s-release preflight)
+ok "preflight: a conflict with a package that merely starts with a held name blames nobody" "$? $(echo "$out" | grep -c 'not because of a held package')" "0 1"
+out=$(STUB_MODE=rival PACMAN_STUB=$BASE/pacman-stub run "$r" k114s-release preflight)
+ok "preflight: a dry run that succeeds (-Sup runs no conflict step) but lists a rival of held hyprland-m5 is not an all-clear" "$? $(echo "$out" | grep -c 'would FAIL on a dependency or conflict of held package(s): hyprland-m5') $(echo "$out" | grep -c 'no held package stands in the way')" "0 1 0"
+rm -f "$BASE/stub.log"; LC_ALL=de_DE.UTF-8 STUB_LOG=$BASE/stub.log PACMAN_STUB=$BASE/pacman-stub run "$r" k114s-release preflight >/dev/null
+ok "preflight: pacman's -Sup runs with LC_ALL=C whatever the owner's locale (the parser reads English messages)" "$(grep -c '^LC_ALL=C .*-Sup' "$BASE/stub.log")" 1
 if have pacman repo-add fakeroot vercmp bsdtar zstd; then
   # a blocking held package whose channel build is fixed is released by the preflight as release.conf allows
   r=$(mk); sync_db "$r"; run "$r" k114s-release mark-known-good >/dev/null; out=$(STUB_REAL=1 STUB_MODE=kernel PACMAN_STUB=$BASE/pacman-stub run "$r" k114s-release preflight)
-  ok "preflight: a fixed blocking kernel (and limine, the held package it needs a newer build of) goes through the release step (a rollback set is written and the transaction is tried; a fake root cannot install: it says so and names the manual command)" "$? $(echo "$out" | grep -c 'would FAIL on a dependency of held package(s): limine linux-aurora') $(ls "$r/var/lib/omarchy-k114s/rollback" | grep -c -- '-boot$') $(echo "$out" | grep -c 'linux-aurora: the transaction did not go through') $(echo "$out" | grep -c 'if linux-aurora is still held, run: sudo k114s-release release linux-aurora')" "0 1 1 1 1"
+  ok "preflight: a fixed blocking kernel (and limine, the held package it needs a newer build of) goes through the release step (a rollback set is written and the transaction is tried; a fake root cannot install: it says so and names the manual command)" "$? $(echo "$out" | grep -c 'would FAIL on a dependency or conflict of held package(s): limine linux-aurora') $(ls "$r/var/lib/omarchy-k114s/rollback" | grep -c -- '-boot$') $(echo "$out" | grep -c 'linux-aurora: the transaction did not go through') $(echo "$out" | grep -c 'if linux-aurora is not at the build that passed the check yet, run: sudo k114s-release release linux-aurora')" "0 1 1 1 1"
   r=$(mk); sync_db "$r"; run "$r" k114s-release mark-known-good >/dev/null; sed -i 's/^AUTO_RELEASE_BOOT=.*/AUTO_RELEASE_BOOT=no/' "$r/etc/omarchy-k114s/release.conf"; out=$(STUB_REAL=1 STUB_MODE=kernel PACMAN_STUB=$BASE/pacman-stub run "$r" k114s-release preflight)
   ok "preflight: AUTO_RELEASE_BOOT=no: reports the exact command, stages nothing" "$(echo "$out" | grep -c 'stage it with: sudo k114s-release release linux-aurora') $(test -e "$r/var/lib/omarchy-k114s/release/trial"; status)" "1 1"
 fi

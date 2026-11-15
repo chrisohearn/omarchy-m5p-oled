@@ -23,14 +23,17 @@
 #
 # The rules it keeps:
 #  - Only a package whose channel build passes release-criteria.conf (k114s-release-check, run
-#    fresh as root) is released, and only at the version and SHA-256 that passed.
+#    fresh as root) is released, and only at the version and SHA-256 that passed: the archive the check verified is what is
+#    installed (pacman -U of that file, after its SHA-256 is compared with the verdict again and its detached
+#    signature is verified against pacman's keyring, the check pacman -S would have made).
 #  - A rollback set is written first: the installed package rebuilt into an archive, /boot and
 #    the ESP boot files with hashes (k114s-recovery-set). No set, no release.
 #  - The hold guard lets exactly this transaction through (a permit naming its packages).
-#  - Userland packages switch directly. The GPU stack (mesa-aurora, vulkan-aurora: "keep-held" in the
-#    criteria) and every boot-chain package STAY HELD: they are installed under the permit for that one
+#  - Userland packages switch directly. Packages marked "keep-held" in the criteria (the GPU stack,
+#    mesa-aurora and vulkan-aurora, which carry the further marker "gpu"; asahi-fwextract and omarchy-mac
+#    do not) and every boot-chain package STAY HELD: they are installed under the permit for that one
 #    transaction, so the next channel build is checked again, never installed by an ordinary update.
-#    A GPU-stack build from the channel is on TRIAL (gpu-trial): if the next recorded boot has no desktop,
+#    A GPU-stack ("gpu") build from the channel is on TRIAL (gpu-trial): if the next recorded boot has no desktop,
 #    "auto" puts the rollback archive back by itself and does not install that build again.
 #  - Boot-chain packages never replace the proven boot path in one step:
 #      1. the fixed kernel/firmware is installed while Stage 2 is frozen. Its boot image becomes
@@ -73,15 +76,21 @@ PLAN_SOURCE=channel
 declare -A PLAN_VERSION=() PLAN_CLASS=() PLAN_FILE=()
 
 log() { mkdir -p "$STATE"; echo "$(now) $*" >> "$STATE/log"; say "$*"; }
+# The archive is installed with pacman -U, and pacman -U goes by LocalFileSigLevel (Optional here), so the
+# signature check that pacman -S would make is made here: the channel's detached signature (FILE.sig, fetched by
+# the check next to the archive) must verify against pacman's own keyring at full trust, as pacman -S requires.
+SIGCHECK=${K114S_SIGCHECK:-pacman-key --verify}
+signed_ok() { [[ -f $1.sig ]] && $SIGCHECK "$1.sig" "$1" >/dev/null 2>&1; }   # word splitting of SIGCHECK is meant
 note() { summary+=("$*"); log "$*"; }
 run_pacman() { # a transaction runs its boot hooks (limine-entry-tool takes the boot-partition lock itself), so this process lets go of the lock meanwhile
   local status=0 transaction=0
   [[ $1 != -S && $1 != -U ]] || transaction=1
   ((!transaction)) || boot_unlock
-  env OMARCHY_UPDATE_PACMAN=1 "$PACMAN" "${PACMAN_ARGS[@]}" "$@" 8>&- || status=$?
+  env LC_ALL=C OMARCHY_UPDATE_PACMAN=1 "$PACMAN" "${PACMAN_ARGS[@]}" "$@" 8>&- || status=$?
   return "$status"
 }
-keep_held() { [[ $(awk -v p="$1" '$1 == "package" && $2 == p { print $4; exit }' "$(data_file release-criteria.conf)") == keep-held ]]; }
+keep_held() { [[ $(awk -v p="$1" '$1 == "package" && $2 == p { print $4; exit }' "$(data_file release-criteria.conf)") == keep-held ]]; }   # stays in IgnorePkg after its release
+gpu_stack() { [[ $(awk -v p="$1" '$1 == "package" && $2 == p { print $5; exit }' "$(data_file release-criteria.conf)") == gpu ]]; }    # the explicit fifth word "gpu": AUTO_RELEASE_GPU and the GPU trial
 permit_write() { mkdir -p "$RUN"; { echo "# k114s-release permit $(now) pid $$"; printf '%s\n' "$@"; } > "$PERMIT"; }
 permit_clear() { rm -f "$PERMIT"; }
 holds() { bash "$(tool k114s-holds)" "$@"; }
@@ -161,9 +170,9 @@ cmd_mark_known_good() {
 
 # --- userland ---------------------------------------------------------------------------------
 release_userland() { # release_userland PKG: verdict fixed, class userland
-  local package=$1 want real id dir
+  local package=$1 want real id dir file
   want=$(verdict_of "$package" 5)
-  if keep_held "$package"; then
+  if gpu_stack "$package"; then
     if grep -Fxq -- "$package $want" "$GPU_GIVEN_UP" 2>/dev/null; then log "$package $want was rolled back after a boot without a desktop; it is not installed again (a newer build is checked)"; return 0; fi
     if [[ -f $GPU_TRIAL && $(kv "$GPU_TRIAL" boot_id) != "$(boot_id)" ]]; then note "$package: waits, the GPU stack from the channel ($(gpu_packages)) has not been through a boot yet"; return 0; fi
   fi
@@ -171,16 +180,23 @@ release_userland() { # release_userland PKG: verdict fixed, class userland
   if [[ $real != "$want" ]]; then
     note "$package: the check passed $want, but pacman's own lists offer ${real:-nothing}; left held (run omarchy update first)"; return 0
   fi
+  file=$(verdict_of "$package" 8)
+  if [[ ! -f $file || $(sum "$file") != "$(verdict_of "$package" 7)" ]]; then
+    note "$package: the archive the check verified (${file:-none}) is not there or its SHA-256 is not the one that passed; left held"; return 0
+  fi
+  signed_ok "$file" || { note "$package: the archive the check verified has no signature (${file##*/}.sig) or it does not verify against pacman's keyring; left held"; return 0; }
   id=$(new_id "$package")
   dir=$(rollback_set "$id" "$package" --no-uki) || { note "$package: could not write the rollback set; left held"; return 0; }
   permit_write "install $package"
-  # keep-held packages (the GPU stack) are installed under the permit alone and stay held: the next channel build is checked again
+  # keep-held packages are installed under the permit alone and stay held: the next channel build is checked again
   keep_held "$package" || holds release "$package" "$want" >/dev/null
-  if run_pacman -S --noconfirm --needed "$package" > "$dir/pacman.log" 2>&1 && [[ $(installed_version "$package") == "$want" ]]; then
+  if run_pacman -U --noconfirm "$file" > "$dir/pacman.log" 2>&1 && [[ $(installed_version "$package") == "$want" ]]; then
     permit_clear
-    if keep_held "$package"; then
+    if gpu_stack "$package"; then
       gpu_trial_add "$package" "$dir" "$want"
       note "$package installed (it stays held: the next channel build is checked again): now $want from the channel. Rollback: sudo k114s-release adopt $dir/packages/$package-*.pkg.tar.zst (it is on trial: put back by itself if the next boot shows no desktop)"
+    elif keep_held "$package"; then
+      note "$package installed (it stays held: the next channel build is checked again): now $want from the channel. Rollback: sudo k114s-release adopt $dir/packages/$package-*.pkg.tar.zst (no trial: a person checks that it works)"
     else
       note "$package released: now $want from the channel. Rollback: sudo pacman -U $dir/packages/$package-*.pkg.tar.zst"
     fi
@@ -201,6 +217,9 @@ gpu_trial_advance() { # a later boot with a desktop ends the trial; a later boot
   bid=$(kv "$GPU_TRIAL" boot_id); started=$(kv "$GPU_TRIAL" started); names=$(gpu_packages)
   for rec in "$VAR"/release/boots/*; do
     [[ -f $rec && $(kv "$rec" boot_id) != "$bid" && ! $(kv "$rec" time) < $started ]] || continue
+    # k114s-boot-success writes an interim "incomplete" record into a boot that is still running (a login screen waiting) and replaces it
+    # until the boot is ok: only a finished verdict counts, an ok record or the record of a boot that is over
+    [[ $(kv "$rec" result) == ok || $(kv "$rec" boot_id) != "$(boot_id)" ]] || continue
     seen=1
     [[ $(kv "$rec" desktop) != yes ]] || up=1
   done
@@ -311,6 +330,9 @@ stage_boot() { # stage_boot PKG...: verdict fixed, classes boot-uki / boot-stage
     if [[ $PLAN_SOURCE == channel ]]; then
       real=$(real_version "$package")
       [[ $real == "$want" ]] || { note "$package: the check passed $want, but pacman's own lists offer ${real:-nothing}; boot-chain release waits (run omarchy update first)"; return 0; }
+      file=${PLAN_FILE[$package]:-}
+      [[ -f $file && $(sum "$file") == "$(verdict_of "$package" 7)" ]] || { note "$package: the archive the check verified (${file:-none}) is not there or its SHA-256 is not the one that passed; boot-chain release waits"; return 0; }
+      signed_ok "$file" || { note "$package: the archive the check verified has no signature (${file##*/}.sig) or it does not verify against pacman's keyring; boot-chain release waits"; return 0; }
     fi
     class=${PLAN_CLASS[$package]:-}
     [[ $class == boot-uki ]] && uki_pkgs+=("$package")
@@ -381,14 +403,13 @@ stage_boot() { # stage_boot PKG...: verdict fixed, classes boot-uki / boot-stage
     # Boot-chain packages are NOT released from the holds, not even for this transaction: the permit lets
     # exactly these packages through the guard and pacman installs a named, ignored package. They are
     # held before, during and after, so the next channel build has to pass the check and the trial again.
-    [[ $PLAN_SOURCE == channel ]] || files+=("${PLAN_FILE[$package]}")
+    files+=("${PLAN_FILE[$package]}")   # the channel's verified archive or the local build: never a second download under the same name
   done
   permit_write "${lines[@]}"
   local ok=1 mods=$ROOT/usr/lib/modules had_mods=0 old_rel
   old_rel=$(running_release)
   [[ ! -d $mods/$old_rel/kernel ]] || had_mods=1
-  if [[ $PLAN_SOURCE == channel ]]; then run_pacman -S --noconfirm --needed "${packages[@]}" > "$dir/pacman.log" 2>&1 || ok=0
-  else run_pacman -U --noconfirm "${files[@]}" > "$dir/pacman.log" 2>&1 || ok=0; fi     # local builds: they stay held
+  run_pacman -U --noconfirm "${files[@]}" > "$dir/pacman.log" 2>&1 || ok=0
   permit_clear
   for package in "${packages[@]}"; do [[ $(installed_version "$package") == "${PLAN_VERSION[$package]}" ]] || ok=0; done
   # Omarchy's 11-omarchy-mac-saved-modules.hook moves the RUNNING kernel's modules to /usr/lib/modules/.old when the
@@ -774,8 +795,8 @@ do_release() { # do_release MODE PKG...: MODE auto obeys release.conf, MODE name
     is_held "$name" || continue
     fixed+=("$name")
     case $class in
-      userland) if [[ $mode == named ]] || { enabled AUTO_RELEASE yes && { ! keep_held "$name" || enabled AUTO_RELEASE_GPU no; }; }; then release_userland "$name"
-                elif keep_held "$name"; then note "$name: the channel's build is fit for the K114s; the GPU stack is not switched unattended (AUTO_RELEASE_GPU=no); release with: sudo k114s-release release $name"
+      userland) if [[ $mode == named ]] || { enabled AUTO_RELEASE yes && { ! gpu_stack "$name" || enabled AUTO_RELEASE_GPU no; }; }; then release_userland "$name"
+                elif gpu_stack "$name"; then note "$name: the channel's build is fit for the K114s; the GPU stack is not switched unattended (AUTO_RELEASE_GPU=no); release with: sudo k114s-release release $name"
                 else note "$name: the channel's build is fit for the K114s; release with: sudo k114s-release release $name"; fi ;;
       boot-uki | boot-stage2) boot+=("$name") ;;
     esac
@@ -790,34 +811,54 @@ do_release() { # do_release MODE PKG...: MODE auto obeys release.conf, MODE name
     for name in "$@"; do [[ " ${fixed[*]:-} " == *" $name "* ]] || note "$name is not released: $(verdict_of "$name" 3)"; done
   fi
 }
+preflight_conflicts() { # preflight_conflicts OUT: the held packages that a package of the upgrade list (-Sup prints no conflict step) would replace
+  local held rival upgrade
+  upgrade=$(awk 'NF == 2 && $2 ~ /[0-9]/ { print $1 }' <<<"$1")
+  [[ -n $upgrade ]] || return 0
+  for held in $(held_names); do
+    for rival in $(awk -v h="$held" '$2 == h { print $1 }' "$(data_file rivals.list)" 2>/dev/null) \
+                 $(LC_ALL=C "$PACMAN" "${PACMAN_ARGS[@]}" -Qi "$held" 2>/dev/null | sed -n 's/^Conflicts With *: *//p' | tr -s ' ' '\n' | sed 's/[<>=].*//'); do
+      if grep -Fxq -- "$rival" <<<"$upgrade"; then echo "$held"; break; fi
+    done
+  done
+}
 cmd_preflight() { # the upgrade the channel offers, worked out in the check's private copy of the lists; releases a fixed blocker as release.conf allows
-  local out status=0 name blocked=() fixed=() lines=() verdict needers
+  local out status=0 name blocked=() fixed=() pending=() lines=() verdict needers
   boot_unlock
   # a trial that a later boot has already decided is closed first, so a fixed blocker is not kept waiting on it
   advance 0; gpu_trial_advance
   run_check || { say "preflight: the release check could not run (network?); nothing checked"; return 0; }
-  out=$("$PACMAN" "${PACMAN_ARGS[@]}" --dbpath "$VAR/check/db" -Sup --noconfirm 2>&1) || status=$?
-  ((status)) || { say "preflight: no held package stands in the way of the channel's upgrade"; return 0; }
+  # LC_ALL=C: the parser below reads pacman's English messages
+  out=$(LC_ALL=C "$PACMAN" "${PACMAN_ARGS[@]}" --dbpath "$VAR/check/db" -Sup --print-format '%n %v' --noconfirm 2>&1) || status=$?
   # only the dependency errors count: pacman also prints "NAME: ignoring package upgrade" for every held package with a newer build
   # "breaks dependency 'D' required by NAME": NAME (held) is what the upgrade would break.
   # "unable to satisfy dependency 'D>=v' required by NAME": D is missing (a held package that is too old), and NAME may be held too.
+  # ":: A and B are in conflict": either name may be held.
   needers=$( { awk '/breaks dependency/ && /required by / { sub(/.*required by /, ""); print $1 }' <<<"$out"
-               awk -F"'" '/unable to satisfy dependency/ { d = $2; sub(/[<>=].*/, "", d); print d; r = $0; if (sub(/.*required by /, "", r)) { split(r, w, " "); print w[1] } }' <<<"$out"; } | sort -u)
+               awk -F"'" '/unable to satisfy dependency/ { d = $2; sub(/[<>=].*/, "", d); print d; r = $0; if (sub(/.*required by /, "", r)) { split(r, w, " "); print w[1] } }' <<<"$out"
+               awk '/^:: .* and .* are in conflict/ { for (i = 2; i <= 4; i += 2) { n = $i; sub(/-[^-]+-[^-]+$/, "", n); print n } }' <<<"$out"
+               preflight_conflicts "$out"; } | sort -u)
   for name in $(held_names); do grep -Fxq -- "$name" <<<"$needers" && blocked+=("$name"); done
-  if ((${#blocked[@]} == 0)); then say "preflight: the channel's upgrade would fail, not because of a held package: $(tail -n 2 <<<"$out" | tr '\n' ' ')"; return 0; fi
+  if ((${#blocked[@]} == 0)); then
+    if ((status)); then say "preflight: the channel's upgrade would fail, not because of a held package: $(tail -n 2 <<<"$out" | tr '\n' ' ')"
+    else say "preflight: no held package stands in the way of the channel's upgrade"; fi
+    return 0
+  fi
   for name in "${blocked[@]}"; do
     verdict=$(verdict_of "$name" 3)
     if [[ $verdict == fixed ]]; then fixed+=("$name"); lines+=("$name: the channel's build is fit for the K114s")
     else lines+=("$name: the channel's build is not fit yet (${verdict:-no verdict}); the update stops until it is. Look at: sudo k114s-release status"); fi
   done
-  say "preflight: the channel's upgrade would FAIL on a dependency of held package(s): ${blocked[*]}"
+  say "preflight: the channel's upgrade would FAIL on a dependency or conflict of held package(s): ${blocked[*]}"
   printf '%s\n' "${lines[@]}" | sed 's/^/  /'
   # A fit build is released here as release.conf allows (auto: AUTO_RELEASE, AUTO_RELEASE_BOOT, the trial rules). pacman's own lists
   # may not offer it yet (this runs before the update refreshes them): it then stays held and the next preflight, after the failed
   # update has refreshed the lists, releases it. Otherwise the line says what to run.
   if ((${#fixed[@]})); then
     do_release auto "${fixed[@]}"
-    say "preflight: if ${fixed[*]} is still held, run: sudo k114s-release release ${fixed[*]} (add --accept-manual where the criteria say a person decides), then update again"
+    # keep-held and boot-chain packages are held after a successful release too: the hint goes by the installed build
+    for name in "${fixed[@]}"; do [[ $(installed_version "$name") == "$(verdict_of "$name" 5)" ]] || pending+=("$name"); done
+    ((${#pending[@]} == 0)) || say "preflight: if ${pending[*]} is not at the build that passed the check yet, run: sudo k114s-release release ${pending[*]} (add --accept-manual where the criteria say a person decides), then update again"
   fi
   notify normal "K114s updates" "$(printf '%s\n' "The next omarchy update would fail on held ${blocked[*]}" "${lines[@]}" "${summary[@]}" | cut -c1-400)"
 }

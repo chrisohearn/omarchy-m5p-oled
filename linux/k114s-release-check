@@ -84,6 +84,10 @@ fetch() { # make the channel's package available unpacked; sets $unpacked, or $f
     fi
   fi
   [[ -f $file && $(sum "$file") == "$want" ]] || { fetch_error="${file##*/} does not match the repository list's SHA-256"; return 0; }
+  # the detached signature next to it: k114s-release verifies it before it installs this file (a missing one leaves the package held)
+  if [[ $url != file://* && ! -s $file.sig ]]; then
+    curl -fsSL --proto '=https,http' --retry 2 --max-time 120 -o "$file.sig.part" "$url.sig" 2>> "$cache/download.log" && mv -f "$file.sig.part" "$file.sig" || rm -f "$file.sig.part"
+  fi
   package_file=$file
   rm -rf "${cache:?}/x/$package"; mkdir -p "$cache/x/$package"
   # Unpack only: no scriptlet runs, no ownership or special permissions are taken from the archive.
@@ -304,6 +308,12 @@ for package in $wanted; do
     [[ -n ${group_pass[$label]:-} ]] || { [[ $verdict == error ]] || verdict=not-fixed; }
   done
   unset group_pass group_seen
+  # a fixed verdict names the verified archive (columns 7 and 8): k114s-release installs that file. Criteria that read no file
+  # (version-newer and manual only) have not fetched it yet.
+  if [[ $verdict == fixed && -z $package_file ]]; then
+    fetch
+    [[ -n $package_file ]] || { verdict=error; record download fetch error "${fetch_error:-the package could not be fetched}"; }
+  fi
   [[ $verdict != fixed ]] || fixed=$((fixed + 1))
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$package" "$class" "$verdict" "$installed" "$channel" "$repo" "$sha" "$package_file" >> "$cache/verdict.tsv.new"
   ((keep)) || rm -rf "${cache:?}/x/$package" "$cache/x/$package.plain" "$cache/x/$package.image" "$cache/x/$package.config" "$cache/x/$package.compat"

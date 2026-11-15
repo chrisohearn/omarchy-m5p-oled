@@ -52,7 +52,7 @@ sb() { # run a command inside the throwaway system as its root
     --bind "$S/etc" /etc --bind "$S/var" /var --bind "$S/run" /run --bind "$S/boot" /boot --bind "$ESPD" /boot/efi \
     --bind "$S/opt" /opt --bind "$S/people" /people --bind "$S/root" /root --ro-bind "$L" "$L" --ro-bind "$T" "$T" \
     --setenv PATH /usr/bin --setenv HOME /root --setenv LC_ALL C --unsetenv K114S_ROOT \
-    --setenv K114S_TEST 1 --setenv K114S_UNAME_R "$UNAME_R" --setenv K114S_PROC_VERSION "$(banner "$UNAME_R")" --setenv K114S_ESP_FREE "$ESP_FREE" \
+    --setenv K114S_TEST 1 --setenv K114S_SIGCHECK "${SIGCHECK_STUB:-true}" --setenv K114S_UNAME_R "$UNAME_R" --setenv K114S_PROC_VERSION "$(banner "$UNAME_R")" --setenv K114S_ESP_FREE "$ESP_FREE" \
     --setenv K114S_EFI_STUB_ID /etc/k114s-test/stub-id --setenv K114S_ESP_DT /nonexistent --setenv K114S_NOTIFY_LOG /var/log/notify.log \
     --setenv K114S_BOOT_ID "$BOOT_ID" --setenv K114S_AURA_TRIAL "$AURA_TRIAL" --setenv K114S_DESKTOP yes --setenv K114S_SYS /etc/k114s-test/sys --setenv K114S_PROC /etc/k114s-test/proc \
     --setenv K114S_BOOT_WAIT 0 --setenv K114S_DT_COMPATIBLE /etc/k114s-test/compatible --setenv K114S_SYSTEMCTL /usr/bin/true \
@@ -530,10 +530,13 @@ chmod 755 "$BASE/pacman-wrap"
 mesa_before=$(Q mesa-aurora); rm -f "$STATE/release/gpu-given-up" "$STATE/release/gpu-trial"
 g1=$(g_mesa trial-1 20270101.cccccc1); mkrepo edge "$g1"; sb pacman -Syy >/dev/null; echo cccccc1 > "$BASE/wrap-want"; : > "$S/var/log/notify.log"
 out=$(sb env K114S_PACMAN="$BASE/pacman-wrap" /usr/local/lib/omarchy-k114s/k114s-release preflight)
-ok "preflight: the held Mesa blocks the upgrade and its channel build is fit: the preflight installs it, and it stays held" "$? $(echo "$out" | grep -c 'would FAIL on a dependency of held package(s): mesa-aurora') $(Q mesa-aurora) $(sb pacman-conf IgnorePkg | grep -c -x mesa-aurora)" "0 1 1:26.3.0_devel.20270101.cccccc1-1 1"
-ok "preflight: the vulkan-aurora 'ignoring package upgrade' warning was not taken for a blocker" "$(echo "$out" | grep -c 'would FAIL on a dependency of held package(s): mesa-aurora$')" 1
+ok "preflight: the held Mesa blocks the upgrade and its channel build is fit: the preflight installs it, and it stays held" "$? $(echo "$out" | grep -c 'would FAIL on a dependency or conflict of held package(s): mesa-aurora') $(Q mesa-aurora) $(sb pacman-conf IgnorePkg | grep -c -x mesa-aurora)" "0 1 1:26.3.0_devel.20270101.cccccc1-1 1"
+ok "preflight: the release went through (Mesa stays held by design), so no 'still held, run release' hint is printed" "$(echo "$out" | grep -c 'run: sudo k114s-release release')" 0
+ok "preflight: the vulkan-aurora 'ignoring package upgrade' warning was not taken for a blocker" "$(echo "$out" | grep -c 'would FAIL on a dependency or conflict of held package(s): mesa-aurora$')" 1
 ok "the GPU stack is on trial: the record names the package and its rollback archive" "$(awk '$1 == "package" { print $2 }' "$STATE/release/gpu-trial") $(sb ls "$(awk '$1 == "package" { print $4 }' "$STATE/release/gpu-trial")"/packages | grep -c '^mesa-aurora-.*pkg.tar.zst$')" "mesa-aurora 1"
 sleep 1; BOOT_ID=b00000a1; sb env K114S_DESKTOP=no /usr/local/lib/omarchy-k114s/k114s-boot-success >/dev/null; out=$(rel auto)
+ok "the interim 'incomplete' record of a boot that is still running (a login screen that waits) is not a verdict: the trial goes on, nothing is rolled back" "$(Q mesa-aurora) $(test -e "$STATE/release/gpu-trial"; status)" "1:26.3.0_devel.20270101.cccccc1-1 0"
+BOOT_ID=b00000a9; out=$(rel auto)
 ok "the next boot recorded no desktop: auto puts the old Mesa back, held" "$? $(Q mesa-aurora) $(sb pacman-conf IgnorePkg | grep -c -x mesa-aurora) $(test -e "$STATE/release/gpu-trial"; status)" "0 $mesa_before 1 1"
 ok "and says so" "$(notes | grep -c 'recorded no desktop: the old build of mesa-aurora is back')" 1
 out=$(rel auto); ok "the channel's build that failed is not installed again" "$(Q mesa-aurora) $(grep -c 'rolled back after a boot without a desktop' "$STATE/release/log")" "$mesa_before 2"
@@ -542,6 +545,49 @@ out=$(rel auto); ok "a newer channel build is installed (on trial again)" "$(Q m
 BOOT_ID=b00000a2; out=$(rel auto); ok "the boot it was installed in decides nothing; a later boot is waited for" "$(test -e "$STATE/release/gpu-trial"; status)" 0
 sleep 1; BOOT_ID=b00000a3; sb /usr/local/lib/omarchy-k114s/k114s-boot-success >/dev/null; out=$(rel auto)
 ok "a later boot with a desktop ends the trial; the build stays" "$(Q mesa-aurora) $(test -e "$STATE/release/gpu-trial"; status) $(notes | grep -c 'been through a boot that reached the desktop')" "1:26.3.0_devel.20270102.dddddd2-1 1 1"
+
+# keep-held without the gpu marker (asahi-fwextract): a person decides; it is not the GPU stack, so no GPU trial and no GPU wait
+t=$(tree); mkdir -p "$t/usr/lib/asahi-fwextract"; echo "fwextract 1" > "$t/usr/lib/asahi-fwextract/version"; c_afw1=$(mkpkg "$t" asahi-fwextract 1-1 "$P")
+t=$(tree); mkdir -p "$t/usr/lib/asahi-fwextract"; echo "fwextract 2" > "$t/usr/lib/asahi-fwextract/version"; c_afw2=$(mkpkg "$t" asahi-fwextract 2-1 "$P")
+sb pacman -U --noconfirm "$c_afw1" >/dev/null; sb /usr/local/lib/omarchy-k114s/k114s-holds hold asahi-fwextract >/dev/null
+g4=$(g_mesa trial-4 20270104.ffffff4); mkrepo edge "$g4" "$c_afw2"; sb pacman -Syy >/dev/null; sleep 1
+out=$(rel auto); ok "a GPU trial is open (Mesa waits for a boot)" "$(test -e "$STATE/release/gpu-trial"; status)" 0
+out=$(rel release --accept-manual asahi-fwextract)
+ok "asahi-fwextract is released by name although a GPU trial is open: it is not the GPU stack" "$(Q asahi-fwextract) $(echo "$out" | grep -c 'GPU stack from the channel')" "2-1 0"
+ok "it stays held, and the GPU trial does not list it (nothing puts it back by itself)" "$(sb pacman-conf IgnorePkg | grep -c -x asahi-fwextract) $(grep -c '^package asahi-fwextract' "$STATE/release/gpu-trial")" "1 0"
+ok "its note says there is no trial" "$(grep -c 'asahi-fwextract installed (it stays held.*no trial: a person checks that it works' "$STATE/release/log")" 1
+sed -i 's/^AUTO_RELEASE_GPU=.*/AUTO_RELEASE_GPU=no/' "$S/etc/omarchy-k114s/release.conf"
+t=$(tree); mkdir -p "$t/usr/lib/asahi-fwextract"; echo "fwextract 3" > "$t/usr/lib/asahi-fwextract/version"; c_afw3=$(mkpkg "$t" asahi-fwextract 3-1 "$P"); mkrepo edge "$g4" "$c_afw3"; sb pacman -Syy >/dev/null
+out=$(rel auto); ok "AUTO_RELEASE_GPU=no does not speak for asahi-fwextract: its message is the plain one" "$(echo "$out" | grep -c 'asahi-fwextract: the channel.s build is fit for the K114s; release with: sudo k114s-release release asahi-fwextract') $(echo "$out" | grep -c 'asahi-fwextract.*GPU stack')" "0 0"
+sed -i 's/^AUTO_RELEASE_GPU=.*/AUTO_RELEASE_GPU=yes/' "$S/etc/omarchy-k114s/release.conf"
+rm -f "$STATE/release/gpu-trial"
+
+# the release installs the archive the check verified, not whatever pacman's own lists carry under the same version
+mkdir -p "$BASE/pkgsB"; P_keep=$P; P=$BASE/pkgsB; g5b=$(g_mesa build-B 20270105.eeeeee5); P=$P_keep; g5a=$(g_mesa build-A 20270105.eeeeee5)
+mkrepo edge "$g5b"; sb pacman -Syy >/dev/null; mkrepo edge "$g5a"       # pacman's own lists: build B; the channel the check reads: build A, same pkgver-pkgrel
+out=$(rel auto); ok "same version, different build in pacman's own lists: the verified build is the one installed (the files are build A's)" "$(Q mesa-aurora) $(tr '\0' ' ' < "$S/usr/lib/libgallium-99.0.0-test.so")" "1:26.3.0_devel.20270105.eeeeee5-1 gallium-build-A G17S ASAHI_M5_BRINGUP llvmpipe "
+rm -f "$STATE/release/gpu-trial"
+g6=$(g_mesa build-6 20270106.eeeeee6); mkrepo edge "$g6"; sb pacman -Syy >/dev/null
+cat > "$BASE/pacman-tamper" <<'WRAP'
+#!/bin/bash
+# real pacman, except that the verdict's SHA-256 of Mesa stops matching the archive after the check and before the install
+case " $* " in *" -Sp "*) sed -i -E '/^mesa-aurora\t/ s/\t[0-9a-f]{64}\t/\t0000000000000000000000000000000000000000000000000000000000000000\t/' /var/lib/omarchy-k114s/check/verdict.tsv ;; esac
+exec pacman "$@"
+WRAP
+chmod 755 "$BASE/pacman-tamper"
+out=$(sb env K114S_PACMAN="$BASE/pacman-tamper" /usr/local/lib/omarchy-k114s/k114s-release auto)
+ok "an archive whose SHA-256 differs from the verdict's is refused: nothing installed, left held" "$(Q mesa-aurora) $(echo "$out" | grep -c 'SHA-256 is not the one that passed') $(test -e "$STATE/release/gpu-trial"; status)" "1:26.3.0_devel.20270105.eeeeee5-1 1 1"
+
+# the archive is installed with pacman -U, so its detached signature is checked here: a bad or missing one leaves it held
+out=$(SIGCHECK_STUB=false sb /usr/local/lib/omarchy-k114s/k114s-release auto)
+ok "a signature that does not verify is refused: nothing installed, left held" "$(Q mesa-aurora) $(echo "$out" | grep -c 'does not verify against pacman.s keyring; left held') $(test -e "$STATE/release/gpu-trial"; status)" "1:26.3.0_devel.20270105.eeeeee5-1 1 1"
+rm -f "$REPO"/edge/os/mesa-aurora-*.sig
+out=$(sb /usr/local/lib/omarchy-k114s/k114s-release auto)
+ok "an archive without a signature is refused: nothing installed, left held" "$(Q mesa-aurora) $(echo "$out" | grep -c 'has no signature') $(test -e "$STATE/release/gpu-trial"; status)" "1:26.3.0_devel.20270105.eeeeee5-1 1 1"
+mkrepo edge "$g6"; sb pacman -Syy >/dev/null
+out=$(sb /usr/local/lib/omarchy-k114s/k114s-release auto)
+ok "with its signature back, the verified build goes in" "$(Q mesa-aurora) $(echo "$out" | grep -c 'has no signature')" "1:26.3.0_devel.20270106.eeeeee6-1 0"
+rm -f "$STATE/release/gpu-trial"
 
 # --- the installer's undo ---------------------------------------------------------------------------------------------------
 out=$(sb bash "$L/k114s-tooling-install" --undo); ok "installer --undo" "$? $(echo "$out" | grep -c 'k114s-tooling-install: undone')" "0 1"
