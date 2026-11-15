@@ -9,6 +9,10 @@ The Omarchy package (`omarchy`, or `omarchy-dev` on the Edge channel) owns most 
 `omarchy update`. A pacman hook puts the patches back after every transaction that installs or
 upgrades the package, and stops reapplying them once they no longer fit.
 
+Patch paths are relative to `/usr`: `bin/omarchy-...` for Omarchy's `bin/`, and
+`share/omarchy/shell/...` for its `shell/`, which installs as `/usr/share/omarchy/shell`. A patch
+may also carry a local preference rather than an upstream fix; the table below says which.
+
 ## Install, refresh, undo
 
 From a checkout of this repository, inside Linux:
@@ -30,6 +34,9 @@ It installs:
 It is independent of the repair bundles. It touches no boot file, package hold or EFI partition,
 and `linux-persist.sh --undo` leaves it alone. It needs GNU `patch` (`sudo pacman -S patch`), which
 Omarchy does not depend on. Without it, the installer refuses and the hook writes nothing and says so.
+
+Script patches take effect on the next run. A patch to the shell's QML (such as 0002) is not
+picked up by the running bar: run `omarchy-restart-shell` once after installing or after an update.
 
 A patch may only change files the `omarchy` or `omarchy-dev` package installed (the two the hook
 watches), as recorded in the package database. The installer refuses one that creates or deletes a
@@ -78,6 +85,7 @@ the wanted set goes back on from the bottom up.
 | Patch | Fixes | Upstream | State |
 | --- | --- | --- | --- |
 | `0001-claude-account-by-user-and-organization.patch` | The agents panel keys a Claude account by the claude.ai user alone. One user who belongs to two organizations (a personal plan and a Team) cannot add the second one ("That's Main ..., sign in as the other account"), and both would share one usage cache. The patch keys the account by user and organization in the account registry, the account copy and the Claude usage cache. | [omacom/omarchy#18681](https://github.com/omacom/omarchy/pull/18681) (head `0d6d7c27a790`), carrying [#16144](https://github.com/omacom/omarchy/pull/16144) onto `quattro` | open upstream; applied here 2026-11-14 |
+| `0002-agents-panel-room-left-pace-and-model-rows.patch` | Local preference, not an upstream fix. In the agents panel every limit meter reads as room left (it drains), as T3 Code's usage view does, so Claude's and Codex's bars move the same way. A hairline marks even pace (the share of the window's time left), and the tooltip says ahead of, on or under pace within 5 points. A model-scoped window such as Fable Weekly gets its own row instead of a tick on the Weekly bar. The usage records still hold the share used. | none (this machine's choice) | applied here 2026-11-15 |
 
 Tests: `tests/linux/test-omarchy-patches.sh linux [OMARCHY_SRC]` runs the mechanism in a fake
 root. With `OMARCHY_SRC`, an omacom/omarchy checkout at the installed revision, it also checks that

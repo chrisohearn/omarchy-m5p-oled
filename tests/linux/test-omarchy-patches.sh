@@ -17,9 +17,10 @@ orig() { mkdir -p "$1/usr/bin"
   printf 'a\nb\nc\nd\n' > "$1/usr/bin/omarchy-x"
   chmod 755 "$1"/usr/bin/omarchy-*; }
 fixed() { sed -i 's/^key=user$/key=user-org/' "$1/usr/bin/omarchy-a"; sed -i 's/^cache=user$/cache=user-org/' "$1/usr/bin/omarchy-b"; }
-shipped() { # record the files now under $1/usr/bin as what the package installed
+shipped() { # record the files now under $1/usr (but /usr/local) as what the package installed
   local d=$1/var/lib/pacman/local/omarchy-dev-1-1 f; mkdir -p "$d"
-  for f in "$1"/usr/bin/*; do echo "./usr/bin/$(basename "$f") time=1.0 size=$(stat -c %s "$f") sha256digest=$(sha256sum "$f" | cut -c1-64)"; done | gzip > "$d/mtree"; }
+  (cd "$1" && find usr -path usr/local -prune -o -type f -print | LC_ALL=C sort) | while read -r f; do
+    echo "./$f time=1.0 size=$(stat -c %s "$1/$f") sha256digest=$(sha256sum "$1/$f" | cut -c1-64)"; done | gzip > "$d/mtree"; }
 # A patch in Omarchy's tree layout (a/bin/...) between two versions of one file.
 mkpatch() { local out=$1 file=$2; mkdir -p "$BASE/mp"; printf "$3" > "$BASE/mp/old"; printf "$4" > "$BASE/mp/new"
   diff -u "$BASE/mp/old" "$BASE/mp/new" | sed "1s#^--- .*#--- a/bin/$file#; 2s#^+++ .*#+++ b/bin/$file#" > "$out"; }
@@ -185,7 +186,10 @@ ok "hook: cannot abort a transaction" "$(grep -c AbortOnFail "$H")" 0
 
 # The real patches against the Omarchy revision this machine runs.
 if [ -n "${2:-}" ]; then
-  O=$BASE/omarchy; mkdir -p "$O/usr"; cp -a "$2/bin" "$O/usr/bin"; shipped "$O"
+  # Omarchy's bin/ installs as /usr/bin and its shell/ as /usr/share/omarchy/shell.
+  O=$BASE/omarchy; mkdir -p "$O/usr/share/omarchy"; cp -a "$2/bin" "$O/usr/bin"
+  [ -d "$2/shell" ] && cp -a "$2/shell" "$O/usr/share/omarchy/shell"
+  shipped "$O"
   for p in "$P"/*.patch; do
     n=$(basename "$p")
     patch -p1 -d "$O/usr" -F0 -s -f --dry-run < "$p" >/dev/null 2>&1; ok "real $n: applies without fuzz" "$?" 0
@@ -193,8 +197,16 @@ if [ -n "${2:-}" ]; then
   out=$(K114S_ROOT=$O bash "$INSTALL" 2>&1); ok "real patches: install succeeds" "$?" 0
   ok "real patches: all applied" "$(grep -c ': applied' <<<"$out")" "$(ls "$P"/*.patch | wc -l | tr -d ' ')"
   for f in "$O"/usr/bin/omarchy-agent-*; do head -1 "$f" | grep -q python && { python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$f" || ok "real: $(basename "$f") parses" 1 0; }; done
+  for f in "$O"/usr/share/omarchy/shell/plugins/*/*.qml; do
+    [ -x /usr/lib/qt6/bin/qmllint ] || break
+    # This qmllint reports a syntax error as a "Warning: ... [syntax]" line and exits non-zero.
+    lint=$(/usr/lib/qt6/bin/qmllint "$f" 2>&1); lrc=$?
+    if [ "$lrc" != 0 ] || grep -q '\[syntax\]' <<<"$lint"; then ok "real: $(basename "$f") passes qmllint" "$lrc" 0; fi
+  done
   out=$(K114S_ROOT=$O bash "$INSTALL" --undo 2>&1)
-  ok "real patches: undo gives the shipped files" "$(diff -r "$2/bin" "$O/usr/bin" >/dev/null && echo same)" same
+  same=same; diff -r "$2/bin" "$O/usr/bin" >/dev/null || same=differs
+  [ -d "$2/shell" ] && { diff -r "$2/shell" "$O/usr/share/omarchy/shell" >/dev/null || same=differs; }
+  ok "real patches: undo gives the shipped files" "$same" same
   ok "real patches: no .orig or .rej" "$(leftovers "$O")" 0
 fi
 
