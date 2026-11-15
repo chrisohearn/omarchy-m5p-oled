@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s r1 plus the sleep and lid additions, and nothing else: the tree for testing suspend
+ * while the panel is still the boot framebuffer.
+ */
+#define K114S_R1_N1
+#define K114S_R1_USB
+#include "t6050-k114s-common.dtsi"
+#include "t6050-k114s-sleep.dtsi"

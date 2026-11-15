@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ed <mailbox-in-upstream-commit-1006491abe42@redacted.invalid>
+Date: Thu, 5 Nov 2026 18:08:44 +0100
+Subject: [PATCH 04/10] drm/sysfb: simpledrm: eDP connector for an Apple
+ built-in panel
+
+Without DCP, the J714c panel is a simpledrm framebuffer whose connector
+is Unknown-1. Omarchy treats every connector that is not eDP, LVDS or
+DSI as an external monitor, so closing the lid kept the session in
+clamshell mode instead of locking it.
+
+A framebuffer node with apple,internal-panel now gets an eDP connector;
+the J714c framebuffer node carries it. Tested on J714c: the panel is
+card0-eDP-1, omarchy-hw-external-monitors reports none, and closing the
+lid locks the Omarchy session.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+(cherry picked from commit 9dee12b1266c4d4f29eda19a67b964fb25ed844a)
+Signed-off-by: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+
+(cherry picked from commit 1006491abe42bbbdecc4491e68815bfe77093202)
+[k114s: from aurora-silicon/linux pull request 1688 (open draft), unchanged; first written for omacom/linux-aurora]
+---
+ arch/arm64/boot/dts/apple/t6050-j714c.dts | 1 +
+ drivers/gpu/drm/sysfb/simpledrm.c         | 4 +++-
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714c.dts b/arch/arm64/boot/dts/apple/t6050-j714c.dts
+index cf1d62c69..362609337 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j714c.dts
+@@ -39,6 +39,7 @@ framebuffer0: framebuffer@0 {
+ 			reg = <0 0 0 0>; /* To be filled by the loader */
+ 			/* Format properties will be added by the loader */
+ 			status = "disabled";
++			apple,internal-panel; /* simpledrm reports it as eDP */
+ 		};
+ 	};
+ };
+diff --git a/drivers/gpu/drm/sysfb/simpledrm.c b/drivers/gpu/drm/sysfb/simpledrm.c
+index 404758261..5a821ba86 100644
+--- a/drivers/gpu/drm/sysfb/simpledrm.c
++++ b/drivers/gpu/drm/sysfb/simpledrm.c
+@@ -864,8 +864,10 @@ static struct simpledrm_device *simpledrm_device_create(struct drm_driver *drv,
+ 	/* Connector */
+ 
+ 	connector = &sdev->connector;
++	/* A built-in laptop panel the loader hands over (Apple, before DCP). */
+ 	ret = drm_connector_init(dev, connector, &simpledrm_connector_funcs,
+-				 DRM_MODE_CONNECTOR_Unknown);
++				 of_property_read_bool(dev->dev->of_node, "apple,internal-panel") ?
++				 DRM_MODE_CONNECTOR_eDP : DRM_MODE_CONNECTOR_Unknown);
+ 	if (ret)
+ 		return ERR_PTR(ret);
+ 	drm_connector_helper_add(connector, &simpledrm_connector_helper_funcs);

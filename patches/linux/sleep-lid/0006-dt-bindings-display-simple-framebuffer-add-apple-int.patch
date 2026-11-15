@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 08:02:58 -0600
+Subject: [PATCH 06/10] dt-bindings: display: simple-framebuffer: add
+ apple,internal-panel
+
+Add a boolean for a framebuffer that drives the machine's built-in laptop
+panel, handed over by the Apple boot loader. simpledrm reports an eDP
+connector for such a node instead of an unknown one, so that Omarchy and
+other user space do not count the internal panel as an external monitor
+and keep holding the lid-switch inhibitor.
+
+The T6050 K114c, K114s, K116c and K116s framebuffer nodes carry it and
+failed CHECK_DTBS without it.
+
+Signed-off-by: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+
+(cherry picked from commit 67e63a577af4eab860779d28f225247041ae337a)
+[k114s: from aurora-silicon/linux pull request 1688 (open draft), unchanged]
+---
+ .../devicetree/bindings/display/simple-framebuffer.yaml   | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/display/simple-framebuffer.yaml b/Documentation/devicetree/bindings/display/simple-framebuffer.yaml
+index 66e734780..04ed4291d 100644
+--- a/Documentation/devicetree/bindings/display/simple-framebuffer.yaml
++++ b/Documentation/devicetree/bindings/display/simple-framebuffer.yaml
+@@ -128,6 +128,14 @@ properties:
+     $ref: /schemas/types.yaml#/definitions/phandle
+     description: Display panel node
+ 
++  apple,internal-panel:
++    type: boolean
++    description:
++      The framebuffer drives the machine's built-in laptop panel, handed over by
++      the boot loader before a display controller driver takes over. simpledrm
++      reports it as an eDP connector instead of an unknown one, so that user
++      space does not count it as an external monitor.
++
+   allwinner,pipeline:
+     description: Pipeline used by the framebuffer on Allwinner SoCs
+     enum:

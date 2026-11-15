@@ -1,0 +1,13 @@
+# K114s r3, sleep and lid. Apply in this order on the installed kernel source
+# (aurora-silicon/linux a34d26c2 + linux-j714s-27.2.patch, with either trackpad series).
+# "shared" = the same upstream commit is also carried by r3/display-gpu; apply it once.
+0001-PCI-apple-qualify-the-K116s-for-suspend-to-idle-over.patch
+0002-PCI-apple-let-devices-below-a-kernel-trained-port-le.patch
+0003-PCI-apple-qualify-the-K114s-for-suspend-to-idle-over.patch
+0004-drm-sysfb-simpledrm-eDP-connector-for-an-Apple-built.patch   # shared
+0005-arm64-dts-apple-t6050-k114-k116-report-the-built-in-.patch   # shared
+0006-dt-bindings-display-simple-framebuffer-add-apple-int.patch
+0007-power-supply-macsmc-skip-an-unreadable-manufacture-d.patch
+0008-arm64-dts-apple-t6050-keep-the-PMP-s-power-domains-o.patch
+0009-soc-apple-mailbox-receive-T6050-GPU-mailboxes-by-int.patch   # shared
+0010-soc-apple-mailbox-receive-T6050-GPU-mailboxes-by-int.patch   # shared
