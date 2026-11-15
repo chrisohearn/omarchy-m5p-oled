@@ -30,7 +30,7 @@ interface_branding: Omarchy Bootloader
 /+Omarchy
 comment: machine-id=00000000000000000000000000000000
   //linux-k114s
-  comment: Kernel version: 7.3.0-17.v272-4-k114s-r3a-ARCH
+  comment: Kernel version: 7.3.0-17.v272-11-k114s-r3b-ARCH
   protocol: efi
   path: boot():/EFI/Linux/omarchy_linux-k114s.efi#$nh
   cmdline: root=UUID=00000000-0000-0000-0000-000000000000 rw

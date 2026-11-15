@@ -1,5 +1,7 @@
 # r3a: the integrated K114s kernel candidate, its package and its staged install
 
+> Naming (2026-11-15): "the r3-gpu candidate" below is what these notes called r3b before. **r3b** now names the rebase of r3a on betizzel's v272-11 series (`docs/r3b-kernel.md`). It carries `sleep-lid/0010` (GPU mailbox receive by interrupt only) without any K114s proof of that line, so the GPU-tree and suspend-on-the-GPU-tree gates stay open and no r3b boot on the GPU tree is allowed.
+
 Evidence labels: **agent-run** (run on this Mac or its build area), **emulator/replica** (QEMU, fake
 trees), **read from source** (code and hooks read, not provoked). Nothing here has run on the K114s
 hardware. Nothing built for r3a is installed; every root step is in the runbook at the end.
@@ -28,11 +30,11 @@ device tree describes a DCP or a GPU, which r3a does not:
 | `display-gpu/0003`-`0006` (#1868) | the display driver offers only the 120 Hz mode on firmware 27.2 T6050 internal panels, keeps every mode on an external DCP | `appledrm` finds no DCP node in the r3a tree, so it never binds. `0006` scopes the gate to the T6050 internal path |
 | `display-gpu/0009`, `0010` (#1648 bindings) | schema text only | no runtime effect |
 
-**Left out, for candidate r3b (it needs the new Stage 2 loader and this Mac's Apple device tree data):**
+**Left out, for the r3-gpu candidate (it needs the new Stage 2 loader and this Mac's Apple device tree data):**
 
 | Left out | Why |
 | --- | --- |
-| `sleep-lid/0010` = `display-gpu/0002` (#1844 second commit, `788441e0`, GPU mailboxes by interrupt only) | **Left out of r3a after the device-tree review.** The GPU Stage 2 trial that this Mac runs binds two `apple,t6050-j775d-ascwrap-v6` mailboxes (`2302600000`, `2302e00000`) and receives on them by polling (`.rx_poll_only`, upstream `43c6ca839e`: on a 14-inch M5 Max the GPU ASC interrupt never reached the AIC). `0010` removes the polling and the storm guard, so receive would depend on an interrupt never seen on a 14-inch T6050. r3a keeps `0009` (polling stays until the interrupt delivers a message, storm guard stays). `0010` goes to r3b, after `/proc/interrupts` shows `2302600000.mailbox-recv` rising on a 0009-only kernel on the GPU tree (the r3a + GPU step) |
+| `sleep-lid/0010` = `display-gpu/0002` (#1844 second commit, `788441e0`, GPU mailboxes by interrupt only) | **Left out of r3a after the device-tree review.** The GPU Stage 2 trial that this Mac runs binds two `apple,t6050-j775d-ascwrap-v6` mailboxes (`2302600000`, `2302e00000`) and receives on them by polling (`.rx_poll_only`, upstream `43c6ca839e`: on a 14-inch M5 Max the GPU ASC interrupt never reached the AIC). `0010` removes the polling and the storm guard, so receive would depend on an interrupt never seen on a 14-inch T6050. r3a keeps `0009` (polling stays until the interrupt delivers a message, storm guard stays). `0010` goes to the r3-gpu candidate, after `/proc/interrupts` shows `2302600000.mailbox-recv` rising on a 0009-only kernel on the GPU tree (the r3a + GPU step) |
 | `display-gpu/0001` (#1844 first commit) | already in `sleep-lid/0009`: taken once |
 | `display-gpu/0007`, `0008` (#1688, eDP connector) | already in `sleep-lid/0004`, `0005`: taken once |
 | `patches/aura/0001`-`0003` (the loader: panel pin table, #226, #230) | a new Stage 2 loader changes the chain that every boot entry uses and has never booted in this form. The installed loader refuses a K114s panel image it does not pin |
@@ -43,7 +45,7 @@ The sleep patch `0008` (PMP domains always on) has no effect in r3a (PMP stays d
 (GPU mailbox receive, polling kept) has no effect on the r3a tree, which binds no GPU mailbox; on the GPU tree it acts on the two
 bound GPU mailboxes but keeps their polling. (An earlier version of this document, and `docs/r3-sleep-lid.md`, said that no GPU
 mailbox is bound at all: that was true of the r1 tree only, and is corrected.) They are in the kernel because the sound variant enables
-the PMP and r3b enables the GPU display path, and a kernel without them makes those unsafe (`docs/r3-sleep-lid.md`).
+the PMP and the r3-gpu candidate enables the GPU display path, and a kernel without them makes those unsafe (`docs/r3-sleep-lid.md`).
 
 ## 3. Kernel
 
@@ -294,7 +296,7 @@ The device-tree review showed that this matters for the kernel: on that boot `23
   Version 2 of the guard (`linux/r3a-trial/70-k114s-gpu-desktop`, tested by `tests/linux/test-gpu-guard.sh`, 7 passed) adds a second lock for an accident (a trial left armed): on a
   `...-k114s-r3a-ARCH` kernel it keeps the desktop on the CPU even with `~/.config/k114s-gpu-desktop`, until the separate opt-in `~/.config/k114s-gpu-desktop-r3a` exists.
 - **r3a + GPU is its own step (G).** After (i) and (ii) are clean. It restores the parked trial, creates the second opt-in, and boots the r3a kernel on the GPU tree once. The kernel there is the
-  0009-only kernel: 0009 enables the mailbox receive interrupt beside both pollers (a line that never fires keeps polling, the storm guard is in place), which is the first time it is enabled on this Mac, and everything else in r3a is new on that tree too. `0010` stays out until r3b.
+  0009-only kernel: 0009 enables the mailbox receive interrupt beside both pollers (a line that never fires keeps polling, the storm guard is in place), which is the first time it is enabled on this Mac, and everything else in r3a is new on that tree too. `0010` stays out until the r3-gpu candidate.
 - Suspend stays forbidden on the GPU tree until `0010` is in and proven (`docs/r3-sleep-lid.md`).
 
 ### The Stage 2 files

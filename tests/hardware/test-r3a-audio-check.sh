@@ -11,8 +11,8 @@ bash "$S" --bogus >/dev/null 2>&1; [ $? = 2 ] && ok "an unknown flag is refused"
 bash "$S" --play >/dev/null 2>&1; [ $? = 2 ] && ok "--play without --listen is refused" || bad "--play alone accepted"
 out=$(timeout 120 bash "$S" --no-save </dev/null 2>&1); rc=$?
 case $(uname -r) in
-  *k114s-r3a-ARCH) [ $rc = 0 ] || [ $rc = 1 ] && ok "runs to the end on the r3a kernel (exit $rc)" || bad "exit $rc" ;;
-  *) [ $rc = 1 ] && grep -q '^BAD     running kernel is' <<<"$out" && ok "a kernel that is not r3a is a BAD line and exit 1" || bad "wrong kernel not reported (exit $rc)" ;;
+  *k114s-r3[ab]-ARCH) [ $rc = 0 ] || [ $rc = 1 ] && ok "runs to the end on the r3a or r3b kernel (exit $rc)" || bad "exit $rc" ;;
+  *) [ $rc = 1 ] && grep -q '^BAD     running kernel is' <<<"$out" && ok "a kernel that is not r3a or r3b is a BAD line and exit 1" || bad "wrong kernel not reported (exit $rc)" ;;
 esac
 grep -q '^== 5. summary' <<<"$out" && ok "the unattended report reaches its summary" || bad "no summary"
 grep -qE '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}' <<<"$out" && bad "an address-shaped string is in the output" || ok "no address-shaped string in the output"

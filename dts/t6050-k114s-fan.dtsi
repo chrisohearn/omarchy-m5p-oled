@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s: let userspace set the two fan speeds. DRAFT. NOT booted on a K114s. NOT included by any
+ * tree of this repository (docs/r3b-kernel.md, "J714s nodes").
+ *
+ * K114s copy of the J714s lines of aurora-silicon/linux #1944 (Isaac-Duarte, open; betizzel
+ * v272-11 patch 0024): apple,fan-manual-control on both fans makes fanX_target writable without the
+ * unsafe fan_control module parameter. The SMC keeps driving the fans until userspace writes a
+ * target; writing 0 hands a fan back to the firmware. It was tested on a J714s only.
+ *
+ * What supports a K114s copy: the K114s tree already names the same two fans with the same mode
+ * keys (F0md, F1md; t6050-k114s-common.dtsi), and the running K114s kernel exposes fan1 and fan2
+ * with min, max and target (read only today: agent-run on this Mac, running r1 kernel). What it cannot
+ * show: that this chassis's SMC accepts a manual speed on F0md/F1md. The SMC fan keys are not in
+ * the Apple device tree, so no ADT fact can check that. Test with fan_control=N first (the
+ * parameter exists in the running kernel), one fan, a low target, and write 0 to hand it back.
+ *
+ * Nothing here is enabled unless the including tree defines K114S_R3B_FAN_MANUAL. Include it
+ * after t6050-k114s-common.dtsi, which defines the two fan nodes.
+ */
+#ifdef K114S_R3B_FAN_MANUAL
+&smc_hwmon {
+	fan-F0Ac {
+		apple,fan-manual-control;
+	};
+
+	fan-F1Ac {
+		apple,fan-manual-control;
+	};
+};
+#endif

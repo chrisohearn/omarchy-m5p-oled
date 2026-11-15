@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s: enforce the PMP's fast-die effort on the three CPU clusters. DRAFT. NOT booted on a
+ * K114s. NOT included by any tree of this repository (docs/r3b-kernel.md, "J714s nodes").
+ *
+ * K114s copy of the J714s lines of aurora-silicon/linux #1950 (DjDeveloperr, open; betizzel
+ * v272-11 patch 0032). apple-soc-cpufreq turns the effort the PMP publishes for each cluster into
+ * a frequency limit. The J714s evidence: under a sustained all-core load the clusters otherwise
+ * keep their top state while the effort sits at its maximum.
+ *
+ * What the ADT of this Mac says (agent-run, 2026-11-15, read from a local copy, nothing
+ * printed but names): /arm-io/pmp0/iop-pmp0-nub has fast-die-ctrl-ce-map with the three entries
+ * MACC0, MACC1 and PACC_ANE in that order, the order of the J714s lines (M0, M1, P). The
+ * three cpufreq nodes (cpufreq_mc0, cpufreq_mc1, cpufreq_pc) are in the shared T6050 tree.
+ *
+ * Why it is off, and why it cannot simply be on: the properties point at &pmp0_report, which
+ * reports only while the PMP runs. The K114s trees here keep the PMP disabled (the PMP needs this
+ * Mac's own tunables from its Apple device tree, root only; docs/r3-sound.md). Until the PMP
+ * reports, cpufreq holds each cluster at its fallback limit (the J714s comment on these lines),
+ * so these lines in a tree without a running PMP would slow the CPUs. Include this file only in a
+ * tree that enables &pmp0_report, such as t6050-k114s-r3a-sound.dts built with the tunables
+ * file, and only after the PMP is proven there.
+ *
+ * Nothing here is enabled unless the including tree defines K114S_R3B_FAST_DIE. Include it
+ * after t6050-k114s-common.dtsi.
+ */
+#ifdef K114S_R3B_FAST_DIE
+&cpufreq_mc0 {
+	apple,fast-die-effort = <&pmp0_report 0>;
+};
+
+&cpufreq_mc1 {
+	apple,fast-die-effort = <&pmp0_report 1>;
+};
+
+&cpufreq_pc {
+	apple,fast-die-effort = <&pmp0_report 2>;
+};
+#endif

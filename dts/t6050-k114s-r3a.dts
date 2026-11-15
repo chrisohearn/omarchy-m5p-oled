@@ -13,7 +13,7 @@
  *                  (t6050-k114s-pmp-tunables.dtsi, generated from its Apple device tree as root).
  *                  Build t6050-k114s-r3a-sound.dts, which defines K114S_R3A_SOUND, once that file
  *                  exists. Speakers are never part of it.
- *   display, GPU   NOT in this tree (candidate r3b: needs the new Stage 2 loader for the panel).
+ *   display, GPU   NOT in this tree (the r3-gpu candidate: needs the new Stage 2 loader for the panel).
  *
  * Nothing here has run on a K114s.
  */

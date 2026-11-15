@@ -1,5 +1,5 @@
 #!/bin/bash
-# Read-only report of what the r3a kernel changed, for the first boot of linux-k114s. No root needed
+# Read-only report of what the r3a (or r3b) kernel changed, for the first boot of linux-k114s. No root needed
 # (a few lines are better with root and say so). Changes nothing. Prints "ok", "BAD" or "info" lines.
 #   tests/hardware/k114s-r3a-check.sh [--expect-tree r1|r3a] [--allow-gpu]
 # --allow-gpu is for the separate r3a + GPU step only. Otherwise a boot on the GPU Stage 2 trial is a BAD line: the r3a
@@ -8,7 +8,8 @@ want=r1; allow_gpu=0
 while [ $# -gt 0 ]; do case $1 in --expect-tree) want=${2:-r1}; shift ;; --allow-gpu) allow_gpu=1 ;; esac; shift; done
 ok() { echo "ok    $*"; }; bad() { echo "BAD   $*"; }; info() { echo "info  $*"; }
 rel=$(uname -r)
-case $rel in *k114s-r3a-ARCH) ok "running kernel $rel" ;; *) bad "running kernel is $rel, not the r3a kernel" ;; esac
+case $rel in *k114s-r3[ab]-ARCH) ok "running kernel $rel" ;; *) bad "running kernel is $rel, not an r3a or r3b kernel" ;; esac
+case $rel in *k114s-r3b-ARCH) info "r3b: the GPU mailboxes receive by interrupt only and the connector stays Unknown-1 (docs/r3b-kernel.md, section 3)" ;; esac
 trial=$(tr -d '\0' < /proc/device-tree/chosen/aurora,trial 2>/dev/null)
 info "Stage 2: ${trial:-the configured m1n1/boot-ctxr.bin}"
 gpu_node=$(ls -d /sys/bus/platform/drivers/aurora/*/drm/renderD* 2>/dev/null | head -1)

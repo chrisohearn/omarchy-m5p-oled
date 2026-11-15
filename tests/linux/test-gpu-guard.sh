@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test of linux/r3a-trial/70-k114s-gpu-desktop (the session guard, version 2) with a fake /sys and a fake home.
+# Test of linux/r3a-trial/70-k114s-gpu-desktop (the session guard, version 3) with a fake /sys and a fake home.
 # Not for a machine that has /dev/dri/by-path/platform-display-subsystem-card (the guard then prints nothing by design).
 #   usage: test-gpu-guard.sh [PATH-TO-GUARD]
 set -u
@@ -11,8 +11,8 @@ ok() { if [ "$2" = "$3" ]; then pass=$((pass+1)); echo "PASS $1"; else fail=$((f
 mkdir -p "$W/home/.config" "$W/sys/bus/platform/drivers/aurora/2300000000.gpu/drm/renderD128" "$W/sys0"
 g() { HOME=$W/home K114S_SYS_ROOT=$1 K114S_UNAME_R=$2 sh "$G" | tr '\n' ' '; }
 CPU="LIBGL_ALWAYS_SOFTWARE=1 GBM_ALWAYS_SOFTWARE=1 ASAHI_M5_BRINGUP=0 "
-R1=7.3.0-17.v272-4-ARCH; R3=7.3.0-17.v272-4-k114s-r3a-ARCH
-ok "no render node (the r1 tree): prints nothing, on either kernel" "$(g $W/sys0 $R1)$(g $W/sys0 $R3)" ""
+R1=7.3.0-17.v272-4-ARCH; R3=7.3.0-17.v272-4-k114s-r3a-ARCH; R3B=7.3.0-17.v272-11-k114s-r3b-ARCH
+ok "no render node (the r1 tree): prints nothing, on any kernel" "$(g $W/sys0 $R1)$(g $W/sys0 $R3)$(g $W/sys0 $R3B)" ""
 ok "render node, no opt-in: CPU" "$(g $W/sys $R1)" "$CPU"
 touch $W/home/.config/k114s-gpu-desktop
 ok "render node, opt-in, running kernel: GPU (nothing printed)" "$(g $W/sys $R1)" ""
@@ -23,4 +23,14 @@ echo zink > $W/home/.config/k114s-gpu-desktop
 ok "zink request still honoured with both opt-ins" "$(g $W/sys $R3)" "MESA_LOADER_DRIVER_OVERRIDE=zink "
 rm $W/home/.config/k114s-gpu-desktop
 ok "only the r3a opt-in: CPU" "$(g $W/sys $R3)" "$CPU"
+# r3b: its own opt-in; the standing one and r3a's do not unlock it
+ok "r3b kernel, only the r3a opt-in: CPU" "$(g $W/sys $R3B)" "$CPU"
+touch $W/home/.config/k114s-gpu-desktop
+ok "r3b kernel, standing + r3a opt-in: CPU" "$(g $W/sys $R3B)" "$CPU"
+touch $W/home/.config/k114s-gpu-desktop-r3b
+ok "r3b kernel, standing + r3b opt-in: GPU" "$(g $W/sys $R3B)" ""
+rm $W/home/.config/k114s-gpu-desktop-r3a
+ok "r3b opt-in does not unlock the r3a kernel" "$(g $W/sys $R3)" "$CPU"
+rm $W/home/.config/k114s-gpu-desktop-r3b
+ok "r3b kernel, no opt-in for it: CPU" "$(g $W/sys $R3B)" "$CPU"
 echo "gpu guard tests: $pass passed, $fail failed"; [ "$fail" = 0 ]

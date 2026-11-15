@@ -5,7 +5,7 @@ set -u
 cd "$(dirname "$0")/.." || exit 2
 bad=0
 flag() { echo "check-publishable: $1"; bad=1; }
-files=$(git ls-files)
+files=$( { git ls-files; git ls-files -o --exclude-standard; } | sort -u)   # untracked files too: a new file is checked before git add
 [ -n "$files" ] || { echo "check-publishable: nothing tracked"; exit 2; }
 # 1. no binaries: kernels, modules, device tree blobs, loader images, firmware, archives, installers
 while IFS= read -r f; do
