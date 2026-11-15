@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Fri, 13 Nov 2026 13:18:41 -0700
+Subject: [PATCH] kboot: T6050: report the firmware release to the GPU driver
+
+The Linux G17 driver takes apple,firmware-version of the GPU node as the
+hint for which pinned firmware build to measure first. The T6050 hand-off
+did not set it, so the driver walked its table in order and logged every
+earlier build as an error before it reached the loaded one. On the K116s
+(27.2) that is, on every boot:
+
+  aurora 2300000000.gpu: unsupported GPU firmware build: TEXT 0xa4000 ...
+  aurora 2300000000.gpu: supported: 26C5035r for T6050 G17S, primary then secondary
+  aurora 2300000000.gpu: GPU firmware image not admitted: EINVAL
+  aurora 2300000000.gpu: GPU firmware build: 26B8125 for T6050 G17S, primary then secondary
+
+Set the property from the OS firmware version once the hand-off is
+published. A failure only loses the hint.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+(cherry picked from commit 5d2ec8f00e996f7e9351f398945b844ba0fb813e)
+---
+ src/kboot_gpu.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/kboot_gpu.c b/src/kboot_gpu.c
+index d44fcddc..daff6683 100644
+--- a/src/kboot_gpu.c
++++ b/src/kboot_gpu.c
+@@ -4217,6 +4217,13 @@ static T6050_GPU_INIT int dt_set_gpu_t6050(void *dt)
+     }
+     printf("FDT: GPU: T6050 G17S %s enabled, fw-text at %#lx\n", t6050_gpu.build[step - 2].name,
+            r[8]);
++    /*
++     * The driver tries the build of the reported release first. Without the hint it walks its
++     * table in order and logs each earlier build as not admitted before it finds this one.
++     */
++    int gpu = kboot_fdt_path_exact(dt, "gpu");
++    if (gpu < 0 || firmware_set_fdt(dt, gpu, "apple,firmware-version", &os_firmware))
++        printf("FDT: GPU: T6050: no apple,firmware-version for the driver\n");
+     if (t6050_gpu_leakage(dt))
+         printf("FDT: GPU: no leakage calibration words; the driver's generic configuration\n");
+     return 0;
