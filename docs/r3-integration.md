@@ -273,7 +273,7 @@ The trial uses Limine's own boot-once request, read from the source of the insta
   mechanism, an owner decision). The gate is mechanical: `k114s-boot-once status`, run first thing in the boot after step B's request, measures it and writes
   `/var/lib/k114s-recovery/boot-once-selftest-ok` only if that boot is the one right after arming (checked against the journal's previous boot id), Limine started the requested entry, the variable is gone from efivarfs
   **and** from U-Boot's file, and that file was not written during this boot. `arm` refuses every target except entry 1 (the request that changes nothing) unless that marker exists
-  (tests: `tests/linux/test-boot-once.sh`, 60 passed, which covers pass, fail, wrong boot, a save during the boot and `clear` between arm and reboot).
+  (tests: `tests/linux/test-boot-once.sh`, 61 passed, which covers pass, fail, wrong boot, a save during the boot and `clear` between arm and reboot).
 
 `k114s-boot-once arm` also refuses (a hard check, not advice) unless `default_entry` is 1 and entry 1 is the repair entry, the target's EFI file is on the ESP and
 matches its `#hash`, no Stage 2 trial is armed or configured to re-arm, the four sleep targets are masked, `remember_last_entry` is not `yes` (Limine would then boot the last booted entry ahead of `default_entry`), and, for any target but entry 1, the step B marker exists. It numbers entries the way Limine's
@@ -355,7 +355,7 @@ the proven r1 file (`45a5dbef19c1...`) byte for byte, which is the check that th
 | `lint-dtb.py`, `lint-sound-dtb.py` | pass | agent-run |
 | dtb reproducibility against the final kernel tree | `154568fe...`, same as before | agent-run |
 | Stage 2 reproduction of the proven r1 file | byte for byte | agent-run |
-| `tests/linux/test-boot-once.sh` | 60 passed, 0 failed (bytes written to the variable, UTF-16 id, every refusal, a saver that does not persist, a failing saver, `remember_last_entry`, the self-test gate) | emulator/replica |
+| `tests/linux/test-boot-once.sh` | 61 passed, 0 failed (bytes written to the variable, UTF-16 id, every refusal, a saver that does not persist, a failing saver, `remember_last_entry`, the self-test gate) | emulator/replica |
 | `tests/linux/test-gpu-guard.sh` | 7 passed | emulator/replica |
 | `tests/macos/test-no-original-uki.sh` | 24 passed (synthetic bundle and ESP; includes the old tool stopping on the no-original ESP) | emulator/replica |
 | `k114s-boot-once entries` on a copy of this Mac's `limine.conf` | ids `Omarchy-K114s-repair-r1--trackpad-fix-B-` and `Omarchy.linux-aurora`, equal to Limine's published `LoaderEntries` | agent-run |
@@ -417,7 +417,7 @@ After the boot, **as the very first command** (no shutdown has run since Limine 
 `holds LoaderEntryOneShot`, the erase did not reach disk before the shutdown save: **the mechanism is not hang-safe; do not run step E** (`sudo $K clear`; report it, a different mechanism is an owner decision);
 if it says `NOT MEASURED`, repeat step B (a shutdown save, a clear, or a status run in a later boot voids it). `arm` for the real kernel refuses without the marker. (`clear` between arm and reboot also voids it: it removes the arming record, so a later boot cannot give a false PASSED.) `NOT MEASURED: ... written during this boot` prints the file's mtime and the boot start; if they differ by about a whole number of hours, U-Boot stamps FAT times in UTC and the gate cannot pass: report it, do not work around it.
 
-*Optional durability check (recommended before step E):* `sudo $K arm 'Omarchy K114s repair r1 (trackpad fix B)' --with-stage2-trial`, reboot, and during Limine's 5 s menu (after it has read and erased the request) hold the power button until off. Then boot **macOS** through Startup Options, which does not run U-Boot or Limine: do **not** boot Linux first, because a Linux boot goes through Limine again and erases the request a second time, which hides the result. In macOS mount the Linux EFI partition read-only (`sudo diskutil mount readOnly <device>`) and test the file: `python3 -c "d=open('/Volumes/EFI/ubootefi.var','rb').read();print('HOLDS' if 'LoaderEntryOneShot'.encode('utf-16-le') in d else 'gone')"`, then `diskutil unmount`. `gone` means the erase survived the power cut; `HOLDS` means it is not durable: do not run step E (and use the stuck-request way back if a trial entry was armed). Without this check, step B proves visibility only.
+*Optional durability check (recommended before step E):* `sudo $K arm 'Omarchy K114s repair r1 (trackpad fix B)' --with-stage2-trial`, reboot, and during Limine's 5 s menu (after it has read and erased the request) hold the power button until off. Then boot **macOS** through Startup Options, which does not run U-Boot or Limine: do **not** boot Linux first, because a Linux boot goes through Limine again and erases the request a second time, which hides the result. In macOS mount the Linux EFI partition read-only (`sudo diskutil mount readOnly <device>`) and test the file: `python3 -c "d=open('/Volumes/EFI/ubootefi.var','rb').read();print('HOLDS' if 'LoaderEntryOneShot'.encode('utf-16-le') in d else 'gone')"`, then `diskutil unmount`. `gone` means the erase survived the power cut; `HOLDS` means it is not durable: run `sudo rm /var/lib/k114s-recovery/boot-once-selftest-ok` in Linux so that `arm` refuses a real target, and do not run step E (and use the stuck-request way back if a trial entry was armed). Without this check, step B proves visibility only.
 
 **4. Step C: prepare the kernel trial: end the GPU Stage 2 trial, keep the desktop on the CPU, block every suspend path.**
 
@@ -447,6 +447,7 @@ D0. Backups and facts. Stop if a hash pair differs: the recovery copy is what th
 
 D1. Free the slot, and check that the repair entry survived. **Prerequisite: step 1 is complete (the owner confirmed `sudo ./k114s-repair status` with the fixed tool on the Mac) and step B passed (the marker exists).**
 
+    findmnt /boot/efi >/dev/null || echo "STOP: /boot/efi is not mounted; go to step Z"      # the installed guard does not check this
     sudo limine-entry-tool --remove-uki linux-aurora
     sudo $K check                                          # default_entry 1; entry 1 boots the repair image; its hash matches; NO "BAD"
     sudo sha256sum /boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi | cut -c1-16     # 51148ff7005d2986, unchanged
@@ -462,6 +463,7 @@ D2. Keep `update-m1n1` from rewriting `boot.bin` during the install (it would us
 
 D3. Install. (The space guard passes only now.)
 
+    findmnt /boot/efi >/dev/null || echo "STOP: /boot/efi is not mounted; go to step Z"      # the installed guard does not check this
     sudo pacman -U $R/linux-k114s-7.3.0.r3a-2-aarch64.pkg.tar.zst
 
 Expected lines: the hold guard and the space guard hooks pass silently; `Updating linux initcpios under /boot (Apple Silicon)...` with a
@@ -472,7 +474,7 @@ If a Limine step fails, the package is installed without its image: **step Z**.
 
 D4. Restore `update-m1n1` and check what happened, before anything is armed.
 
-    findmnt /boot/efi >/dev/null || { echo "STOP: /boot/efi is not mounted"; exit 1; }      # the installed guard does not check this
+    findmnt /boot/efi >/dev/null || echo "STOP: /boot/efi is not mounted; go to step Z"      # the installed guard does not check this
     sudo cp -p /var/lib/k114s-recovery/update-m1n1.before-r3a /etc/default/update-m1n1
     sudo sha256sum /boot/efi/m1n1/boot-ctxr.bin | cut -c1-16                               # 45a5dbef19c14898 (unchanged: r1)
     sudo $K entries                                                                         # entry 1 is still the repair entry; a new Omarchy.linux-k114s line
@@ -505,6 +507,8 @@ If the Mac hangs before the root filesystem or shows nothing: hold the power but
 
 **7. What the owner looks at.** On the trial boot, with the desktop up:
 
+First, after the reboot: `findmnt /boot/efi >/dev/null || echo "STOP: /boot/efi is not mounted; go to step Z"`.
+
     uname -r                                          # 7.3.0-17.v272-4-k114s-r3a-ARCH
     sudo $K status                                    # "this boot started: Omarchy.linux-k114s"; no request left
     $REPO/tests/hardware/k114s-r3a-check.sh           # "ok" lines; the 11 CONFIG_ BAD lines must be gone; not the GPU trial, no render node, sleep targets masked
@@ -514,6 +518,8 @@ Success criteria for (i): keyboard, trackpad, Wi-Fi, Bluetooth, battery and fans
 Do not suspend. Closing the lid locks the session (drop-in from step C) and nothing more. The next reboot returns to the repair entry by itself.
 
 **8. Step F: (ii) the r3a tree, with the r3a kernel, as a one-boot Stage 2 trial.** Only after step E is clean. First add the `eDP-1` monitor rule (`docs/r3-sleep-lid.md`).
+
+First, after the reboot: `findmnt /boot/efi >/dev/null || echo "STOP: /boot/efi is not mounted; go to step Z"`.
 
     sudo cp $R/boot-ctxr-r3a.bin /boot/efi/m1n1/boot-ctxr-r3a.bin
     sudo sha256sum /boot/efi/m1n1/boot-ctxr-r3a.bin | cut -c1-64          # 5164bb1e1be1fba3...
@@ -562,7 +568,7 @@ Nothing in this runbook touches macOS, Apple's boot policy, Stage 1 or Apple fir
 
 - **The one-shot is measured, not assumed.** The mechanism is read from Limine's source; nothing yet shows that U-Boot persists a boot-time erase, step B measures it (it can fail), and `arm` refuses a kernel target until it has passed. A hang that loses power before Limine reads the request simply retries the trial once more.
 - The slot swap removes the only hook-managed UKI of the known-good image for the length of the window; the recovery copy and `limine.conf.before-r3a` restore it. Entry 1 is the fallback; if entry 1 breaks, macOS is the way back, and only the fixed tool (step 1, a prerequisite of D1) works once the original image is off the ESP.
-- **The space guard in this branch also refuses when `/boot/efi` is not a mount point** (with fstab `nofail` a failed ESP mount makes `df` report the root filesystem and the guard pass). `allow-low-esp` still overrides it. The guard installed on the Mac today is r2c's and does **not** check this: it reaches the Mac only with the next bundle revision. Until then every step of the window starts with `findmnt /boot/efi >/dev/null || STOP` (step D4).
+- **The space guard in this branch also refuses when `/boot/efi` is not a mount point** (with fstab `nofail` a failed ESP mount makes `df` report the root filesystem and the guard pass). `allow-low-esp` still overrides it. The guard installed on the Mac today is r2c's and does **not** check this: it reaches the Mac only with the next bundle revision. Until then steps D1, D3, D4 and the first command after each reboot of the window (the first command of steps 7 and 8, after the trial reboots of steps E and F) run `findmnt /boot/efi >/dev/null || echo STOP`.
 - **During the window the ESP is expected about 0.4 MB under the space guard's minimum (replica UKI sizes) and cannot hold a second 79 MB UKI.** The guard refuses package transactions (correct) only if that estimate holds; D4 therefore measures the real free space and stops (step Z) if it is at or above the minimum. Do not use `allow-low-esp` except in step Z. Unattended updates are not possible while the window is open; the steady state that allows them (one hook-managed kernel directory, or a larger ESP) is the owner's decision.
 - `limine-entry-tool` might renumber the menu or not keep `default_entry` on entry 1; steps D1 and D4 check it before any reboot.
 - The configuration delta changes first-boot behaviour (`docs/r3-config.md`, risks): `ufw` loads fully, qdisc `fq` and BBR, Tailscale rules, `systemd-oomd`, qemu-user binfmt.
