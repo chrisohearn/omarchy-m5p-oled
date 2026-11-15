@@ -2,9 +2,15 @@
 # K114s (omarchy-m5p-oled): install the sound configuration for the headphone jack and the
 # microphones. Nothing here is for the loudspeakers.
 #
-#     sudo bash linux/audio/install-audio.sh            install
-#     sudo bash linux/audio/install-audio.sh --undo     remove what it installed, restore what it replaced
-#     bash linux/audio/install-audio.sh --check         say what is installed, change nothing
+#     sudo bash linux/audio/install-audio.sh                      install
+#     sudo bash linux/audio/install-audio.sh --with-beamformer    install, and make the beamformed
+#                                                                 microphone graph the one in use
+#     sudo bash linux/audio/install-audio.sh --undo               remove what it installed, restore what it replaced
+#     bash linux/audio/install-audio.sh --check                   say what is installed, change nothing
+#     --root DIR (or K114S_ROOT=DIR) works on a directory tree instead of /: for tests. With a root the
+#     script needs no root rights (it still checks the device tree named by K114S_DT_COMPATIBLE, default
+#     the running Mac's) and neither reloads systemd nor touches any service. Switching between the plain
+#     and the beamformed graph is a re-run with or without --with-beamformer.
 #
 # What it installs (every file is new; an existing file of the same name is kept as *.k114s-orig):
 #   1. ALSA UCM profiles for the two cards the kernel creates:
@@ -31,20 +37,31 @@ say() { echo "install-audio: $*"; }
 
 # source (relative to this folder) -> destination, one pair per line
 pairs() {
+  local MICSRC=share/mic.json; [[ $beam == 1 ]] && MICSRC=share/mic-beamformer.json
   cat <<EOF
 ucm2/macaudio-k114.conf|/usr/share/alsa/ucm2/conf.d/macaudio/MacBook Pro K114.conf
 ucm2/aop_audio-k114-hpai.conf|/usr/share/alsa/ucm2/conf.d/aop_audio/MacBook Pro K114 High-Power Audio Interface.conf
 ucm2/aop_audio-k114-HiFi.conf|/usr/share/alsa/ucm2/conf.d/aop_audio/k114/HiFi.conf
 wireplumber/82-k114-audio.conf|/etc/wireplumber/wireplumber.conf.d/82-k114-audio.conf
-share/mic.json|/usr/local/share/omarchy-k114s/audio/mic.json
+$MICSRC|/usr/local/share/omarchy-k114s/audio/mic.json
 EOF
   for u in $UNITS; do
     echo "systemd/91-k114s-no-speaker-link.conf|/etc/systemd/system/$u.service.d/91-k114s-no-speaker-link.conf"
   done
 }
 
-mode=${1:-install}
-case "$mode" in install|--undo|--check) ;; *) die "usage: install-audio.sh [--undo|--check]" ;; esac
+mode=install; beam=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --undo|--check) mode=$1 ;;
+    --with-beamformer) beam=1 ;;
+    --root) [[ $# -ge 2 ]] || die "--root needs a directory"; ROOT=${2%/}; shift ;;
+    --root=*) ROOT=${1#--root=}; ROOT=${ROOT%/} ;;
+    *) die "usage: install-audio.sh [--undo|--check] [--with-beamformer] [--root DIR]" ;;
+  esac
+  shift
+done
+if [[ -n $ROOT ]]; then STATE=$ROOT/usr/local/lib/omarchy-k114s/audio; fi
 
 if [[ $mode == --check ]]; then
   rc=0
@@ -56,7 +73,7 @@ if [[ $mode == --check ]]; then
   exit $rc
 fi
 
-[[ $(id -u) == 0 || -n ${K114S_ROOT:-} ]] || die "run with sudo"
+[[ $(id -u) == 0 || -n $ROOT ]] || die "run with sudo"
 compatible=${K114S_DT_COMPATIBLE:-/sys/firmware/devicetree/base/compatible}
 grep -zFxq 'apple,k114s' "$compatible" || die "this is not an apple,k114s Mac"
 
@@ -74,7 +91,7 @@ else
   while IFS='|' read -r src dst; do [[ -f $HERE/$src ]] || die "missing beside this script: $src"; done < <(pairs)
   while IFS='|' read -r src dst; do
     if [[ -f $ROOT$dst ]] && cmp -s "$HERE/$src" "$ROOT$dst"; then continue; fi
-    if [[ -e $ROOT$dst && ! -e $ROOT$dst.k114s-orig ]]; then mv "$ROOT$dst" "$ROOT$dst.k114s-orig"; say "kept the existing $dst as $dst.k114s-orig"; fi
+    if [[ -e $ROOT$dst && ! -e $ROOT$dst.k114s-orig && ! -e $STATE/installed ]]; then mv "$ROOT$dst" "$ROOT$dst.k114s-orig"; say "kept the existing $dst as $dst.k114s-orig"; fi
     install -D -m 0644 "$HERE/$src" "$ROOT$dst"
     say "installed $dst"
   done < <(pairs)

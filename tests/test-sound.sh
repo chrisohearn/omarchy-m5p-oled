@@ -13,7 +13,7 @@
 #   4. the lint fails on trees that give the amplifiers a way to play (the K116s amp nodes, a Speaker
 #      link, the shutdown pin exposed, a speaker DMA channel, the K116 card);
 #   5. the ALSA UCM profiles parse with the installed alsaucm, where it and alsa-ucm-conf-aurora exist;
-#   6. linux/audio/install-audio.sh installs and undoes cleanly in a fake root;
+#   6. linux/audio/install-audio.sh installs and undoes cleanly in a fake root (--root, --with-beamformer);
 #   7. the installed speakerguardd v2 gate code, given the compiled tree, finds no speaker card.
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -152,7 +152,25 @@ find "$R" -type f | sort > "$W/after-install"
 expect "install: --undo runs" inst --undo
 [ "$(find "$R" -type f | wc -l)" = 2 ] && [ "$(cat "$R/etc/wireplumber/wireplumber.conf.d/82-k114-audio.conf")" = "someone else's" ] &&
   ok "install: --undo leaves the root as it was" || { no "install: --undo left a difference"; find "$R" -type f; }
-if find "$here/linux/audio" -type f -print0 | xargs -0 grep -l -iE 'speakersafetyd|Speaker Volume Unlock|Speaker Protection' | grep -q .; then
+# --root and the beamformed graph (a second root: the flag, not the environment variable)
+R2="$W/root2"; mkdir -p "$R2/usr/share/alsa/ucm2/conf.d/macaudio/cs42l84"; : > "$R2/usr/share/alsa/ucm2/conf.d/macaudio/cs42l84/HiFi-jack.conf"
+inst2() { K114S_DT_COMPATIBLE="$W/compat" bash "$here/linux/audio/install-audio.sh" --root "$R2" "$@"; }
+M="$R2/usr/local/share/omarchy-k114s/audio/mic.json"
+expect "install: --root installs into the given tree" inst2
+cmp -s "$M" "$here/linux/audio/share/mic.json" && ok "install: the plain microphone graph is the default" || no "install: default graph"
+expect "install: --with-beamformer switches the graph" inst2 --with-beamformer
+cmp -s "$M" "$here/linux/audio/share/mic-beamformer.json" && ok "install: the beamformed graph is in place" || no "install: beamformed graph"
+[ ! -e "$M.k114s-orig" ] && ok "install: switching graphs does not keep our own file as an original" || no "install: switching made a .k114s-orig"
+expect "install: --undo with --root" inst2 --undo
+[ "$(find "$R2" -type f | wc -l)" = 1 ] && ok "install: --root --undo leaves only the stand-in verb file" || { no "install: --root --undo left files"; find "$R2" -type f; }
+# the Stage B readiness report: silent, and it trips on anything that could admit a speaker path
+SR="$here/linux/audio/speaker-readiness.sh"; R3="$W/root3"; mkdir -p "$R3/usr/share/speakersafetyd/apple" "$R3/proc/device-tree/sound" "$R3/sys/bus/i2c/devices"
+rc=0; bash "$SR" --root "$R3" > "$W/sr.out" 2>&1 || rc=$?
+[ $rc = 0 ] && grep -q '^BLOCKED' "$W/sr.out" && ok "readiness: an empty root is blocked, no tripwire" || { no "readiness: empty root (exit $rc)"; cat "$W/sr.out"; }
+: > "$R3/usr/share/speakersafetyd/apple/k114.conf"; rc=0; bash "$SR" --root "$R3" > /dev/null 2>&1 || rc=$?; [ $rc = 3 ] && ok "readiness: a k114.conf trips it" || no "readiness: k114.conf did not trip"
+rm "$R3/usr/share/speakersafetyd/apple/k114.conf"; mkdir "$R3/proc/device-tree/sound/dai-link@1"; rc=0; bash "$SR" --root "$R3" > /dev/null 2>&1 || rc=$?; [ $rc = 3 ] && ok "readiness: a second card link trips it" || no "readiness: dai-link@1 did not trip"
+rmdir "$R3/proc/device-tree/sound/dai-link@1"; mkdir "$R3/sys/bus/i2c/devices/1-0038"; rc=0; bash "$SR" --root "$R3" > /dev/null 2>&1 || rc=$?; [ $rc = 3 ] && ok "readiness: a bound amplifier address trips it" || no "readiness: i2c 1-0038 did not trip"
+if find "$here/linux/audio" -type f ! -name speaker-readiness.sh -print0 | xargs -0 grep -l -iE 'speakersafetyd|Speaker Volume Unlock|Speaker Protection' | grep -q .; then
   no "install: a shipped file names speakersafetyd or a speaker protection control"; else ok "install: no shipped file names speakersafetyd or a speaker protection control"; fi
 
 # --- 7. what the installed speaker protection gate makes of the tree --------------------------------------------
