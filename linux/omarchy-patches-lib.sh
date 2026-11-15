@@ -17,11 +17,12 @@ fits() { run_patch "$1" -N --dry-run; }
 # The files a patch changes, relative to /usr.
 patch_files() { sed -n 's#^+++ b/\([^[:space:]]*\).*#\1#p' "$1" | LC_ALL=C sort -u; }
 
-# The sha256 the Omarchy package (omarchy, or omarchy-dev on Edge: the two the hook watches)
-# recorded for usr/FILE when it installed it, or nothing.
+# The sha256 the Omarchy package (omarchy, or omarchy-dev on Edge) or omarchy-mac (the Apple Silicon
+# platform data: the three the hook watches) recorded for usr/FILE when it installed it, or nothing.
 shipped_sha() {
   local m
-  for m in "$ROOT"/var/lib/pacman/local/omarchy-[0-9]*/mtree "$ROOT"/var/lib/pacman/local/omarchy-dev-[0-9]*/mtree; do
+  for m in "$ROOT"/var/lib/pacman/local/omarchy-[0-9]*/mtree "$ROOT"/var/lib/pacman/local/omarchy-dev-[0-9]*/mtree \
+           "$ROOT"/var/lib/pacman/local/omarchy-mac-[0-9]*/mtree; do
     [[ -f $m ]] || continue
     zcat -f "$m" 2>/dev/null | awk -v p="./usr/$1" '$1 == p {
       for (i = 2; i <= NF; i++) if ($i ~ /^sha256digest=/) { sub(/^sha256digest=/, "", $i); print $i; exit } }'
@@ -108,7 +109,7 @@ migrate() {
   : > "$dest/.records"
 }
 
-# A patch may only change files the Omarchy package (omarchy or omarchy-dev) installed: none it creates or deletes (a
+# A patch may only change files the Omarchy package (omarchy, omarchy-dev or omarchy-mac) installed: none it creates or deletes (a
 # file it created could later collide with one the package ships), nothing the package database
 # has no record of.
 check_targets() {
@@ -116,7 +117,7 @@ check_targets() {
   if grep -qE '^(---|[+][+][+]) /dev/null' "$p"; then echo "creates or deletes a file"; return 1; fi
   while read -r f; do
     n=$((n + 1))
-    [[ -n $(shipped_sha "$f") ]] || { echo "changes $f, which neither omarchy nor omarchy-dev installed"; return 1; }
+    [[ -n $(shipped_sha "$f") ]] || { echo "changes $f, which none of omarchy, omarchy-dev and omarchy-mac installed"; return 1; }
   done < <(patch_files "$p")
   (( n )) || { echo "changes no file"; return 1; }
 }
