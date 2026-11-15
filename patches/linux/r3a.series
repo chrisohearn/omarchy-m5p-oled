@@ -12,9 +12,14 @@
 #   3. configuration: the running kernel's config + patches/linux/config/k114s-r3.config, validated
 #      (docs/r3-integration.md, "Kernel")
 #
+# NOT in r3a: sleep-lid/0010 (788441e0, GPU mailboxes by interrupt only). The GPU Stage 2 trial that runs on this Mac
+# receives on those mailboxes by polling, and 0010 removes the polling for an interrupt never seen on a 14-inch T6050
+# (device-tree review, docs/r3-integration.md). It belongs to r3b, after the line is proven on a 0009-only kernel.
+#
 # Order: sleep-lid first (it carries #1688 and #1844, which r3/display-gpu also has: taken once, from here),
 # then the display driver's 120 Hz gate and bindings, then sound, then USB. Every patch applies cleanly
-# in this order (agent-run, git am, no fuzz).
+# in this order (agent-run, git am, no fuzz; 20 patches). The built tree was the 21-patch tree with 0010 reverted
+# (git apply -R), which is the same source.
 sleep-lid/0001-PCI-apple-qualify-the-K116s-for-suspend-to-idle-over.patch
 sleep-lid/0002-PCI-apple-let-devices-below-a-kernel-trained-port-le.patch
 sleep-lid/0003-PCI-apple-qualify-the-K114s-for-suspend-to-idle-over.patch
@@ -24,7 +29,6 @@ sleep-lid/0006-dt-bindings-display-simple-framebuffer-add-apple-int.patch
 sleep-lid/0007-power-supply-macsmc-skip-an-unreadable-manufacture-d.patch
 sleep-lid/0008-arm64-dts-apple-t6050-keep-the-PMP-s-power-domains-o.patch
 sleep-lid/0009-soc-apple-mailbox-receive-T6050-GPU-mailboxes-by-int.patch
-sleep-lid/0010-soc-apple-mailbox-receive-T6050-GPU-mailboxes-by-int.patch
 display-gpu/0003-drm-apple-offer-only-the-120-Hz-mode-on-the-firmware.patch
 display-gpu/0004-drm-apple-test-that-an-external-DCP-keeps-its-60-Hz-.patch
 display-gpu/0005-drm-apple-keep-every-mode-on-an-external-firmware-27.patch

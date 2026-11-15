@@ -161,7 +161,7 @@ Once the connector is `eDP-1` (source-read, Omarchy scripts as installed):
 | 0004-0006 + `apple,internal-panel` | Safe: only the connector's type. Take it together with 0001-0003, or every lid close locks and then fails to suspend | Inert once the display coprocessor owns the panel: `apple-drm` replaces `simpledrm` and names the connector `eDP-1` itself (K116s: "eDP-1 connected at 3472x2170") |
 | 0007 | Safe, independent | Same |
 | 0008 + `apple,always-on` | No effect: the domains are disabled | **Required in the same build that enables the PMP** (sound). Without it expect `PS pms: Failed to reach power state` at suspend and a PMP crash at wake |
-| 0009-0010 | No effect: no `ascwrap-v6` mailbox is bound today (agent-run: the five bound mailboxes are all `apple,t6050-asc-mailbox`) | **Required in the same build that enables the GPU.** Without it a suspend with the lid open panics in the noirq phase and looks like a machine that never wakes |
+| 0009-0010 | **Correction (device-tree review, 2026-11-14): not inert on the GPU tree.** Today's boot is the standing GPU Stage 2 trial: `2302600000.mailbox` and `2302e00000.mailbox` (`apple,t6050-j775d-ascwrap-v6`) are bound and `2300000000.gpu` is driven by `aurora`; only the r1 tree has no GPU mailbox bound. They receive by polling today (`.rx_poll_only = true`, upstream `43c6ca839e`, because on the 14-inch M5 Max the GPU ASC interrupt never reached the AIC). `0010` removes the polling and the storm guard, so receive would depend on an interrupt never observed on any 14-inch T6050. **r3a carries 0009 only** (it keeps polling until the interrupt has delivered a message, and keeps the storm guard) and leaves `0010` for r3b, after `/proc/interrupts` shows the `2302600000.mailbox-recv` count rising on a 0009-only kernel on the GPU tree. | **Required in the same build that enables the GPU** (a suspend with the lid open panicked in the noirq phase upstream, #1843): that is `0010`'s job and stays open. Until r3b, suspend with the GPU tree stays forbidden |
 
 What the other work must not assume from this: the suspend path through the display coprocessor
 (blank at suspend, modeset at wake) and through the GPU has only the K116s reports behind it.
@@ -174,7 +174,7 @@ the notice is only sent for a firmware-driven suspend (source-read).
 
 ## Overlap with other r3 branches
 
-`r3/display-gpu` also carries #1688's first two commits and both #1844 commits. They are the same
+`r3/display-gpu` also carries #1688's first two commits and both #1844 commits (r3a leaves the second #1844 commit out, see the 0009-0010 row above). They are the same
 upstream commits (same patch-id). On its kernel branch 0004, 0005, 0009 and 0010 are already
 present and the other six apply cleanly (agent-run, `git apply --check`). `patches/linux/sleep-lid/series`
 marks the four shared files.

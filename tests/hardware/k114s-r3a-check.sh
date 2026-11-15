@@ -1,13 +1,26 @@
 #!/bin/bash
 # Read-only report of what the r3a kernel changed, for the first boot of linux-k114s. No root needed
 # (a few lines are better with root and say so). Changes nothing. Prints "ok", "BAD" or "info" lines.
-#   tests/hardware/k114s-r3a-check.sh [--expect-tree r1|r3a]
-want=r1; [ "${1:-}" = --expect-tree ] && want=${2:-r1}
+#   tests/hardware/k114s-r3a-check.sh [--expect-tree r1|r3a] [--allow-gpu]
+# --allow-gpu is for the separate r3a + GPU step only. Otherwise a boot on the GPU Stage 2 trial is a BAD line: the r3a
+# kernel changes the GPU mailbox path that was proven on this Mac with the running kernel (docs/r3-integration.md).
+want=r1; allow_gpu=0
+while [ $# -gt 0 ]; do case $1 in --expect-tree) want=${2:-r1}; shift ;; --allow-gpu) allow_gpu=1 ;; esac; shift; done
 ok() { echo "ok    $*"; }; bad() { echo "BAD   $*"; }; info() { echo "info  $*"; }
 rel=$(uname -r)
 case $rel in *k114s-r3a-ARCH) ok "running kernel $rel" ;; *) bad "running kernel is $rel, not the r3a kernel" ;; esac
 trial=$(tr -d '\0' < /proc/device-tree/chosen/aurora,trial 2>/dev/null)
 info "Stage 2: ${trial:-the configured m1n1/boot-ctxr.bin}"
+gpu_node=$(ls -d /sys/bus/platform/drivers/aurora/*/drm/renderD* 2>/dev/null | head -1)
+if [ $allow_gpu = 0 ]; then
+  case $trial in *gpu*) bad "this boot is the GPU Stage 2 trial ($trial): the r3a kernel must not run on the GPU tree in this step" ;; *) ok "not the GPU Stage 2 trial" ;; esac
+  [ -n "$gpu_node" ] && bad "the GPU render node exists ($gpu_node): this is the GPU tree" || ok "no GPU render node (the GPU tree is not booted)"
+else
+  info "GPU step: render node ${gpu_node:-none}; mailbox interrupts: $(grep -i mailbox /proc/interrupts 2>/dev/null | awk '{print $NF": "$2}' | tr '\n' ' ')"
+fi
+os=/sys/firmware/efi/efivars/LoaderEntryOneShot-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+[ -e "$os" ] && info "LoaderEntryOneShot is still set (a request for the next boot): $(tail -c +5 "$os" | iconv -f UTF-16LE -t UTF-8 2>/dev/null | tr -d '\0')" || ok "no LoaderEntryOneShot left over: Limine consumed the request"
+for t in suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target; do [ "$(systemctl is-enabled $t 2>/dev/null)" = masked ] || bad "$t is not masked"; done
 tree=r1; for f in /proc/device-tree/chosen/framebuffer@*/apple,internal-panel; do [ -e "$f" ] && tree=r3a; done
 [ "$tree" = "$want" ] && ok "device tree is the $tree tree (apple,internal-panel property: $([ $tree = r3a ] && echo present || echo absent))" || bad "expected the $want tree, the booted tree looks like $tree"
 conf=$(zcat /proc/config.gz 2>/dev/null)

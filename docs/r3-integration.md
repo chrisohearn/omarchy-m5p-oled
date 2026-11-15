@@ -8,11 +8,11 @@ hardware. Nothing built for r3a is installed; every root step is in the runbook 
 
 | Part | State |
 | --- | --- |
-| Kernel | the running kernel's source (aurora-silicon/linux `a34d26c2` + betizzel's 19 patches + `pr1568.patch`) plus 21 r3 patches and the r3 configuration delta. Release `7.3.0-17.v272-4-k114s-r3a-ARCH` (the running one is `7.3.0-17.v272-4-ARCH`) |
-| Package | `linux-k114s 7.3.0.r3a-1`, installs beside `linux-aurora`, shares no file with it |
+| Kernel | the running kernel's source (aurora-silicon/linux `a34d26c2` + betizzel's 19 patches + `pr1568.patch`) plus 20 r3 patches and the r3 configuration delta (`sleep-lid/0010` is not in r3a, section 2). Release `7.3.0-17.v272-4-k114s-r3a-ARCH` (the running one is `7.3.0-17.v272-4-ARCH`) |
+| Package | `linux-k114s 7.3.0.r3a-2`, installs beside `linux-aurora`, shares no file with it (`-1` had `sleep-lid/0010` and is superseded) |
 | Device tree | `dts/t6050-k114s-r3a.dts`: the proven r1 tree plus the sleep pieces (three properties). Sound is a build variant that needs this Mac's own data (section 4) |
 | Stage 2 | `boot-ctxr-r3a.bin` (the r3a tree in the installed Aura loader), tried as a one-boot trial, never first |
-| Staging | (i) r3a kernel on the proven r1 tree; (ii) the r3a tree as a one-boot Stage 2 trial; (iii) promotion, only after (ii) is proven |
+| Staging | (i) r3a kernel on the proven r1 tree, started once through Limine's own one-shot request; (ii) the r3a tree as a one-boot Stage 2 trial; (iii) the r3a kernel on the GPU tree, as its own step; (iv) promotion, only after (ii) and (iii) are proven. The GPU Stage 2 trial is ended for (i) and (ii) |
 
 ## 2. The merge, and what was left out
 
@@ -32,16 +32,18 @@ device tree describes a DCP or a GPU, which r3a does not:
 
 | Left out | Why |
 | --- | --- |
-| `display-gpu/0001`, `0002` (#1844, GPU mailboxes by interrupt) | already in `sleep-lid/0009`, `0010`: taken once |
+| `sleep-lid/0010` = `display-gpu/0002` (#1844 second commit, `788441e0`, GPU mailboxes by interrupt only) | **Left out of r3a after the device-tree review.** The GPU Stage 2 trial that this Mac runs binds two `apple,t6050-j775d-ascwrap-v6` mailboxes (`2302600000`, `2302e00000`) and receives on them by polling (`.rx_poll_only`, upstream `43c6ca839e`: on a 14-inch M5 Max the GPU ASC interrupt never reached the AIC). `0010` removes the polling and the storm guard, so receive would depend on an interrupt never seen on a 14-inch T6050. r3a keeps `0009` (polling stays until the interrupt delivers a message, storm guard stays). `0010` goes to r3b, after `/proc/interrupts` shows `2302600000.mailbox-recv` rising on a 0009-only kernel on the GPU tree (the r3a + GPU step) |
+| `display-gpu/0001` (#1844 first commit) | already in `sleep-lid/0009`: taken once |
 | `display-gpu/0007`, `0008` (#1688, eDP connector) | already in `sleep-lid/0004`, `0005`: taken once |
 | `patches/aura/0001`-`0003` (the loader: panel pin table, #226, #230) | a new Stage 2 loader changes the chain that every boot entry uses and has never booted in this form. The installed loader refuses a K114s panel image it does not pin |
 | `dts/t6050-k114s-display-gpu.dtsi` and the `r3-edp`, `r3-gpu`, `r3` trees | enable the DCP, the panel and the GPU. The panel hand-off is the one step that can cost the picture (`docs/r3-display-gpu.md`, risks), and the GPU without the panel is the lead's separate standing trial |
 | display tools and tests (`tests/lint-display-gpu-dtb.py` and friends) | belong with the trees |
 
-The sleep patches `0008` (PMP domains always on) and `0009`/`0010` (GPU mailbox interrupts) have no
-effect in r3a (PMP stays disabled in the shipped tree, no GPU mailbox is bound). They are in the
-kernel because the sound variant enables the PMP and r3b enables the GPU, and a kernel without
-them makes those unsafe (`docs/r3-sleep-lid.md`).
+The sleep patch `0008` (PMP domains always on) has no effect in r3a (PMP stays disabled in the shipped tree). `0009`
+(GPU mailbox receive, polling kept) has no effect on the r3a tree, which binds no GPU mailbox; on the GPU tree it acts on the two
+bound GPU mailboxes but keeps their polling. (An earlier version of this document, and `docs/r3-sleep-lid.md`, said that no GPU
+mailbox is bound at all: that was true of the r1 tree only, and is corrected.) They are in the kernel because the sound variant enables
+the PMP and r3b enables the GPU display path, and a kernel without them makes those unsafe (`docs/r3-sleep-lid.md`).
 
 ## 3. Kernel
 
@@ -53,8 +55,9 @@ them makes those unsafe (`docs/r3-sleep-lid.md`).
 2. `patches/linux/pr1568.patch` with `patch -Np1 --no-backup-if-mismatch` (`git am` refuses it, one hunk
    needs fuzz; this is what the running kernel has). Result: `src/r1`.
 3. `localversion.10-pkgrel` with the content `-17.v272-4-k114s-r3a`.
-4. `sleep-lid/0001`-`0010`, `display-gpu/0003`-`0006`, `0009`, `0010`, `sound/0001`-`0004`,
-   `usb/0001`, by `git am`, no fuzz (agent-run, 21 commits).
+4. `sleep-lid/0001`-`0009`, `display-gpu/0003`-`0006`, `0009`, `0010`, `sound/0001`-`0004`,
+   `usb/0001`, by `git am`, no fuzz (agent-run, 20 commits; the first build had 21 and `sleep-lid/0010` was taken out again
+   with `git apply -R`, the same source: no later patch touches `mailbox.c` or `mailbox-g17-test.h`).
 
 Reproduce (build area per `build/native/README-build.md` and `docs/r3-buildenv.md`):
 
@@ -92,7 +95,7 @@ so nothing the machine needs was dropped.
     source $K114S_BUILD_ROOT/env.sh
     cd $K114S_BUILD_ROOT/src/r3a && kmake O=$K114S_BUILD_ROOT/build/r3a -j14 Image modules dtbs
 
-6 min 13 s. `kernelrelease` `7.3.0-17.v272-4-k114s-r3a-ARCH`, 1972 modules (the running kernel has 1728;
+6 min 13 s for the first build (21 patches); taking `sleep-lid/0010` out again was an incremental build of `mailbox.o`, the relink and the `Image` at -j8 (a few minutes). `kernelrelease` `7.3.0-17.v272-4-k114s-r3a-ARCH`, 1972 modules (the running kernel has 1728;
 the difference is the config delta), `Image` 54,217,216 bytes (the running image: 54,086,144).
 Toolchain as in the foundation build (clang 23.1.3, Rust 1.98.1).
 
@@ -169,8 +172,8 @@ tests the result; `dtbs.list` names the 46 device trees.
 
 Contents (agent-run listing): `usr/lib/modules/7.3.0-17.v272-4-k114s-r3a-ARCH/` with `vmlinuz` (the raw arm64
 Image), `pkgbase` (`linux-k114s`), `modules.*`, `kernel/` (the modules, no `updates/`), `dtbs/` (flat, the same 46
-names as `linux-aurora`, `t6050-k114s.dtb` built from the r3a kernel tree), plus `usr/share/linux-k114s/config-<release>`.
-2,588 entries, 47,439,440 bytes. No symbolic links (the `build` and `source` links are removed).
+names as `linux-aurora`, `t6050-k114s.dtb` is the kernel tree's preliminary tree, not the r3a tree, see below), plus `usr/share/linux-k114s/config-<release>`.
+2,588 entries; the package file is 47,441,434 bytes. No symbolic links (the `build` and `source` links are removed).
 
 Checks (agent-run, `check-package.sh`, all pass): one module directory; release ends in `-ARCH` and differs from
 linux-aurora's; **no file in common with `pacman -Qlq linux-aurora`** (compared with `bsdtar -t`; only
@@ -179,31 +182,47 @@ carry vermagic `7.3.0-17.v272-4-k114s-r3a-ARCH` and `modinfo` reads them with th
 `depmod -a -e` over the package tree reports no error and no unresolved symbol; the kernel banner in `vmlinuz`
 names the release.
 
-### What the slot design is
+### What the slot design is, and its limit
 
-Constraints: the ESP has about 87.7 MB free; a UKI is about 80 MB; entry 1 (static repair UKI, 112 MB)
-must stay and needs `/usr/lib/modules/7.3.0-17.v272-4-ARCH` on root.
+Constraints: the ESP has about 87.7 MB free; a UKI is about 79 MB; entry 1 (static repair UKI, 112 MB)
+must stay and needs `/usr/lib/modules/7.3.0-17.v272-4-ARCH` on root. Nothing else on the ESP is mine to delete
+(`asahi/` 90 MB, `vendorfw/` 113 MB and `m1n1/boot.bin*` 20 MB are the installer's and the hooks' files; deleting them is the owner's decision).
+Inventory (agent-run, `du -ab`): `EFI/Linux` 191 MB (the two UKIs), `vendorfw` 113 MB, `asahi` 90 MB, `m1n1` 29 MB, the rest under 5 MB.
 
-Chosen: **install `linux-k114s` beside `linux-aurora`, and free the hook-managed slot first by removing
-linux-aurora's hook-built UKI and its menu entry (`limine-entry-tool --remove-uki linux-aurora`), not the package.**
+Chosen: **install `linux-k114s` beside `linux-aurora`, and for the length of the trial free the hook-managed slot first by removing
+linux-aurora's hook-built UKI and its menu entry (`limine-entry-tool --remove-uki linux-aurora`), not the package.** The 79 MB
+copy of that UKI is already in `/var/lib/k114s-recovery/uki/` (sha256 `cce61605...`, same bytes as the ESP file, checked in step D0), and the undo
+puts that very file back, not a rebuilt one.
 
 - `linux-aurora` stays installed and owned: its modules directory is package-owned, so
   `linux-modules-cleanup.service` leaves it alone; `IgnorePkg`, the K114s hold guard and entry 1 keep working. Wi-Fi
   on entry 1 (`apple_centauri_t6050` loaded after the initramfs) keeps its modules.
 - The Limine hook builds the UKI per kernel directory found through `modules.builtin`
   (`pacman -Qqo` gives the package name, so the new UKI is `omarchy_linux-k114s.efi`), by
-  `mkinitcpio --kernel <release> --uki ...`, not through the preset. Removing linux-aurora's preset would therefore not stop its UKI. Removing the UKI and the menu
-  entry does, and it frees the 79 MB that the new UKI needs. The cost: a hook that rebuilds all kernels
-  (a change under `usr/lib/firmware/*`, `usr/lib/initcpio/*`, `usr/lib/modprobe.d/`, `boot/dtbs/*` ...) would rebuild linux-aurora's UKI too,
-  which no longer fits. The space guard (below) refuses such a transaction beforehand: after the swap the ESP has less than the
-  guard's 84 MiB again, exactly as today. So the steady state is "package transactions need `allow-low-esp`" as it is now.
+  `mkinitcpio --kernel <release> --uki ...`, not through the preset. Removing linux-aurora's preset would therefore not stop its UKI.
+- **The macOS repair tool needed a change, and has one.** `macos/tools/k114s_repair.py` used to require
+  `EFI/Linux/omarchy_linux-aurora.efi` in `status`, `default`, `stage2`, `kernel` and `rollback all`. With the file gone, `status` failed,
+  `default` and `stage2` wrote and then reported STOPPED, `rollback all` (which `docs/bundle-r2c.md` tells the owner to run "if Linux does not start")
+  would have restored a menu that points at the missing file and deleted the repair image, leaving no Linux entry that starts, and `default 1`
+  (a value the tool never accepted) was the wrong word for `default repair`. Now, without the original image: `status`, `stage2`, `default repair`
+  and `rollback stage2` work; `kernel`, `default original`, `rollback all` and `apply` stop with a message and write nothing
+  (tests: `tests/macos/test-no-original-uki.sh`, 24 passed). The delivered earlier tool stops on that ESP (does not find it) and writes nothing, so the fixed file has to be on the Mac, confirmed by `status` there, before the window opens: a hard prerequisite of step D1.
+- **Limit, not fixed here.** After the swap the ESP is expected to have about 87.6 MB free (replica UKI builds: r3a 79,363,072 bytes, baseline 79,252,992), 0.4 MB
+  under the space guard's 88,080,384; that margin is an estimate, so step D4 measures the real value and stops if it is not below the minimum. While it is, every package transaction is refused by the guard for as long as both kernel directories exist.
+  That refusal is correct, not a nuisance: a transaction that touches `usr/lib/firmware/*`, `usr/lib/initcpio/*`, `boot/dtbs/*` and the like
+  makes the Limine hook rebuild **every** kernel directory it finds, which would create linux-aurora's 79 MB UKI again in what is left, and
+  `allow-low-esp` switches the guard off entirely. So the swap is a **trial window**, not a steady state: it opens at step D1, closes with the undo (step Z)
+  or with a promotion decision (below), and no other package transaction runs inside it. This is also why unattended updates cannot run while the
+  window is open. The state that does allow unattended updates is a single hook-managed kernel directory, or a larger ESP; either
+  is a decision for the owner and is not made here.
 - Rejected: replacing `linux-aurora` (the hold guard, `IgnorePkg` and entry 1's module directory all depend on that package);
   a companion package owning the old modules directory (a second package that ships the same files as another is a file
-  conflict; moving ownership is a change to the proven chain for no gain); a third UKI (does not fit).
+  conflict); a third UKI (does not fit); a kernel on `/boot` instead of a UKI (Limine reading another filesystem and the hook's
+  paths are both untested here, which would put a second new thing into the first trial).
 
 ### What installing the package triggers (read from the installed hooks; the install is not run)
 
-`sudo pacman -U linux-k114s-7.3.0.r3a-1-aarch64.pkg.tar.zst`
+`sudo pacman -U linux-k114s-7.3.0.r3a-2-aarch64.pkg.tar.zst`
 
 | Order | Hook | What it does for this package |
 | --- | --- | --- |
@@ -220,15 +239,68 @@ linux-aurora's hook-built UKI and its menu entry (`limine-entry-tool --remove-uk
 Not triggered: `81-omarchy-mac-limine-deploy` (BOOTAA64.EFI), `80-limine-efi-deploy`, `03-k114s-omarchy-patches`.
 
 What `boot.bin` choice means: the highest-version rule is only a risk to ESP space and to byte-stability of `boot.bin`. The
-r3a package's `t6050-k114s.dtb` is the r3a tree (identical to `154568fe...`), so even a rebuilt `boot.bin`
-would carry a K114s tree no worse than before. It does not change what boots.
+r3a package's `t6050-k114s.dtb` is **not** the r3a tree (corrected after the device-tree review): it is the kernel tree's own preliminary
+`t6050-k114s.dts` plus the four properties, sha256 `d1011ecf0d88fa340cb4979a9443223308db057c0f8bde2aaf852a60a9cb16d7`, which lacks 35 nodes of the r3a tree (the N1, USB and
+SMC sensors). `check-package.sh` now prints that hash. It does not change what boots: the Stage 2 is built from the pinned tree, and `use-packaged-dtb`
+must stay absent; anyone who sets it, or boots `boot.bin`, would get a tree without Wi-Fi or USB.
 
-## 6. Stage 2, staged
+## 6. Stage 2 and the one-boot entry, staged
 
-The Stage 2 file is shared by every boot entry, so the new tree is a separate file, tried alone:
+### The one-boot entry (requirement: survives a hang before the root filesystem)
 
-    m1n1/boot-ctxr.bin           configured, proven r1 tree; never overwritten until (iii)
-    m1n1/boot-ctxr-r3a.bin       the r3a tree, 4,439,433 bytes
+The old plan changed `default_entry` to the new entry and relied on a unit that reverts it once the boot reaches root. That unit is
+disabled on this Mac, and it could not help anyway: a hang before the root filesystem never starts it, so `default_entry` would stay on
+the trial entry for every later boot, and the built-in keyboard does not work in Limine's menu. **That mechanism is removed from the plan** (the installed
+`k114s-trial-default-revert` unit stays disabled and nothing creates `/etc/omarchy-k114s/trial-default`).
+
+The trial uses Limine's own boot-once request, read from the source of the installed Limine 12.9.6 (`common/lib/bli.c`, `common/menu.c`; the installed
+`CONFIG.md` says "a Boot Loader Interface `LoaderEntryOneShot` request takes precedence over `default_entry`"):
+
+- Linux writes the EFI variable `LoaderEntryOneShot` (GUID `4a67b082-0a4c-41cf-b6c7-440b29bb8c4f`, attributes NV|BS|RT) holding the entry id as UTF-16
+  (`Omarchy.linux-k114s`: the entry path with `/` as `.` and every byte outside `[A-Za-z0-9+_.@-]` as `-`; the two entries now on the ESP give exactly
+  the ids that Limine publishes in `LoaderEntries`, agent-run).
+- **Limine erases the variable in the same call that reads it** (`handle_entry(..., erase = true)`), before it boots anything. A kernel that hangs
+  leaves nothing behind. `default_entry` is never changed, so the next boot is entry 1, the proven repair entry, with the configured Stage 2.
+  An id that matches no entry is erased too and falls through to `default_entry`.
+- U-Boot keeps runtime variable writes in RAM (`RTStorageVolatile`), and `omarchy-mac-efi-vars.service` copies them to `ubootefi.var` only at shutdown
+  (the J604 finding). So `k114s-boot-once arm` runs `efi-vars-save` immediately, then checks that `ubootefi.var` holds the id as a UTF-16 string, and takes the
+  request back if it does not (agent-run on a fake ESP with a stand-in saver: `tests/linux/test-boot-once.sh`; the real saver and Limine are the self-test, step B).
+- **Nothing observed yet shows that a boot-time write or erase reaches `ubootefi.var`.** `LimineLastBootedEntry` is in that file, but its mtime
+  (2026-11-14 17:05:00) is the Linux shutdown save (`efi-vars-save` logged 17:05:00.346 in the previous boot's journal; this boot's kernel started at 17:05:39), so that variable being
+  there is explained by the shutdown save and proves nothing about U-Boot at boot (agent-run, read as root). The erase has to reach the file at boot time, because a hang means no
+  shutdown and no later save. **Step B is the first and only proof, and failing it is a realistic outcome that blocks steps E to G** (then a kernel trial would have to use a different
+  mechanism, an owner decision). The gate is mechanical: `k114s-boot-once status`, run first thing in the boot after step B's request, measures it and writes
+  `/var/lib/k114s-recovery/boot-once-selftest-ok` only if that boot is the one right after arming (checked against the journal's previous boot id), Limine started the requested entry, the variable is gone from efivarfs
+  **and** from U-Boot's file, and that file was not written during this boot. `arm` refuses every target except entry 1 (the request that changes nothing) unless that marker exists
+  (tests: `tests/linux/test-boot-once.sh`, 54 passed, which covers pass, fail, wrong boot and a save during the boot).
+
+`k114s-boot-once arm` also refuses (a hard check, not advice) unless `default_entry` is 1 and entry 1 is the repair entry, the target's EFI file is on the ESP and
+matches its `#hash`, no Stage 2 trial is armed or configured to re-arm, the four sleep targets are masked, `remember_last_entry` is not `yes` (Limine would then boot the last booted entry ahead of `default_entry`), and, for any target but entry 1, the step B marker exists. It numbers entries the way Limine's
+`default_entry` does (every entry line counts, directories included; `entries` prints the index, the id and the file), which replaces the earlier
+`grep -n` line numbers.
+
+### The Stage 2 of each step, and the GPU
+
+The Stage 2 file is shared by every boot entry. This Mac now boots through a standing trial of `m1n1/boot-ctxr-r3-gpu.bin` (the GPU tree):
+`/etc/omarchy-k114s/stage2-trial` names it and `k114s-stage2-rearm.service` re-arms `aura-try` at every clean shutdown after a good trial boot.
+The device-tree review showed that this matters for the kernel: on that boot `2300000000.gpu` is driven by the `aurora` driver and two
+`ascwrap-v6` GPU mailboxes are bound, and the old kernel receives on them by polling. So:
+
+- **Steps (i) and (ii) never run on the GPU tree.** Step C ends the standing trial before the kernel boots: `stage2-trial` is *moved aside* (so the re-arm unit does nothing at
+  shutdown) and `aura-try` is written `spent`. The kernel then boots on the configured, proven `boot-ctxr.bin` (r1 tree, `45a5dbef...`, no GPU node, no render node).
+  `k114s-boot-once arm` refuses to arm while a trial is armed or configured, and `tests/hardware/k114s-r3a-check.sh` prints BAD if the booted Stage 2 is the GPU one or a render node exists.
+- **How the desktop stays on the CPU.** On the r1 tree there is no render node, so the session guard (`/etc/systemd/user-environment-generators/70-k114s-gpu-desktop`) prints nothing and the session is exactly what it was before the GPU work.
+  Version 2 of the guard (`linux/r3a-trial/70-k114s-gpu-desktop`, tested by `tests/linux/test-gpu-guard.sh`, 7 passed) adds a second lock for an accident (a trial left armed): on a
+  `...-k114s-r3a-ARCH` kernel it keeps the desktop on the CPU even with `~/.config/k114s-gpu-desktop`, until the separate opt-in `~/.config/k114s-gpu-desktop-r3a` exists.
+- **r3a + GPU is its own step (G).** After (i) and (ii) are clean. It restores the parked trial, creates the second opt-in, and boots the r3a kernel on the GPU tree once. The kernel there is the
+  0009-only kernel: 0009 enables the mailbox receive interrupt beside both pollers (a line that never fires keeps polling, the storm guard is in place), which is the first time it is enabled on this Mac, and everything else in r3a is new on that tree too. `0010` stays out until r3b.
+- Suspend stays forbidden on the GPU tree until `0010` is in and proven (`docs/r3-sleep-lid.md`).
+
+### The Stage 2 files
+
+    m1n1/boot-ctxr.bin           configured, proven r1 tree; never overwritten until promotion
+    m1n1/boot-ctxr-r3-gpu.bin    the standing GPU trial's file (parked by step C, restored by step G)
+    m1n1/boot-ctxr-r3a.bin       the r3a tree, 4,439,433 bytes (step F)
 
 Built exactly as `update-boot-ctxr-k114s` does (`build/make-stage2.sh`): `/usr/lib/asahi-boot/m1n1.bin` (3,997,696 bytes,
 Aura) + exactly one tree + `gzip -c u-boot-nodtb.bin`, with the file name and mtime of the U-Boot file in the gzip header. The same script reproduces
@@ -238,166 +310,255 @@ the proven r1 file (`45a5dbef19c1...`) byte for byte, which is the check that th
 | --- | --- |
 | `boot-ctxr-r3a.bin` | `5164bb1e1be1fba39aee64229863b2f835828edd8b4f90e8cfa91e71a6fd8cd9` |
 | prefix (Aura) | `1546dd5079cefe0f9bbdee9d1c95dcdbad39a73ae140612cd6dfab4596c2f7a3` (same as the r1 file's) |
-| tree `t6050-k114s-r3a.dtb` | `154568feac3d5c0dc1e1e7f1bb9778c33de29904b49f1813afde4b0bb9b65297` |
+| tree `t6050-k114s-r3a.dtb` | `154568feac3d5c0dc1e1e7f1bb9778c33de29904b49f1813afde4b0bb9b65297` (rebuilt against the final kernel tree: identical) |
 | gzip U-Boot tail | `9d8dc11ea755e8405a7380683bd82cfeb7391b1fc68245e56e10bf5155a746ad` |
-| `linux-k114s-7.3.0.r3a-1-aarch64.pkg.tar.zst` | `7fe50b9aa061021f282999677ff24301b6ff23951f1c856579c6fdfbec0f377d` |
+| `linux-k114s-7.3.0.r3a-2-aarch64.pkg.tar.zst` | `122fdcf88b72102c31ca5e3f8fe8f576c5bf9055f643e242e53e5ff9c4594b80` |
+| `vmlinuz` inside it (= the built `Image`) | `bbf5ad5e675a2ac09f6183e463819486f598562648c61f06c6e1111f4710c04f` |
 
 `build/make-stage2.sh` prints the first four values for any tree; the lead verifies the file by the first row.
 
 ### Steps
 
-- **(i) r3a kernel on the proven r1 tree.** Tests the configuration delta (RFCOMM, firewall rules, BBR, PSI, binfmt,
+- **(i) r3a kernel on the proven r1 tree**, once, by the Limine one-shot request. Tests the configuration delta (RFCOMM, firewall rules, BBR, PSI, binfmt,
   policy routing, PKCS8) and that the kernel is sound. The sleep, sound and USB changes that need the tree stay off. The kernel does
-  contain `sleep-lid/0003`, which admits the K114s to suspend-to-idle: **do not suspend in this step** (the r1 tree
-  has no PMP and the owner's test plan in `docs/r3-sleep-lid.md` is for step ii).
-- **(ii) the r3a tree**, as a watchdog-protected one-boot Stage 2 trial (`aura-try`, section "Runbook"). The configured file is the
-  watchdog's fallback, so a Stage 2 that hangs returns to the proven tree by itself. Needs an `eDP-1` monitor rule first
-  (`docs/r3-sleep-lid.md`, the connector is renamed).
-- **(iii) promotion**, only after (ii) boots cleanly twice: copy the configured file to
+  contain `sleep-lid/0003`, which admits the K114s to suspend-to-idle: suspend is blocked three ways for the whole trial (masked targets, `sleep.conf.d`, `logind` lid action `lock`; step C).
+- **(ii) the r3a tree**, as a watchdog-protected one-boot Stage 2 trial (`aura-try`) together with a one-shot r3a kernel. The configured file is the
+  watchdog's fallback, so a Stage 2 that hangs returns to the proven tree by itself. Needs an `eDP-1` monitor rule first (`docs/r3-sleep-lid.md`, the connector is renamed).
+- **(iii) the r3a kernel on the GPU tree**, once, as step G.
+- **(iv) promotion**, only after (ii) and (iii) boot cleanly twice: copy the configured file to
   `/boot/efi/k114s-repair/known-good/boot-ctxr.bin`, then put the r3a file in place and update the pinned tree
-  (`/boot/efi/k114s-repair/k114s.dtb` and `/usr/local/lib/omarchy-k114s/k114s.dtb`), otherwise the next run of the Stage 2 hook rebuilds the r1 tree.
+  (`/boot/efi/k114s-repair/k114s.dtb` and `/usr/local/lib/omarchy-k114s/k114s.dtb`), otherwise the next run of the Stage 2 hook rebuilds the r1 tree. Not part of this runbook.
 
-### Ways back to the proven Stage 2
+### Ways back
 
-- From Linux, during or after a trial: the configured file was never touched. Disarm with `rm /boot/efi/aura-try`
-  (or write `spent`), remove `/etc/omarchy-k114s/stage2-trial` if it names the r3a file.
-- From macOS: `sudo ./k114s-repair stage2 r1` writes the bundle's r1 Stage 2 file and the pinned tree. The tool accepts a live Stage 2 with
-  the same Aura loader and U-Boot tail and any other trees (`same-loader-other-trees`), which the r3a file is, so it works on it
-  (read from `macos/tools/k114s_repair.py`; not run). `rollback stage2` restores the pre-repair backup.
-- From Linux after promotion: `sudo cp /boot/efi/k114s-repair/known-good/boot-ctxr.bin /boot/efi/m1n1/boot-ctxr.bin`, and put the r1 tree back as the pinned one.
+- **From Linux, a kernel trial:** there is nothing to undo: the request is consumed and `default_entry` was never touched. `k114s-boot-once clear` takes back a request that has not been used.
+- **Stage 2:** the configured file was never touched. Disarm with `printf 'spent\n...\n' > /boot/efi/aura-try`; the standing GPU trial comes back by moving `stage2-trial.parked-r3a` back (step C undo).
+- **From macOS** (only if the repair entry itself fails): with the fixed tool, `sudo ./k114s-repair stage2 r1` (it accepts the r3a file as `same-loader-other-trees`), `rollback stage2`, `default repair`, `status`.
+  **Never `rollback all`, `default original` or `kernel` while the original image is off the ESP**: with the fixed tool they stop and write nothing.
+  **The tool delivered before this change does not work at all once the original image is gone**: it picks the ESP by that file, so `status`, `default repair`, `stage2 r1` and `rollback stage2` all print
+  "STOPPED: ... is not an Omarchy ESP" and write nothing (tested: `tests/macos/test-no-original-uki.sh`, old-tool case). So the fixed tool on the Mac, with `status` confirmed there, is a hard
+  prerequisite of step D1 (runbook step 1); without it the window must not open.
 - The kernel side is independent: entry 1 (repair r1) and its module directory are never touched.
 
 ## 7. Tests
 
 | Test | Result | Label |
 | --- | --- | --- |
-| QEMU (TCG), r3a Image, shell | PASS: kernel boots, `uname -r` is the r3a release | emulator/replica |
-| QEMU, all 1972 modules from the package tree in an initramfs | `modprobe ok=1965 failed=7`; the same seven as the baseline kernel (tcrypt, ipmi_si, cppc_cpufreq, sun50i-cpufreq-nvmem, stratix10-soc, apple-pmp-j613-hwmon, xen-pciback); no Oops, BUG or panic in the serial log | emulator/replica |
-| `depmod -a -e` over the package | clean, no unresolved symbol | agent-run |
-| vermagic of every packaged module against the kernel inside `vmlinuz` | 1972 of 1972 equal | agent-run |
-| `validate-config.py` | 385 requirements, 0 not met | agent-run |
+| QEMU (TCG), r3a-2 Image, shell | PASS: kernel boots, `uname -r` is the r3a release | emulator/replica |
+| QEMU, all 1972 modules from the package tree in an initramfs (r3a-1 Image, which had `sleep-lid/0010`) | `modprobe ok=1965 failed=7`; the same seven as the baseline kernel (tcrypt, ipmi_si, cppc_cpufreq, sun50i-cpufreq-nvmem, stratix10-soc, apple-pmp-j613-hwmon, xen-pciback); no Oops, BUG or panic | emulator/replica |
+| QEMU, the same for r3a-2 | `modprobe ok=1965 failed=7`, the same seven failures; no Oops, BUG or panic (`logs/qemu-smoke-r3a-2-modules.log`) | emulator/replica |
+| `depmod -a -e` over the package, vermagic of all 1972 modules, no file shared with `linux-aurora`, banner | `check-package.sh`: all passed (r3a-2) | agent-run |
+| `validate-config.py` | 385 requirements, 0 not met (the configuration is unchanged by r3a-2) | agent-run |
 | `lint-dtb.py`, `lint-sound-dtb.py` | pass | agent-run |
-| dtb reproducibility | same hash with dtc 1.8.1 and the kernel's dtc | agent-run |
+| dtb reproducibility against the final kernel tree | `154568fe...`, same as before | agent-run |
 | Stage 2 reproduction of the proven r1 file | byte for byte | agent-run |
-| No file shared with `linux-aurora` | confirmed with `bsdtar -t` against `pacman -Qlq` | agent-run |
+| `tests/linux/test-boot-once.sh` | 54 passed, 0 failed (bytes written to the variable, UTF-16 id, every refusal, a saver that does not persist, a failing saver, `remember_last_entry`, the self-test gate) | emulator/replica |
+| `tests/linux/test-gpu-guard.sh` | 7 passed | emulator/replica |
+| `tests/macos/test-no-original-uki.sh` | 24 passed (synthetic bundle and ESP; includes the old tool stopping on the no-original ESP) | emulator/replica |
+| `k114s-boot-once entries` on a copy of this Mac's `limine.conf` | ids `Omarchy-K114s-repair-r1--trackpad-fix-B-` and `Omarchy.linux-aurora`, equal to Limine's published `LoaderEntries` | agent-run |
+| `tests/hardware/k114s-r3a-check.sh` on the running kernel | prints BAD for the GPU Stage 2 trial and the render node, and BAD for the 11 CONFIG_ options, as it should | agent-run |
 
-**Not verified:** anything on the hardware; the hooks (read, not run); the size of the UKI the hook would
-build (estimated from entry 3: the new image is 131,072 bytes larger than the one in entry 3, so about 79 MB); whether
-`limine-entry-tool` leaves `default_entry` pointing at entry 1 after adding the entry; the interaction of the standing GPU trial with
-a different kernel; the tipd async probe; any of the configuration delta's first-boot behaviours; the PMP (sound) values
-on this Mac.
+**Not verified:** anything on the hardware; the hooks (read, not run); the real `efi-vars-save` and Limine consuming the request (step B measures it); the
+full `tests/macos/test-macos-tool.sh` regression (it needs the assembled bundle and the installer image, which this branch does not have: the original-image
+code paths are unchanged); the size of the UKI the hook builds (replica: 79,363,072 bytes); whether `limine-entry-tool` leaves `default_entry` on 1 after adding the entry
+(`k114s-boot-once check` asserts it); the interaction of the GPU Stage 2 trial with this kernel (step G); the tipd async probe; any first-boot behaviour of the configuration delta;
+the PMP (sound) values on this Mac; the fixed macOS tool on the Mac.
 
 ## 8. Runbook (for the lead; root needed)
 
-Files: `$K114S_BUILD_ROOT/integrate/release/` (`SHA256SUMS`, the package, `boot-ctxr-r3a.bin`, `k114s-r3a.dtb`). `R` below is that directory.
-The default entry stays "Omarchy K114s repair r1" (entry 1) until r3a is proven, and the owner never has to pick an entry:
-the keyboard does not work in the Limine menu, so a trial is one boot as `default_entry`.
+`R` is `$K114S_BUILD_ROOT/integrate/release/`, `REPO` is a checkout of branch `r3/integrate`, `K=/usr/local/lib/omarchy-k114s/k114s-boot-once`.
+Entry 1, "Omarchy K114s repair r1", stays the default through every step; **no step changes `default_entry`**, and the owner never picks an entry (the keyboard does not work in Limine's menu).
+Each step has an expected result; stop at the first one that is not met.
 
-**0. Verify and look (no root for the first two).**
+**Rules for the window (from step D1 to step Z).** No package transaction except the ones written here (the guard will refuse them anyway). No `omarchy-update`. On macOS: no `rollback all`, `default original` or `kernel`.
 
-    cd R && sha256sum -c SHA256SUMS                       # 3 lines "OK"
-    uname -r                                              # 7.3.0-17.v272-4-ARCH
+**0. Verify and look (no root for the first lines).**
+
+    cd $R && sha256sum -c SHA256SUMS                       # 3 lines OK
+    uname -r                                               # 7.3.0-17.v272-4-ARCH
+    tr -d '\0' < /proc/device-tree/chosen/aurora,trial; echo   # which Stage 2 THIS boot is. Label everything you read as "r1 kernel on the <this> tree"
     sudo cat /boot/efi/aura-try /etc/omarchy-k114s/stage2-trial
-    tr -d '\0' < /proc/device-tree/chosen/aurora,trial
-    sudo grep -n -E '^ *//?[A-Za-z]|^default_entry' /boot/efi/limine.conf     # entry names and their numbers
 
-**1. Decide the Stage 2 of step (i).** This Mac currently starts through a standing trial of `m1n1/boot-ctxr-r3-gpu.bin`
-(the GPU tree). The r3a kernel is meant to be tested on the proven r1 tree, one change at a time. To do that, end the standing trial:
+**1. Put the fixed macOS tool where macOS can reach it, and confirm it on the Mac. This is a hard prerequisite of step D1: if it is not done, D1 must not run.** The tool the Mac has today does not recognise the ESP once the original image is off it (section 6), so without the fixed one the window has no way back from macOS. Not testable from Linux.
 
-    sudo rm -f /etc/omarchy-k114s/stage2-trial
+    sudo mkdir -p /boot/efi/k114s-repair/macos-r3a
+    sudo install -m644 $REPO/macos/tools/k114s_repair.py /boot/efi/k114s-repair/macos-r3a/k114s_repair.py
+    sudo sha256sum /boot/efi/k114s-repair/macos-r3a/k114s_repair.py $REPO/macos/tools/k114s_repair.py    # equal
+
+On the Mac, once, in Terminal (the owner): mount the Linux EFI partition (`diskutil list`, then `sudo diskutil mount <the EFI volume of the internal disk>`), copy
+`/Volumes/EFI/k114s-repair/macos-r3a/k114s_repair.py` over `tools/k114s_repair.py` in the repair bundle folder, and run `sudo ./k114s-repair status` (read-only). The owner reports that it printed the status and not "STOPPED"; only then does the root continue past step 5's D0.
+
+**2. Step A: the key file, by itself, on a plain reboot (the owner's decision; no new kernel or tree).** This boot still goes through the standing GPU trial.
+
+    sudo systemctl reboot
+
+After the boot (no passphrase was asked): `tr ' ' '\n' </proc/cmdline | grep '^rd.luks'` shows `rd.luks.key=` and `rd.luks.options=...keyfile-timeout=10s,tries=4`; `systemctl status k114s-keydev-release --no-pager` is
+active or exited without error; `findmnt /boot/efi` shows the ESP mounted; `sudo journalctl -b -p warning --no-pager | head -40` shows nothing about the key. If it asked for the passphrase or anything is
+off, **stop**: the r3a UKI's embedded command line carries the same key words, and the trial must not be the first boot to test them.
+
+**3. Step B: install the helper and measure the one-shot mechanism on a request that changes nothing.** This is the first and only proof that U-Boot persists a boot-time erase; it can fail.
+
+    sudo install -m755 $REPO/linux/r3a-trial/k114s-boot-once /usr/local/lib/omarchy-k114s/k114s-boot-once
+    K=/usr/local/lib/omarchy-k114s/k114s-boot-once
+    sudo $K entries                                        # default_entry: 1; entry 1 Omarchy-K114s-repair-r1--trackpad-fix-B-; 3 Omarchy.linux-aurora
+    sudo $K check                                          # all ok / info; no BAD
+    sudo $K arm 'Omarchy K114s repair r1 (trackpad fix B)' --with-stage2-trial     # the repair entry itself: what boots does not change
+    sudo $K status                                         # efivarfs holds it AND "U-Boot file ...: holds LoaderEntryOneShot"
+    sudo systemctl reboot
+
+After the boot, **as the very first command** (no shutdown has run since Limine read the request; do not run `clear` or anything that saves first):
+
+    sudo $K status
+
+**Expected: `no LoaderEntryOneShot` on the efivarfs line and on the `U-Boot file` line.** `this boot started: Omarchy-K114s-repair-r1--trackpad-fix-B-` confirms Limine took the request. `status` then ends with `self-test: PASSED ... marker /var/lib/k114s-recovery/boot-once-selftest-ok written`. Any other self-test line (`FAILED`, `NOT MEASURED`) means no marker: if the U-Boot line still says
+`holds LoaderEntryOneShot`, the erase did not reach disk before the shutdown save: **the mechanism is not hang-safe; do not run step E** (`sudo $K clear`; report it, a different mechanism is an owner decision);
+if it says `NOT MEASURED`, repeat step B (a shutdown save, a clear, or a status run in a later boot voids it). `arm` for the real kernel refuses without the marker.
+
+**4. Step C: prepare the kernel trial: end the GPU Stage 2 trial, keep the desktop on the CPU, block every suspend path.**
+
+    sudo cp -p /etc/systemd/user-environment-generators/70-k114s-gpu-desktop /var/lib/k114s-recovery/70-k114s-gpu-desktop.v2-before-r3a
+    sudo install -m755 $REPO/linux/r3a-trial/70-k114s-gpu-desktop /etc/systemd/user-environment-generators/70-k114s-gpu-desktop
+    sudo install -m644 $REPO/linux/r3a-trial/logind-30-k114s-r3a-trial.conf /etc/systemd/logind.conf.d/30-k114s-r3a-trial.conf
+    sudo install -D -m644 $REPO/linux/r3a-trial/sleep-30-k114s-r3a-trial.conf /etc/systemd/sleep.conf.d/30-k114s-r3a-trial.conf
+    sudo systemctl kill -s HUP systemd-logind
+    systemd-analyze cat-config systemd/logind.conf | grep -E '^HandleLidSwitch'        # lock, lock, ignore
+    systemctl is-enabled suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target    # masked x4
+    sudo mv /etc/omarchy-k114s/stage2-trial /etc/omarchy-k114s/stage2-trial.parked-r3a     # the re-arm unit now does nothing at shutdown
     sudo sh -c "printf 'spent\nm1n1/boot-ctxr-r3-gpu.bin\n' > /boot/efi/aura-try && sync -f /boot/efi"
+    sudo sha256sum /boot/efi/m1n1/boot-ctxr.bin | cut -c1-16                              # 45a5dbef19c14898: the proven r1 Stage 2 is what boots next
+    sudo $K check                                          # all ok: "no Stage 2 trial is armed", "... configured to re-arm"
 
-Expected: nothing printed. Undo: `sudo sh -c "printf 'armed\nm1n1/boot-ctxr-r3-gpu.bin\n' > /boot/efi/aura-try"` and write the two lines `m1n1/boot-ctxr-r3-gpu.bin` and
-its sha256 (`9825a103...`) to `/etc/omarchy-k114s/stage2-trial`. (If the lead prefers to test r3a on the GPU tree, skip this step; that combination is untested.)
+Expected on the next boot: no render node, the desktop on the CPU (`Hyprland renders on the CPU (llvmpipe ...)`), because the r1 tree has no GPU node. `~/.config/k114s-gpu-desktop` and `.keep` stay where they are.
+Undo of this step: `sudo mv /etc/omarchy-k114s/stage2-trial.parked-r3a /etc/omarchy-k114s/stage2-trial`, `sudo sh -c "printf 'armed\nm1n1/boot-ctxr-r3-gpu.bin\n' > /boot/efi/aura-try"`,
+remove the two drop-ins (then `systemctl kill -s HUP systemd-logind`), and `sudo cp -p /var/lib/k114s-recovery/70-k114s-gpu-desktop.v2-before-r3a /etc/systemd/user-environment-generators/70-k114s-gpu-desktop`.
 
-**2. Back up the menu, then free the slot.** The static entry 1 is the fallback, so the 79 MB UKI of entry 3 can go.
+**5. Step D: free the slot and install (this opens the window).**
+
+D0. Backups and facts. Stop if a hash pair differs: the recovery copy is what the undo puts back.
 
     sudo mkdir -p /var/lib/k114s-recovery && sudo cp -p /boot/efi/limine.conf /var/lib/k114s-recovery/limine.conf.before-r3a
+    sudo sh -c 'sha256sum /boot/efi/EFI/Linux/*.efi /var/lib/k114s-recovery/uki/*.efi | cut -c1-16,65-'
+    # expect cce616053713ec3b (omarchy_linux-aurora.efi) twice and 51148ff7005d2986 (omarchy_linux-aurora-k114s.efi) twice
+
+D1. Free the slot, and check that the repair entry survived. **Prerequisite: step 1 is complete (the owner confirmed `sudo ./k114s-repair status` with the fixed tool on the Mac) and step B passed (the marker exists).**
+
     sudo limine-entry-tool --remove-uki linux-aurora
-    df -B1 --output=avail /boot/efi | tail -1             # about 79 MB more than before: expect > 160,000,000
+    sudo $K check                                          # default_entry 1; entry 1 boots the repair image; its hash matches; NO "BAD"
+    sudo sha256sum /boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi | cut -c1-16     # 51148ff7005d2986, unchanged
+    ls /boot/efi/EFI/Linux                                  # omarchy_linux-aurora-k114s.efi only
+    df -B1 --output=avail /boot/efi | tail -1               # about 79 MB more than before: expect > 160,000,000
 
-Undo (needs about 80 MB free, so only before step 4 or after step 6's undo):
-`echo usr/lib/modules/7.3.0-17.v272-4-ARCH/modules.builtin | sudo /usr/share/libalpm/scripts/limine-mkinitcpio-install`, then
-compare `limine.conf` with the backup.
+If `check` prints BAD, the repair image is missing, or its hash changed: **stop and run the undo (step Z)**, which first puts the repair image back from its recovery copy.
 
-**3. Keep `update-m1n1` from rewriting `boot.bin` during the install (it would use r3a's trees and grow the ESP).**
+D2. Keep `update-m1n1` from rewriting `boot.bin` during the install (it would use r3a's trees and grow the ESP).
 
     sudo cp -p /etc/default/update-m1n1 /var/lib/k114s-recovery/update-m1n1.before-r3a
     echo 'export M1N1_UPDATE_DISABLED=1' | sudo tee -a /etc/default/update-m1n1 >/dev/null
 
-**4. Install.** (The space guard passes only after step 2.)
+D3. Install. (The space guard passes only now.)
 
-    sudo pacman -U R/linux-k114s-7.3.0.r3a-1-aarch64.pkg.tar.zst
+    sudo pacman -U $R/linux-k114s-7.3.0.r3a-2-aarch64.pkg.tar.zst
 
-Expected lines: the hold guard and space guard hooks pass silently; `Updating linux initcpios under /boot (Apple Silicon)...` with a
+Expected lines: the hold guard and the space guard hooks pass silently; `Updating linux initcpios under /boot (Apple Silicon)...` with a
 `mkinitcpio` run for `linux-k114s` ending in `Image generation successful`; `Updating linux initcpios...` (Limine) with
 `Building UKI for linux-k114s (7.3.0-17.v272-4-k114s-r3a-ARCH)`; `Updating m1n1 image...` printing nothing (disabled);
 `Updating the confined m1n1 Stage 2` printing `update-boot-ctxr-k114s: wrote /boot/efi/m1n1/boot-ctxr.bin (4439xxx bytes, K114s device tree 2ea22d26...)`.
-If a Limine step fails, the package is installed without its image: do the undo below.
+If a Limine step fails, the package is installed without its image: **step Z**.
 
-**5. Restore `update-m1n1` and check what happened.**
+D4. Restore `update-m1n1` and check what happened, before anything is armed.
 
     sudo cp -p /var/lib/k114s-recovery/update-m1n1.before-r3a /etc/default/update-m1n1
-    sudo sha256sum /boot/efi/m1n1/boot-ctxr.bin | cut -c1-16        # 45a5dbef19c14898 (unchanged: r1)
-    ls -l /boot/efi/EFI/Linux/                                      # omarchy_linux-aurora-k114s.efi (112 MB, static) and omarchy_linux-k114s.efi (~79 MB)
-    ls /boot/vmlinuz-linux-k114s /boot/initramfs-linux-k114s.img
-    sudo grep -n -E '^ *//?[A-Za-z]|^default_entry' /boot/efi/limine.conf
-    df -B1 --output=avail /boot/efi | tail -1
+    sudo sha256sum /boot/efi/m1n1/boot-ctxr.bin | cut -c1-16                               # 45a5dbef19c14898 (unchanged: r1)
+    sudo $K entries                                                                         # entry 1 is still the repair entry; a new Omarchy.linux-k114s line
+    sudo $K check                                                                           # default_entry 1 and the repair image checks, no BAD
+    sudo sha256sum /boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi | cut -c1-16         # 51148ff7005d2986
+    ls -l /boot/efi/EFI/Linux/ ; ls /boot/vmlinuz-linux-k114s /boot/initramfs-linux-k114s.img ; ls /usr/lib/modules/   # both release directories
+    free=$(df -B1 --output=avail /boot/efi | tail -1); echo $free                           # about 87.6 MB: must be BELOW 88,080,384 (the guard's minimum, see section 5)
+    [ "$free" -lt 88080384 ] && echo "space guard will refuse transactions" || echo "STOP: free space is at or above the guard's minimum; the guard would pass a rebuild-all. Go to step Z" 
+    t=$(mktemp -d); sudo objcopy --dump-section .cmdline=$t/c /boot/efi/EFI/Linux/omarchy_linux-k114s.efi /dev/null 2>/dev/null; sudo tr -d '\0' < $t/c | tr ' ' '\n' | sort > $t/embedded
+    sudo sh -c "grep -m1 '^  cmdline:' /boot/efi/limine.conf | sed 's/^  cmdline: //' | tr ' ' '\n' | sort" > $t/entry1
+    diff $t/embedded $t/entry1 && echo "UKI embedded command line = entry 1's"             # expect no difference: same key words, which step A proved
+    # the trial boots the new entry's own cmdline: line (systemd-stub prefers the loader's options over .cmdline), so compare that one too
+    sudo awk '/^[ \t]*\/\/linux-k114s/ {f=1} f && /^[ \t]*cmdline:/ {sub(/^[ \t]*cmdline:[ \t]*/,""); print; exit}' /boot/efi/limine.conf | tr ' ' '\n' | sort > $t/new
+    diff $t/new $t/entry1 && echo "new entry's cmdline: line = entry 1's"                  # expect no difference
 
-Expected: the Stage 2 file is the proven one; two UKIs; `default_entry: 1` still names "Omarchy K114s repair r1"; if the entry numbers moved
-(the new entry sits above the repair entry), set `default_entry` back to the repair entry's number before any reboot.
-Entry 1's own module directory is still there: `ls /usr/lib/modules/` shows both release directories.
+Stop (step Z) if entry 1 is not the repair entry, `default_entry` is not 1, a hash changed, the free space is not below the guard's minimum, or either command line differs from entry 1's in anything but order.
 
-**6. Boot the trial once.** Make the new entry the default for ONE boot (use the unit already installed) and reboot:
+**6. Step E: the r3a kernel, once, on the proven r1 tree.**
 
-    N=<number of the "linux-k114s" entry from step 5>
-    sudo touch /etc/omarchy-k114s/trial-default
-    sudo sed -i "s/^default_entry: .*/default_entry: $N/" /boot/efi/limine.conf && sudo sync -f /boot/efi
+    sudo $K arm Omarchy/linux-k114s                         # refuses unless every check above still holds; then saves to U-Boot and proves it
+    sudo $K status                                          # efivarfs: LoaderEntryOneShot = Omarchy.linux-k114s ; U-Boot file holds it
     sudo systemctl reboot
 
-`k114s-trial-default-revert` puts `default_entry` back to 1 as soon as the trial boot reaches the root filesystem. If the boot
-hangs, force power off: the next boot uses entry 1. If entry 1 also fails, from macOS: `sudo ./k114s-repair default 1`.
+If the Mac hangs before the root filesystem or shows nothing: hold the power button until it is off and start it. Nothing is armed any more (Limine erased the request when it read it),
+`default_entry` is 1, and the Mac comes up on the repair entry with the proven Stage 2. If it also fails to come up, macOS: `sudo ./k114s-repair stage2 r1` and `sudo ./k114s-repair default repair`
+(section 6, "Ways back"). To try again, run `arm` again: every trial is one boot.
 
 **7. What the owner looks at.** On the trial boot, with the desktop up:
 
-    tests/hardware/k114s-r3a-check.sh                 # all "ok", "BAD" lines for the 11 CONFIG_ options must be gone
-    cat /var/lib/k114s-recovery/trial-default.log     # shows LimineLastBootedEntry and that default_entry went back to 1
+    uname -r                                          # 7.3.0-17.v272-4-k114s-r3a-ARCH
+    sudo $K status                                    # "this boot started: Omarchy.linux-k114s"; no request left
+    $REPO/tests/hardware/k114s-r3a-check.sh           # "ok" lines; the 11 CONFIG_ BAD lines must be gone; not the GPU trial, no render node, sleep targets masked
 
-Success criteria for (i): `uname -r` is `7.3.0-17.v272-4-k114s-r3a-ARCH`; keyboard, trackpad, Wi-Fi, Bluetooth, battery and fans work (the same
-list as r1); `ufw` active (the IPv6 rules load), `bluetoothd` without RFCOMM errors, `sysctl net.ipv4.tcp_congestion_control` `bbr`,
-`systemd-oomd` active; no Oops or WARNING in `sudo dmesg`. Take a picture of the failed-units list (`systemctl --failed`) if anything is red.
-Do not suspend in this step.
+Success criteria for (i): keyboard, trackpad, Wi-Fi, Bluetooth, battery and fans work (the same list as r1); `ufw` active (the IPv6 rules load), `bluetoothd` without RFCOMM errors,
+`sysctl net.ipv4.tcp_congestion_control` `bbr`, `systemd-oomd` active; no Oops or WARNING in `sudo dmesg`. Take a picture of the failed-units list (`systemctl --failed`) if anything is red.
+Do not suspend. Closing the lid locks the session (drop-in from step C) and nothing more. The next reboot returns to the repair entry by itself.
 
-**8. Step (ii): the r3a tree as a one-boot Stage 2 trial.** Only after (i) is clean. First add the `eDP-1` monitor rule (`docs/r3-sleep-lid.md`).
+**8. Step F: (ii) the r3a tree, with the r3a kernel, as a one-boot Stage 2 trial.** Only after step E is clean. First add the `eDP-1` monitor rule (`docs/r3-sleep-lid.md`).
 
-    sudo cp R/boot-ctxr-r3a.bin /boot/efi/m1n1/boot-ctxr-r3a.bin
+    sudo cp $R/boot-ctxr-r3a.bin /boot/efi/m1n1/boot-ctxr-r3a.bin
     sudo sha256sum /boot/efi/m1n1/boot-ctxr-r3a.bin | cut -c1-64          # 5164bb1e1be1fba3...
     sudo sh -c "printf 'armed\nm1n1/boot-ctxr-r3a.bin\n' > /boot/efi/aura-try && sync -f /boot/efi"
-    # keep the k114s entry as the one-boot default as in step 6, then reboot
+    sudo $K arm Omarchy/linux-k114s --with-stage2-trial     # only this check is lifted
+    sudo systemctl reboot
 
-Expected after the boot: `tr -d '\0' < /proc/device-tree/chosen/aurora,trial` prints `m1n1/boot-ctxr-r3a.bin`;
-`tests/hardware/k114s-r3a-check.sh --expect-tree r3a` says `device tree is the r3a tree`; the connector is `eDP-1`. A hang resets, within
-the loader's watchdog (178 s), onto the configured proven file. Undo: `sudo sh -c "printf 'spent\nm1n1/boot-ctxr-r3a.bin\n' > /boot/efi/aura-try"`; `sudo rm /boot/efi/m1n1/boot-ctxr-r3a.bin`.
+`stage2-trial` stays parked, so the trial is one boot: the re-arm unit does nothing. Expected after the boot: `tr -d '\0' < /proc/device-tree/chosen/aurora,trial` prints `m1n1/boot-ctxr-r3a.bin`;
+`tests/hardware/k114s-r3a-check.sh --expect-tree r3a` says `device tree is the r3a tree`; the connector is `eDP-1`. A hang resets, within the loader's watchdog (178 s), onto the configured proven file, and the next
+boot is the repair entry. Undo: `sudo sh -c "printf 'spent\nm1n1/boot-ctxr-r3a.bin\n' > /boot/efi/aura-try"`; `sudo rm /boot/efi/m1n1/boot-ctxr-r3a.bin`.
 
-**Undo of the whole install.**
+**9. Step G: (iii) the r3a kernel on the GPU tree, as its own step.** Only after step F is clean. The kernel is the 0009-only kernel: 0009 enables the receive interrupt beside both pollers, so a line that never fires keeps polling as before and the storm guard is in place, but **this is the first time that interrupt is enabled on this Mac** (r1 had `rx_poll_only`, the interrupt never on).
 
+    touch ~/.config/k114s-gpu-desktop-r3a                  # the guard's second opt-in (the first, ~/.config/k114s-gpu-desktop, is already there)
+    sudo mv /etc/omarchy-k114s/stage2-trial.parked-r3a /etc/omarchy-k114s/stage2-trial
+    sudo sh -c "printf 'armed\nm1n1/boot-ctxr-r3-gpu.bin\n' > /boot/efi/aura-try && sync -f /boot/efi"
+    sudo $K arm Omarchy/linux-k114s --with-stage2-trial
+    sudo systemctl reboot
+
+Expected: `aurora,trial` names `boot-ctxr-r3-gpu.bin`; `tests/hardware/k114s-r3a-check.sh --allow-gpu` lists the render node and the mailbox interrupt counts; the desktop is on the GPU as before (`journalctl -b | grep 'renders on'`);
+`/var/lib/k114s-recovery/trial-boot-report.log` has the boot. A hang resets onto the configured Stage 2 and the repair entry. Because `stage2-trial` is back, the clean shutdown after a good boot
+re-arms the GPU trial for the next boot, which returns the Mac to the standing state of today (repair kernel on the GPU tree). Suspend stays forbidden.
+
+**Z. Undo of the whole install (closes the window).**
+
+    sudo $K clear
+    sudo cp -p /etc/default/update-m1n1 /var/lib/k114s-recovery/update-m1n1.before-undo
+    echo 'export M1N1_UPDATE_DISABLED=1' | sudo tee -a /etc/default/update-m1n1 >/dev/null
     sudo touch /etc/omarchy-k114s/allow-low-esp                     # the guard also runs on removal
     sudo pacman -R linux-k114s                                      # removes the UKI, the menu entry, the preset, /boot files
     sudo rm /etc/omarchy-k114s/allow-low-esp
-    echo usr/lib/modules/7.3.0-17.v272-4-ARCH/modules.builtin | sudo /usr/share/libalpm/scripts/limine-mkinitcpio-install   # entry 3 back
-    sudo sed -i 's/^default_entry: .*/default_entry: 1/' /boot/efi/limine.conf
+    sudo cp -p /var/lib/k114s-recovery/update-m1n1.before-undo /etc/default/update-m1n1
+    sudo cp -p /var/lib/k114s-recovery/uki/omarchy_linux-aurora.efi /boot/efi/EFI/Linux/omarchy_linux-aurora.efi
+    # the repair image too, if step D1 (limine-entry-tool) removed or changed it
+    h=$(sudo sha256sum /boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi 2>/dev/null | cut -c1-16); [ "$h" = 51148ff7005d2986 ] || sudo cp -p /var/lib/k114s-recovery/uki/omarchy_linux-aurora-k114s.efi /boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi
+    sudo sha256sum /boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi | cut -c1-16        # 51148ff7005d2986
+    sudo cp -p /var/lib/k114s-recovery/limine.conf.before-r3a /boot/efi/limine.conf && sudo sync -f /boot/efi
+    sudo sh -c 'sha256sum /boot/efi/EFI/Linux/omarchy_linux-aurora.efi | cut -c1-16; b2sum /boot/efi/EFI/Linux/omarchy_linux-aurora.efi | cut -c1-20'    # cce616053713ec3b ; a3028af4d7d75799ce3f
+    sudo $K check ; ls /usr/lib/modules/ ; df -B1 --output=avail /boot/efi | tail -1
 
-Nothing in this runbook touches macOS, Apple's boot policy, Stage 1 or Apple firmware. Entry 1, its UKI, its module directory,
-the configured Stage 2 file and the pinned tree stay as they are through step 8.
+The recovery copy is restored byte for byte, and so is the repair image when it was missing or different (not rebuilt, so today's command line is not baked into it), and the pre-install `limine.conf` goes with it, whose `#hash` is that file's. Move the parked Stage 2 trial back (step C undo) if it is still parked and the GPU state is wanted.
+
+Nothing in this runbook touches macOS, Apple's boot policy, Stage 1 or Apple firmware. Entry 1, its UKI, its module directory, the configured Stage 2 file and the pinned tree stay as they are through step G.
 
 ## 9. Risks
 
-- The slot swap removes the only hook-managed UKI of the known-good image. Entry 1 is the fallback; if entry 1 breaks, macOS is the way back.
-- After the swap the ESP is back at about the guard's limit: any later package transaction needs `allow-low-esp`, and a transaction that rebuilds all kernels would try to rebuild linux-aurora's UKI as well.
-- `limine-entry-tool` might renumber the menu or not keep `default_entry` on entry 1; step 5 checks it before a reboot.
+- **The one-shot is measured, not assumed.** The mechanism is read from Limine's source; nothing yet shows that U-Boot persists a boot-time erase, step B measures it (it can fail), and `arm` refuses a kernel target until it has passed. A hang that loses power before Limine reads the request simply retries the trial once more.
+- The slot swap removes the only hook-managed UKI of the known-good image for the length of the window; the recovery copy and `limine.conf.before-r3a` restore it. Entry 1 is the fallback; if entry 1 breaks, macOS is the way back, and only the fixed tool (step 1, a prerequisite of D1) works once the original image is off the ESP.
+- **During the window the ESP is expected about 0.4 MB under the space guard's minimum (replica UKI sizes) and cannot hold a second 79 MB UKI.** The guard refuses package transactions (correct) only if that estimate holds; D4 therefore measures the real free space and stops (step Z) if it is at or above the minimum. Do not use `allow-low-esp` except in step Z. Unattended updates are not possible while the window is open; the steady state that allows them (one hook-managed kernel directory, or a larger ESP) is the owner's decision.
+- `limine-entry-tool` might renumber the menu or not keep `default_entry` on entry 1; steps D1 and D4 check it before any reboot.
 - The configuration delta changes first-boot behaviour (`docs/r3-config.md`, risks): `ufw` loads fully, qdisc `fq` and BBR, Tailscale rules, `systemd-oomd`, qemu-user binfmt.
-- `sleep-lid/0003` makes suspend possible on a tree that has never suspended: a suspend that never wakes needs a forced power-off.
-- The step (ii) tree renames the connector to `eDP-1`: a lid close then locks and suspends even while agents run (`docs/r3-sleep-lid.md`).
+- `sleep-lid/0003` makes suspend possible on a tree that has never suspended. Suspend is blocked three ways during the trial; remove the two drop-ins only after an attended, deliberate suspend test passes (step (ii) onward). The step (ii) tree renames the connector to `eDP-1`: without the drop-in a lid close would lock and suspend even while agents run (`docs/r3-sleep-lid.md`).
+- Step G puts the r3a kernel on the GPU tree. Only `sleep-lid/0010`'s change (interrupt receive) is kept out, but 0009 still enables the mailbox receive interrupt, which is new on this Mac (not "as proven"); the rest of the kernel is new on that tree too.
+- The packaged `t6050-k114s.dtb` is the kernel tree's preliminary one, not the r3a tree (section 5); nothing boots it unless `use-packaged-dtb` is set, which it must not be.
 - Rust modules and the kernel embed the build area's absolute path (including the user name); the package is for this Mac only and must not be published.
 - Five upstream author mailboxes are redacted in the sleep-lid patches and three in display-gpu (publish check); authorship names and SHAs are intact.
 - The sound variant, the PMP and the speaker path are not in r3a. They need the root-run Apple device tree read first (`docs/r3-sound.md`), and speakers stay without a path.

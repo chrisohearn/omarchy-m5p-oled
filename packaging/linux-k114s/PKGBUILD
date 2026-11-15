@@ -18,7 +18,7 @@
 
 pkgname=linux-k114s
 pkgver=7.3.0.r3a
-pkgrel=1
+pkgrel=2
 pkgdesc='K114s (MacBook Pro 14-inch, M5 Pro) kernel candidate r3a and its modules; installs beside linux-aurora'
 arch=('aarch64')
 url='https://github.com/chrisohearn/omarchy-m5p-oled'
