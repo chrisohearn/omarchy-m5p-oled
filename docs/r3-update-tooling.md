@@ -13,6 +13,7 @@ overwrite our custom stuff when it's fixed".
 | --- | --- |
 | agent-run, fake root | 537 tests as a normal user against throwaway folders (`tests/linux/test-r3-*.sh`) |
 | agent-run, replica | 156 tests in which a **real pacman** runs real transactions through the real hook files, inside a user namespace built with bubblewrap (`tests/linux/test-r3-pacman.sh`). The packages, the boot hooks and "a boot" are stand-ins; see the head of that file |
+| agent-run, replica | 5 tests of a **real `pacman -U`** signature check (`tests/linux/test-r3-pacman-sig.sh`): a throwaway keyring as pacman's GPGDir, `LocalFileSigLevel` Optional and Required, compared with `signed_ok`. Result: Optional accepts an unsigned archive (the gap `signed_ok` closes) and refuses a bad, untrusted or mismatched signature, as `signed_ok` does |
 | agent-run, on the K114s, read-only | the release check against the live Edge channel; the criteria evaluated against this Mac's own packages; the space guard's trigger list against the hooks installed here; the formats of the EFI variable and kernel banner the tools read; the standing aura-try trial (`chosen/aurora,trial`, `/etc/omarchy-k114s/stage2-trial`) as `k114s-release status` reports it |
 | owner-observed | nothing yet |
 

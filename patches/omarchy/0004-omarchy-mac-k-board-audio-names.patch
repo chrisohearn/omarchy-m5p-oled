@@ -1,0 +1,60 @@
+omarchy-mac (omacom/omarchy-mac-pkgs): let the audio names and rules cover K-board MacBooks.
+The M5 MacBook Pros are boards K114 and K116, not jNNN: the cards are AppleK114 and AppleK114HPAI and
+the microphone graph's nodes are effect_output.k114-mic and audio_effect.k114-mic.
+  - audio.json hides audio_effect.<board>-mic and replaces effect_output.<board>-mic by the stereo source;
+  - omarchy-audio-asahi-mic-map finds the mono DSP source (DSP regex) to map it to stereo;
+  - asahi-device-names.conf names it "MacBook Microphone (Mono)";
+  - asahi-audio-no-suspend.conf keeps the jack sink (hw:AppleK114,0) open: no pop on every stream start.
+The mapper's ARRAY regex (AppleJ...HPAI, used only to repair a missing asahi-audio graph) is left alone:
+the K114 graph is not asahi-audio's. See docs/platform-data.md.
+
+--- a/share/omarchy-platform/audio.json
++++ b/share/omarchy-platform/audio.json
+@@ -1,12 +1,12 @@
+ {
+   "hidden": [
+     "effect_output\\.(j[0-9]+|mini|studio)-convolver",
+-    "audio_effect\\.j[0-9]+-mic",
++    "audio_effect\\.[jk][0-9]+-mic",
+     "input\\.omarchy_asahi_mic",
+     "alsa_output\\.platform-sound\\.RawSpeakers",
+     "alsa_input\\.platform-sound\\.RawMics"
+   ],
+   "replaced": [
+-    { "node": "effect_output\\.j[0-9]+-mic", "by": "omarchy_asahi_mic" }
++    { "node": "effect_output\\.[jk][0-9]+-mic", "by": "omarchy_asahi_mic" }
+   ]
+ }
+--- a/bin/omarchy-audio-asahi-mic-map
++++ b/bin/omarchy-audio-asahi-mic-map
+@@ -37,7 +37,7 @@
+ VIRTUAL = 'media.class=Audio/Source/Virtual'
+ OWNER = 'omarchy.asahi-mic.owner'
+ ROUTE_CLIENT = 'omarchy-asahi-mic-route'
+-DSP = re.compile(r'effect_output\.j[0-9]+-mic')
++DSP = re.compile(r'effect_output\.[jk][0-9]+-mic')
+ # asahi-audio's mono DSP output: AUX0, or MONO since asahi-audio ab1b469.
+ DSP_PORTS = ('capture_AUX0', 'capture_MONO')
+ # The microphone array's ALSA card, present even when its DSP graph is not,
+--- a/share/pipewire/pipewire.conf.d/asahi-device-names.conf
++++ b/share/pipewire/pipewire.conf.d/asahi-device-names.conf
+@@ -29,7 +29,7 @@
+   }
+   {
+     matches = [
+-      { node.name = "~^effect_output\\.j[0-9]+-mic$" }
++      { node.name = "~^effect_output\\.[jk][0-9]+-mic$" }
+     ]
+     actions = {
+       update-props = {
+--- a/share/wireplumber/wireplumber.conf.d/asahi-audio-no-suspend.conf
++++ b/share/wireplumber/wireplumber.conf.d/asahi-audio-no-suspend.conf
+@@ -8,7 +8,7 @@
+ monitor.alsa.rules = [
+   {
+     matches = [
+-      { api.alsa.path = "~hw:AppleJ[0-9][0-9][0-9],[01]", media.class = "Audio/Sink" }
++      { api.alsa.path = "~hw:Apple[JK][0-9][0-9][0-9],[01]", media.class = "Audio/Sink" }
+     ]
+     actions = {
+       update-props = {

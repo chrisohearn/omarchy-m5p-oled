@@ -56,7 +56,7 @@ User space (`linux/audio/`; this branch's additions are marked **new**):
 | `speaker-readiness.sh` **new** | run by anyone | silent, read-only report of whether anything could reach the speakers (see Stage B) |
 
 Other `new` work: `tests/test-audio-userland.sh` (guard, tree-check, readiness and installer tests in
-fake roots, besides the 19 earlier checks) and the installer tests added to `tests/test-sound.sh`.
+fake roots, besides the 19 earlier checks) and the installer tests added to `tests/test-sound.sh`. Review notes of #6 (2026-11-15): every install path now prints the user-manager `daemon-reload` hint (sudo cannot reach the seat user's manager), `speaker-readiness.sh` checks `systemctl --user cat` of WirePlumber and the two v2 user units as the seat user, the stale gate label in `tests/test-sound.sh` is reworded, and its PMP-refusal test now runs against a copy of the dts directory without the generated PMP file, so it holds on a kernel tree that has one.
 
 The jack-card WirePlumber rules (pro-audio off, PCM 1 and 2 never nodes) come from the
 `audio-userland` worker's findings (a copy of its working files; if that branch is pushed later its
@@ -227,6 +227,49 @@ Shut down (do not reboot into the same tree) and report if **any** of these happ
 
 If only the microphones misbehave, use the `-nomics` tree; the jack is independent of them.
 
+### The r3a package, checked offline (jack and Bluetooth audio pieces)
+
+Agent-run, 2026-11-15, read-only: `linux-k114s-7.3.0.r3a-2-aarch64.pkg.tar.zst` unpacked into a temporary
+directory (nothing installed). The configuration is the one embedded in its `vmlinuz` (IKCONFIG), which
+agrees with the build directory's `.config`.
+
+| Piece | In the package |
+|---|---|
+| Bluetooth core and SCO | `CONFIG_BT=y`, `CONFIG_BT_BREDR=y` (SCO is part of the built-in Bluetooth core; there is no separate `sco.ko`) |
+| RFCOMM | `CONFIG_BT_RFCOMM=m`, `CONFIG_BT_RFCOMM_TTY=y`; `net/bluetooth/rfcomm/rfcomm.ko` present; `modules.alias` has `bt-proto-3 rfcomm`, so bluetoothd's HFP/HSP socket loads it |
+| Others | `CONFIG_BT_BNEP=m` (`bnep.ko`), `CONFIG_BT_HIDP=y` (built in), `CONFIG_BT_HCICENTAURI=m` (`btcentauri_t6050.ko`, alias `pci:v0000106Bd00001903`, depends on `apple_centauri_t6050`, requests no firmware files; agent-run: on the running kernel `hci0` is bound to this driver). `CONFIG_BT_HCIBCM4377=m` (`hci_bcm4377.ko`) is also built but the N1 does not use it |
+| Jack codec and card | `CONFIG_SND_SOC_CS42L84=m` (`snd-soc-cs42l84.ko`, with `cs42l84_set_jack` and `snd_soc_jack_report`), `CONFIG_SND_SOC_APPLE_MACAUDIO=m` (`snd-soc-macaudio.ko`, alias `apple,k114-macaudio`), `CONFIG_SND_SOC_APPLE_MCA=m`, `CONFIG_SND_JACK=y`, `CONFIG_SND_JACK_INPUT_DEV=y` |
+| AOP, PMP, DMA, I2C | `aop.ko`, `apple-admac.ko`, `i2c-pasemi-platform.ko`; `CONFIG_APPLE_PMP=m` |
+
+Baseline kept for the comparison after the boot (agent-run, running kernel, this boot's bluetoothd journal):
+`RFCOMM server failed for Hands-Free Voice gateway` and `... Hands-Free unit: socket(STREAM, RFCOMM): Protocol not supported (93)`.
+After an r3a boot those two lines must be gone: `tests/hardware/k114s-r3a-audio-check.sh` section 4 tests it.
+Not proven by any of this: that the modules load and bind, that anything is audible.
+
+### Owner's attended check after the r3a boot
+
+`bash tests/hardware/k114s-r3a-audio-check.sh` (read-only, no root; also writes a redacted copy of the report to
+`~/k114s-audio-check-DATE.txt`) reports the kernel and tree, the sound cards, modules, a 5 s codec interrupt count
+(an idle codec is quiet; a stuck status latch would show about a thousand a second), the guard state, and the Bluetooth
+controller, UUIDs and RFCOMM journal. With `--listen` it pauses for you to plug and unplug headphones, listen over the jack
+and over Bluetooth, and run a hands-free test; `--play` adds a 2 s quiet tone on the K114 jack sink only (it refuses any
+other sink and a sink volume above 50 %). It never pairs, loads a module or changes a setting. Its ASK lines are what you
+record as owner-observed. Its software test is `tests/hardware/test-r3a-audio-check.sh`.
+
+### linux #1895 (cs42l84 probe writes): not applied to the K114s
+
+aurora-silicon/linux #1895 adds an optional `apple,init-writes` device-tree property that the cs42l84 driver
+applies right after its ID check, plus a fourth commit that reads `REMOTE_BUTTON_STATUS1` (0x1484) once after the
+writes and in every codec interrupt. Read 2026-11-15 (upstream-reported; the author's own J604 measurements, plug and unplug untested at the time):
+
+- The 20 register values are a macOS I2C trace on the J604 (M4, T8132). The only machine with the property is the J604. Nothing says the K114s (M5 Pro, T6050) codec wants the same values: two of them tune jack detect (0x1471 to 0x1480), the rest analog trim, and a trace of macOS on this Mac does not exist here.
+- Without the property the driver is unchanged, so the r3a kernel is unaffected whichever way this goes.
+- The one hazard the writes bring (an unmasked latch holding the interrupt line asserted, about 1000 interrupts a second) is the author's fix in commit 4, and is irrelevant while the K114s writes nothing.
+
+Decision: do not copy the J604 values to the K114s. Boot first and see whether the jack detects without them. The check script's
+interrupt count tells whether this codec shows the same stuck-latch symptom (it should not); if plug detection or headset type
+detection fails, the next step is a K114s macOS probe trace, then K114s-specific values, not the J604's. Candidate upstream remark, only after a boot: report the K114s jack result on #1895 (see `UPSTREAM.md` once there is a result).
+
 ## Stage B: the loudspeakers
 
 ### Result: blocked, nothing enabled
@@ -377,3 +420,5 @@ Mac's PMP values passes everything else and fails only that check. It needs `dtc
 6. Whether `omarchy-audio-asahi-mic-map` (the image's stereo mapper, which matches `effect_output.jNNN-mic`
    only) should learn the K114 name; without it the mono source still reaches stereo clients
    as MONO on both channels.
+   Answered offline: yes, with patch 0004 (the DSP regex, `audio.json` and the name rule take `[jk]`); see
+   [docs/platform-data.md](platform-data.md). Needs the owner at the Mac once the card exists.

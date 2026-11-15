@@ -1,6 +1,6 @@
 #!/bin/bash
 # K114s (omarchy-m5p-oled): put this machine's fixes to Omarchy's own scripts back after an update.
-# The Omarchy package (omarchy, or omarchy-dev on Edge) owns /usr/bin/omarchy-*, and every update
+# The Omarchy package (omarchy, or omarchy-dev on Edge; omarchy-mac for the platform data) owns /usr/bin/omarchy-*, and every update
 # replaces those files, which drops a local fix. 03-k114s-omarchy-patches.hook runs this after each
 # transaction that installs or upgrades that package; omarchy-patches-install runs it once.
 #
