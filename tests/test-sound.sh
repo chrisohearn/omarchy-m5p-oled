@@ -6,7 +6,8 @@
 # KTREE: a kernel tree at the installed base (aurora-silicon/linux a34d26c2 + linux-j714s-27.2.patch).
 # It is only read. Tools: python3, a C preprocessor (CPP, default "cpp") and dtc (DTC, default "dtc").
 #
-#   1. build/k114s-adt.py against a made-up ADT: the PMP file it writes, and what it refuses;
+#   1. build/k114s-adt.py against a made-up ADT: the PMP file it writes, and what it refuses; and the
+#      self-test of tests/k114s-adt-sound-facts.py (the check of the real ADT is a root step, not run here);
 #   2. the sound trees compile against KTREE (with a stand-in PMP file from that made-up ADT);
 #   3. tests/lint-sound-dtb.py passes on them;
 #   4. the lint fails on trees that give the amplifiers a way to play (the K116s amp nodes, a Speaker
@@ -67,6 +68,7 @@ refuse "adt: an ADT lacking a listed property is not called complete" $tool --ad
 expect "adt: show finds a node by name" $tool --adt "$W/k114s.adt" show audio-codec-output
 refuse "adt: a missing ADT is an error, not an empty file" $tool --adt "$W/none.adt" pmp-dtsi --names-from "$A/t6050-j714s-pmp-tunables.dtsi" -o "$W/none.dtsi"
 [ ! -e "$W/wrong.dtsi" ] && [ ! -e "$W/none.dtsi" ] && ok "adt: a refusal writes no file" || no "adt: a refusal left a file"
+expect "adt: the sound fact checker (tests/k114s-adt-sound-facts.py) passes its self-test" python3 -I "$here/tests/k114s-adt-sound-facts.py" --self-test
 
 # --- 2-4. compile and lint ---------------------------------------------------------------------------------
 # the kernel's dtc warning switches; a newer dtc no longer knows some of them
