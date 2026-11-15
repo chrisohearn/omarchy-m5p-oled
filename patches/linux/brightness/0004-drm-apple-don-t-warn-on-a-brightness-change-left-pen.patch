@@ -1,0 +1,86 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <81541646+RyanTheTide@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 17:30:56 +1100
+Subject: [PATCH] drm/apple: don't warn on a brightness change left pending
+ while the panel is off
+
+The consumer blanks the panel before the DCP suspends. A brightness
+change requested while the CRTC is off is not presented: the backlight
+worker leaves it dirty and the enable swap on resume restores it. The
+suspend drain treated that still-dirty change as a stuck present and,
+after four drain passes, logged "brightness change still pending at
+suspend" although the level was deferred by design and need not reach
+the firmware before the mailbox suspends.
+
+Return from the drain once a pending change remains only because the
+panel is not lit. A change left pending while the panel is lit still
+drains and warns as before.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <address-in-upstream-commit@localhost>
+(cherry picked from commit 629e81bc2dd68f282e37c5a12d9bbd2b739d2098)
+[k114s: aurora-silicon/linux pull request 1887 (merged 2026-11-14). Not booted on a K114s]
+---
+ drivers/gpu/drm/apple/dcp.c           | 10 ++++++++++
+ drivers/gpu/drm/apple/dcp_backlight.c | 14 ++++++++++++++
+ drivers/gpu/drm/apple/dcp_backlight.h |  1 +
+ 3 files changed, 25 insertions(+)
+
+diff --git a/drivers/gpu/drm/apple/dcp.c b/drivers/gpu/drm/apple/dcp.c
+index 2c0dd80547..95d69b1968 100644
+--- a/drivers/gpu/drm/apple/dcp.c
++++ b/drivers/gpu/drm/apple/dcp.c
+@@ -7201,6 +7201,16 @@ static void dcp_drain_for_sleep(struct apple_dcp *dcp)
+ 			return;
+ 		if (!dcp_backlight_active(dcp) || !dcp_backlight_pending(dcp))
+ 			return;
++		/*
++		 * The consumer blanks the panel before this runs, so a change
++		 * left pending while the panel is not lit is the blank itself,
++		 * or a level set while DPMS was off: the firmware will not take
++		 * it until the CRTC is active again, and resume restores it on
++		 * the enable swap. It need not reach the firmware before the
++		 * mailbox suspends, so stop here rather than wait it out.
++		 */
++		if (!dcp_backlight_lit(dcp))
++			return;
+ 	}
+ 	dev_warn(dcp->dev, "brightness change still pending at suspend\n");
+ }
+diff --git a/drivers/gpu/drm/apple/dcp_backlight.c b/drivers/gpu/drm/apple/dcp_backlight.c
+index 46c162f201..80b9a52f57 100644
+--- a/drivers/gpu/drm/apple/dcp_backlight.c
++++ b/drivers/gpu/drm/apple/dcp_backlight.c
+@@ -462,6 +462,20 @@ bool dcp_backlight_pending(struct apple_dcp *dcp)
+ 	return pending;
+ }
+ 
++/* The panel is showing a level now, so a pending change can be presented. */
++bool dcp_backlight_lit(struct apple_dcp *dcp)
++{
++	unsigned long flags;
++	bool lit;
++
++	if (!dcp_backlight_active(dcp))
++		return false;
++	spin_lock_irqsave(&dcp->backlight.lock, flags);
++	lit = dcp_bl_lit(&dcp->backlight.state);
++	spin_unlock_irqrestore(&dcp->backlight.lock, flags);
++	return lit;
++}
++
+ /*
+  * Called from the receive path, which must not queue a transaction itself;
+  * the caller schedules the update worker when this returns true.  Requests
+diff --git a/drivers/gpu/drm/apple/dcp_backlight.h b/drivers/gpu/drm/apple/dcp_backlight.h
+index cc2d321fb1..a746dfc29c 100644
+--- a/drivers/gpu/drm/apple/dcp_backlight.h
++++ b/drivers/gpu/drm/apple/dcp_backlight.h
+@@ -395,6 +395,7 @@ int dcp_backlight_prepare(struct apple_dcp *dcp, bool have_surface,
+ 			  struct dcp_backlight_present *present);
+ bool dcp_backlight_complete(struct apple_dcp *dcp, u64 sequence, bool accepted);
+ bool dcp_backlight_pending(struct apple_dcp *dcp);
++bool dcp_backlight_lit(struct apple_dcp *dcp);
+ bool dcp_backlight_resend(struct apple_dcp *dcp);
+ unsigned int dcp_backlight_retry_delay(struct apple_dcp *dcp);
+ 

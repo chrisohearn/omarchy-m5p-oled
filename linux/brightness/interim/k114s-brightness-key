@@ -1,0 +1,38 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled): what the display brightness keys run while the interim software
+# dimming is installed.
+#
+#     k114s-brightness-key raise | lower | max | min
+#
+# With a kernel backlight for the built-in panel (after the display coprocessor port) it only
+# calls Omarchy's own control, exactly as the default bindings do, and turns the software
+# dimming off first. Without one it steps k114s-soft-dim, which can only DIM BELOW the level
+# the boot stage left the panel at: "max" is that level, not the panel's maximum.
+#
+# Not installed by anything. See linux/brightness/README.md.
+set -euo pipefail
+here=$(dirname "$(readlink -f "$0")")
+dim=$here/k114s-soft-dim
+
+case ${1:-} in
+raise | lower | max | min) ;;
+*) echo "usage: k114s-brightness-key raise|lower|max|min" >&2; exit 2 ;;
+esac
+
+if omarchy-hw-display >/dev/null 2>&1; then
+  # A real backlight exists: no software dimming on top of it.
+  if [[ $("$dim") != 100 ]]; then K114S_DIM_NO_OSD=1 "$dim" off; fi
+  case $1 in
+  raise) exec omarchy-brightness-display +5% ;;
+  lower) exec omarchy-brightness-display 5%- ;;
+  max) exec omarchy-brightness-display 100% ;;
+  min) exec omarchy-brightness-display 1% ;;
+  esac
+fi
+
+case $1 in
+raise) exec "$dim" +10 ;;
+lower) exec "$dim" -10 ;;
+max) exec "$dim" off ;;
+min) exec "$dim" 10 ;;
+esac
