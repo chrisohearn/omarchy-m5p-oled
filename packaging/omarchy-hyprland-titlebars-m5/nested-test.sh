@@ -13,8 +13,11 @@
 #
 # The verifier alone cannot see that fault: its nested instance has no layer surfaces, so the
 # lists the plugin reads from the wrong place are empty either way. This script therefore also
-# maps a background layer surface in the nested instance (a wallpaper, as every real session
-# has) before the first press. --no-layer leaves it out.
+# maps layer surfaces in the nested instance before the first press: a background one (a
+# wallpaper) and a small one each on the top layer (the bar) and the overlay layer (notifications),
+# the two lists the plugin's hit test walks (inputIsValid reads TOP and OVERLAY). The small ones
+# sit in the bottom corners with no exclusive zone, so the verifier's geometry is unchanged.
+# --no-layer leaves all three out.
 #
 # What it does to the session it runs in: one 1280x800 window appears for about half a minute and
 # takes focus, as any newly opened window does. Nothing else: no hyprctl command is sent to the
@@ -23,8 +26,9 @@
 # or a crash notification (its crash report, if any, is copied to the artifacts directory).
 #
 # Needs no root. Needs: Hyprland hyprctl foot grim wayland-scanner cc python3, the gtk4 and
-# gtk4-layer-shell development files (for the layer surface), and a Wayland session whose
-# compositor offers zwp_linux_dmabuf_v1 (Hyprland does).
+# gtk4-layer-shell development files (for the layer surfaces), and a Wayland session whose
+# compositor offers zwp_linux_dmabuf_v1 (Hyprland does) and renders on the CPU: the GPU desktop's
+# native driver cannot yet back a nested compositor (the script says so when that is why it failed).
 set -euo pipefail
 
 die() { echo "nested-test: $*" >&2; exit 2; }
@@ -38,7 +42,7 @@ while (($#)); do
     --source) source_dir=${2:?}; shift 2 ;;
     --artifacts) artifacts=${2:?}; shift 2 ;;
     --no-layer) layer=no; shift ;;
-    -h|--help) sed -n '3,27p' "$0"; exit 0 ;;
+    -h|--help) sed -n '3,31p' "$0"; exit 0 ;;
     -*) die "unknown option $1" ;;
     *) [[ -z $library ]] || die "one library at a time"; library=$1; shift ;;
   esac
@@ -71,7 +75,7 @@ done
 
 # Additions to the verifier, nothing taken out. In its nested config: no Xwayland (it would claim
 # a display number in /tmp/.X11-unix), and none of the first-run dialogs a fresh home brings up.
-# Before its first window: the background layer surface, when NESTED_TEST_LAYER names its client.
+# Before its first window: the layer surfaces, when NESTED_TEST_LAYER names their client.
 cat > "$work/patch-verifier.py" <<'PATCH'
 import sys
 
@@ -81,14 +85,16 @@ config_anchor = 'hl.monitor({ output = "", mode = "1280x800@60", position = "0x0
 config_extra = 'hl.config({ xwayland = { enabled = false }, ecosystem = { no_update_news = true, no_donation_nag = true } })\n'
 window_anchor = "    terminal = subprocess.Popen(['foot', '--app-id=omarchy-titlebars-isolated-test'"
 layer_step = """    if os.environ.get('NESTED_TEST_LAYER'):
-      subprocess.Popen([os.environ['NESTED_TEST_LAYER']], env=env, stdout=log, stderr=log)
-      for _ in range(150):
-        if 'nested-test-background' in ctl('layers'):
-          break
-        time.sleep(.1)
-      else:
-        raise RuntimeError('The background layer surface did not map')
-      print('nested-test: background layer surface mapped in the nested instance', flush=True)
+      for namespace, layer in (('background', 'background'), ('top', 'top'), ('overlay', 'overlay')):
+        subprocess.Popen([os.environ['NESTED_TEST_LAYER'], 'nested-test-' + namespace, layer], env=env, stdout=log, stderr=log)
+      for namespace in ('background', 'top', 'overlay'):
+        for _ in range(150):
+          if 'nested-test-' + namespace in ctl('layers'):
+            break
+          time.sleep(.1)
+        else:
+          raise RuntimeError('The ' + namespace + ' layer surface did not map')
+      print('nested-test: background, top and overlay layer surfaces mapped in the nested instance', flush=True)
 """
 if text.count(config_anchor) != 1 or text.count(window_anchor) != 1:
     sys.exit('nested-test: the verifier changed, review nested-test.sh against it')
@@ -102,19 +108,31 @@ if [[ $layer == yes ]]; then
   pkg-config --exists gtk4 gtk4-layer-shell-0 ||
     die "the gtk4-layer-shell development files are missing (--no-layer runs without them, but then proves little)"
   cat > "$work/layer.c" <<'C'
-// A wallpaper stand-in: one background layer surface covering the output.
+// A layer-shell client: layer.c NAMESPACE background|top|overlay. Background covers the output (a
+// wallpaper); top and overlay are 20x20 in a bottom corner (the right one for top, the left one
+// for overlay) with no exclusive zone, so no window the verifier places is moved or covered.
 #include <gtk/gtk.h>
 #include <gtk4-layer-shell.h>
-int main(void) {
+#include <string.h>
+int main(int argc, char **argv) {
+  if (argc != 3) return 2;
   gtk_init();
   GtkWindow *window = GTK_WINDOW(gtk_window_new());
   gtk_layer_init_for_window(window);
-  gtk_layer_set_namespace(window, "nested-test-background");
-  gtk_layer_set_layer(window, GTK_LAYER_SHELL_LAYER_BACKGROUND);
-  for (int edge = 0; edge < GTK_LAYER_SHELL_EDGE_ENTRY_NUMBER; edge++)
-    gtk_layer_set_anchor(window, edge, TRUE);
-  gtk_layer_set_exclusive_zone(window, -1);
+  gtk_layer_set_namespace(window, argv[1]);
   gtk_layer_set_keyboard_mode(window, GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+  if (!strcmp(argv[2], "background")) {
+    gtk_layer_set_layer(window, GTK_LAYER_SHELL_LAYER_BACKGROUND);
+    for (int edge = 0; edge < GTK_LAYER_SHELL_EDGE_ENTRY_NUMBER; edge++)
+      gtk_layer_set_anchor(window, edge, TRUE);
+    gtk_layer_set_exclusive_zone(window, -1);
+  } else if (!strcmp(argv[2], "top") || !strcmp(argv[2], "overlay")) {
+    gtk_layer_set_layer(window, argv[2][0] == 't' ? GTK_LAYER_SHELL_LAYER_TOP : GTK_LAYER_SHELL_LAYER_OVERLAY);
+    gtk_layer_set_anchor(window, GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
+    gtk_layer_set_anchor(window, argv[2][0] == 't' ? GTK_LAYER_SHELL_EDGE_RIGHT : GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
+    gtk_layer_set_exclusive_zone(window, 0);
+    gtk_window_set_default_size(window, 20, 20);
+  } else return 2;
   gtk_window_present(window);
   g_main_loop_run(g_main_loop_new(NULL, FALSE));
   return 0;
@@ -159,7 +177,7 @@ env -i \
   NESTED_TEST_LAYER="$layer_client" \
   python3 -I "$work/tools/verify.py" "$library" --artifacts "$artifacts" || status=$?
 
-[[ -z $layer_client ]] || pkill -x -f "$layer_client" 2> /dev/null || true
+[[ -z $layer_client ]] || pkill -f -- "^$layer_client " 2> /dev/null || true
 if compgen -G "$work/home/.cache/hyprland/hyprlandCrashReport*" > /dev/null; then
   cp "$work"/home/.cache/hyprland/hyprlandCrashReport* "$artifacts/"
   echo "nested-test: the nested Hyprland crashed; its report is in $artifacts"
@@ -167,6 +185,10 @@ fi
 if ((status)); then
   echo "nested-test: FAILED (verifier exit $status). Last lines of the nested compositor's log:"
   tail -n 15 "$artifacts/compositor.log" 2> /dev/null | cut -c1-200 || true
+  if grep -q -E 'CREATE_DUMB failed|HAL300' "$artifacts/compositor.log" 2> /dev/null; then
+    echo "nested-test: the session renders on the GPU (~/.config/k114s-gpu-desktop), and a nested compositor cannot allocate or render there."
+    echo "nested-test: run this from a CPU-rendered session: rm ~/.config/k114s-gpu-desktop and log in again (or boot r1), then touch it again afterwards."
+  fi
 else
   echo "nested-test: PASSED"
 fi

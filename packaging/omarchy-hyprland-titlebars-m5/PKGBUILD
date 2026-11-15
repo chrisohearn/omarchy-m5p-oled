@@ -11,8 +11,9 @@
 # What it is. The unchanged upstream source at the tag below, compiled with the same recipe as
 # omacom/omarchy-pkgs pkgbuilds/omarchy-hyprland-titlebars (MIT, Ryan Hughes), against the
 # installed hyprland-m5 headers. Differences from that recipe:
-#   - epoch=1 and "+m5" in pkgver: pacman never takes the channel's build over this one in an
-#     upgrade, and the version says which build it is;
+#   - epoch=1 and "+m5" in pkgver: a plain -Syu never takes the channel's build over this one, and
+#     the version says which build it is. The epoch does NOT stop -Syyuu, -Suu or -S: what does is
+#     install.sh's guard hook (00-k114s-titlebars-guard.hook) and the K114s holds;
 #   - depends on the exact hyprland-m5 it was compiled against, pkgrel included, so pacman
 #     refuses to move hyprland-m5 without a rebuild of this package;
 #   - build() refuses headers that are not that hyprland-m5, and pins the CMonitor offsets;
@@ -86,9 +87,13 @@ package() {
 
   # What this plugin was compiled against. The build ID names one Hyprland binary exactly, which
   # the commit hash Hyprland reports does not.
-  local build_id
+  local build_id owner size off_dsfailed off_layers
+  owner=$(pacman -Qqo /usr/bin/Hyprland)
+  [[ $owner == "$_hyprland_pkg" ]] || _fail "/usr/bin/Hyprland belongs to $owner, not $_hyprland_pkg"
   build_id=$(readelf -n /usr/bin/Hyprland | awk '/Build ID:/ { print $3; exit }')
   [[ -n $build_id ]] || _fail "no build ID in /usr/bin/Hyprland"
+  size=$(_probe sizeof_CMonitor) && off_dsfailed=$(_probe off_m_dsFailedClient) && off_layers=$(_probe off_m_layerSurfaceLayers) &&
+    [[ -n $size && -n $off_dsfailed && -n $off_layers ]] || _fail "abi-probe gave no value (build() did not leave abi-probe.o)"
   cat > "$pkgdir/usr/lib/omarchy-hyprland-titlebars/titlebars.abi" <<ABI
 # omarchy-hyprland-titlebars: the Hyprland build this titlebars.so was compiled against.
 plugin=$epoch:$pkgver-$pkgrel
@@ -97,9 +102,9 @@ hyprland_package=$_hyprland_pkg
 hyprland_version=$_hyprland_ver
 hyprland_build_id=$build_id
 hyprland_reported_commit=$(awk -F'"' '/GIT_COMMIT_HASH/ { print $2 }' /usr/include/hyprland/src/version.h)
-sizeof_CMonitor=$(_probe sizeof_CMonitor)
-offsetof_CMonitor_m_dsFailedClient=$(_probe off_m_dsFailedClient)
-offsetof_CMonitor_m_layerSurfaceLayers=$(_probe off_m_layerSurfaceLayers)
+sizeof_CMonitor=$size
+offsetof_CMonitor_m_dsFailedClient=$off_dsfailed
+offsetof_CMonitor_m_layerSurfaceLayers=$off_layers
 ABI
   chmod 644 "$pkgdir/usr/lib/omarchy-hyprland-titlebars/titlebars.abi"
 }

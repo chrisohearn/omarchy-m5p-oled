@@ -3,8 +3,8 @@
 The channel's `omarchy-hyprland-titlebars` is compiled against stock Hyprland headers. On a
 machine that runs betizzel/omarchy-m5's `hyprland-m5` it loads, and takes the compositor down on
 the first click on a floating workspace. This directory builds the same plugin source against the
-installed `hyprland-m5` headers, as a pacman package that replaces the channel's and is not
-replaced by it. The full account is in `docs/r3-titlebars.md`.
+installed `hyprland-m5` headers, as a pacman package that replaces the channel's, with guards that keep the channel's build from
+coming back over it. The full account is in `docs/r3-titlebars.md`.
 
 | File | What it is |
 | --- | --- |
@@ -13,8 +13,10 @@ replaced by it. The full account is in `docs/r3-titlebars.md`.
 | `build.sh` | builds the package as a normal user, in an emptied environment, into a directory you name |
 | `nested-test.sh` | runs the plugin's own verifier against a `titlebars.so` in a disposable nested Hyprland, with a layer surface so that the fault shows |
 | `titlebars-abi-check` | says whether the installed `titlebars.so` was compiled against the installed Hyprland binary; `--disarm` moves a mismatched one aside |
-| `02-k114s-titlebars-abi.hook` | optional pacman hook that runs `titlebars-abi-check --disarm` after the plugin or Hyprland changes |
-| `test-abi-check.sh` | tests of `titlebars-abi-check` in throwaway roots |
+| `00-k114s-titlebars-guard.hook` | pacman PreTransaction hook: stops any change to the plugin or `hyprland-m5` (a downgrade included) without the owner's marker; runs `titlebars-abi-check --pre` |
+| `02-k114s-titlebars-abi.hook` | pacman PostTransaction hook that runs `titlebars-abi-check --disarm` after the plugin or Hyprland changes |
+| `install.sh` | root step: installs the script and both hooks, then the package, under a one-transaction permit and allow-low-esp; fails unless titlebars.so is installed and the ABI check says ok |
+| `test-abi-check.sh`, `test-install.sh` | tests of `titlebars-abi-check` and `install.sh` in throwaway roots |
 
 ## Build (no root)
 
@@ -35,14 +37,16 @@ bsdtar -xf ~/k114s-build/titlebars/pkg/omarchy-hyprland-titlebars-1:0.4.0+m5-1-a
 packaging/omarchy-hyprland-titlebars-m5/nested-test.sh "$d/usr/lib/omarchy-hyprland-titlebars/titlebars.so"
 ```
 
-A 1280x800 window opens for about half a minute and closes again. Ten `PASS` lines and
+The session must render on the CPU (a nested compositor cannot run on the GPU desktop; the script
+says so). A 1280x800 window opens for about half a minute and closes again. Ten `PASS` lines and
 `nested-test: PASSED` is the result to expect. The channel's build fails the same test at the
 first titlebar press, with a crash report of the nested Hyprland in the artifacts directory.
 
 ## Install (root, the lead's step)
 
-Installing arms it: Omarchy loads `/usr/lib/omarchy-hyprland-titlebars/titlebars.so` the next
-time a workspace floats. See "Install and rollback" in `docs/r3-titlebars.md`.
+`sudo packaging/omarchy-hyprland-titlebars-m5/install.sh <package file>`. Installing arms it:
+Omarchy loads `/usr/lib/omarchy-hyprland-titlebars/titlebars.so` the next time a workspace floats.
+See "Install and rollback" in `docs/r3-titlebars.md`.
 
 ## When to rebuild
 

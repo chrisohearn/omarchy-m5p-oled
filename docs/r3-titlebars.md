@@ -131,7 +131,12 @@ nested process so that a crash there leaves no core dump and raises no crash not
 
 The verifier as published cannot see this fault. Its nested instance has no layer surfaces, so
 all four layer lists are empty and the misplaced read finds two null pointers. The script
-therefore maps a background layer surface in the nested instance first.
+therefore maps a background layer surface in the nested instance first. Its first version mapped
+only that one, which left the two lists the plugin's hit test actually walks empty: `inputIsValid()`
+reads `m_layerSurfaceLayers[TOP]` and `[OVERLAY]` (`0x7e0` and `0x7f8` in the rebuild). The script
+now also maps a 20x20 surface on the TOP layer (bottom right corner, the bar's layer) and one on
+the OVERLAY layer (bottom left corner, the notifications' layer), both with no exclusive zone, and
+waits for all three in `hyprctl layers` before the first press.
 
 Runs on this Mac, 2026-11-14, kernel `K114S-R1`, session on llvmpipe (agent-run):
 
@@ -151,9 +156,20 @@ the clients running here did not appear to (they held no window-sized dmabufs) w
 private process: a GBM buffer from the DRM node, exported as a dmabuf, imported into a second EGL
 display as a texture, sampled and read back intact. No Wayland connection was involved.
 
+**Not re-run after that change (agent-run attempt, 2026-11-14 evening).** The extended script
+compiled its layer client and patched the verifier, but the nested compositor could not start a
+useful session: the desktop now renders on the GPU (native driver), the session compositor's
+dmabuf feedback names the GPU's render node, the nested Hyprland allocates on it and Mesa's
+software path then fails with `DRM_IOCTL_MODE_CREATE_DUMB failed: Permission denied` on every
+buffer (with the native driver instead it dies: "Apple G17S uses the HAL300 command stream, which
+this driver does not implement"). The script now says so when that is why a run failed. The test
+has to be run from a CPU-rendered session: `rm ~/.config/k114s-gpu-desktop`, log in again, run it
+(expect: rebuild 10 of 10; the channel `.so` a nested SIGSEGV at the first press, as in run 3),
+`touch` the file again. Record then: the `background, top and overlay layer surfaces mapped` line, 10 PASS lines for the rebuild, a nested SIGSEGV for the channel build (`titlebars.so.disabled-k114s`). Until then the TOP and OVERLAY coverage is **code written, unverified**, not fixed.
+
 What the nested test does not cover: the session's real configuration (Omarchy's
-`workspace-modes.lua`, its theme colors and buttons, the bar and dock on the TOP layer, the
-notification layer), touch input, more than one monitor, and the session compositor's DRM backend
+`workspace-modes.lua`, its theme colors and buttons, the real bar and dock
+and notification surfaces, which the test only stands in for, touch input, more than one monitor, and the session compositor's DRM backend
 instead of the Wayland one.
 
 ## Packaging decisions
@@ -162,13 +178,38 @@ instead of the Wayland one.
   (`omarchy-base.packages`, a migration) and asks pacman only whether a package of that name is
   installed, which a `provides` would not answer.
 - **Version `1:0.4.0+m5-1`.** The epoch makes it newer than anything the channel publishes without
-  one, so `pacman -Syu` never replaces it, with or without the hold. Checked against a copy of the
-  package databases with this package marked installed: no upgrade is offered, with and without
-  the `IgnorePkg` line (agent-run). `+m5` says which build it is. `pkgrel` counts rebuilds.
-- **Hold.** `omarchy-hyprland-titlebars` is already in `/usr/local/lib/omarchy-k114s/holds.list`
-  and stays there. The hold and the epoch cover upgrades. Neither stops an explicit
-  `pacman -S --noconfirm omarchy-hyprland-titlebars`, which would put the channel build back;
-  the optional hook below covers that.
+  one, so a plain `pacman -Syu` never replaces it. That is all it does: Omarchy's refresh runs
+  `pacman -Syyuu` and `omarchy reinstall` runs `-Suu`, and a downgrade-capable upgrade ignores the
+  epoch; `pacman -S --needed omarchy-hyprland-titlebars` (what `omarchy-upgrade-to-quattro` runs
+  over `omarchy-base.packages`) resolves the channel build too, because `--needed` skips only an
+  equal version. Both put the crashing build back (agent-run, copied databases, review of
+  2026-11-14). `+m5` says which build it is. `pkgrel` counts rebuilds.
+- **What holds it.** Three layers, none of them the epoch:
+  1. the guard hook `00-k114s-titlebars-guard.hook` (PreTransaction, AbortOnFail), installed by
+     `install.sh` in the same root session as the package. It triggers on Install and Upgrade of
+     `omarchy-hyprland-titlebars` and `hyprland-m5`; pacman reports a downgrade as an Upgrade, so
+     `-Syyuu`, `-Suu` and `-S --needed` stop before anything changes. It does not depend on
+     `pacman.conf`, which Omarchy rewrites from a template, nor on a user hook that needs a fresh
+     `sudo`. A transaction goes through with `/etc/omarchy-k114s/allow-coupled-update` (the K114s
+     hold guard's own marker) or a release permit naming the package; `install.sh` sets the second
+     (a permit `install omarchy-hyprland-titlebars`) for its one transaction;
+  2. `omarchy-hyprland-titlebars` and `hyprland-m5` in `holds.list` (`apply-holds` writes the
+     `IgnorePkg` line). Omarchy's `pre-refresh-pacman` hook re-adds the line only when it runs and
+     has `sudo`; the guard is what remains when it did not;
+  3. `02-k114s-titlebars-abi.hook` (PostTransaction), also installed by `install.sh`: after any
+     transaction that installed, upgraded or downgraded the plugin or a Hyprland it moves a
+     mismatched `titlebars.so` aside, so even a transaction that got through leaves no armed
+     mismatch.
+  On `r3/update-tooling` the generic hold guard already stops every install of a held package and
+  its `noextract.list` keeps the stock `titlebars.so` out of any package whose version lacks
+  `+m5` (this package's version contains it); there the guard hook is redundant, honors the same
+  permit, and may be dropped by whoever merges the two.
+- **Not used.** A distinct package name with `provides`/`conflicts`: Omarchy's migrations and
+  `omarchy-pkg-present` ask pacman for the name `omarchy-hyprland-titlebars` only, a `provides`
+  does not answer `pacman -Q`, and `omarchy-base.packages` would then try to install the channel
+  package next to a conflicting one on every reinstall. `NoUpgrade` on `titlebars.so`: it lives in
+  `pacman.conf`, which Omarchy overwrites, and it would leave the m5 `.so` under a package record
+  that says `0.4.0-1`.
 - **Dependency.** `hyprland-m5=0.57.2-2`, release included, in place of `hyprland=0.57.2`. pacman
   then refuses to upgrade or replace `hyprland-m5` while this build is installed, which is the
   behavior the channel's pin was meant to have.
@@ -176,6 +217,8 @@ instead of the Wayland one.
   `hyprland-m5 0.57.2-2`, and unless `Monitor::CMonitor` has `m_dsFailedClient` at `0x5b0` and
   `m_layerSurfaceLayers` at `0x7b0`. A rebuilt `hyprland-m5` with another layout therefore stops
   the build until someone has looked.
+- **Build-time checks, continued.** `package()` also stops unless `/usr/bin/Hyprland` belongs to
+  `hyprland-m5`, and unless all three probe values are non-empty before it writes `titlebars.abi`.
 - **`titlebars.abi`.** Installed beside the plugin: the Hyprland package, version and binary build
   ID it was compiled against, and the offsets. The build ID names one binary exactly, which the
   commit hash does not. `titlebars-abi-check` compares it with the installed Hyprland.
@@ -190,19 +233,52 @@ at the next config load when a floating workspace is already saved. Do it when t
 the machine and has nothing unsaved in the session.
 
 ```bash
-P=~/k114s-build/titlebars/pkg/omarchy-hyprland-titlebars-1:0.4.0+m5-1-aarch64.pkg.tar.xz
-pacman -Qp "$P"                       # omarchy-hyprland-titlebars 1:0.4.0+m5-1
-sudo pacman -U "$P"                   # the package is held: answer Y to "is in IgnorePkg ... Install anyway?"
-packaging/omarchy-hyprland-titlebars-m5/titlebars-abi-check     # expect "ok: ... compiled against the installed Hyprland"
-sudo rm /usr/lib/omarchy-hyprland-titlebars/titlebars.so.disabled-k114s   # the channel build that was moved aside; nothing owns it any more
+P=~/k114s-build/titlebars-r2/pkg/omarchy-hyprland-titlebars-1:0.4.0+m5-1-aarch64.pkg.tar.xz
+sha256sum "$P"    # expect 81c321fae282a7c2c676c3b020838961ffe7c87d671b82532dcde92c550fdf99 (titlebars.so inside: e227dafb..., unchanged)
+sudo packaging/omarchy-hyprland-titlebars-m5/install.sh "$P"
 ```
 
+`install.sh` is the whole step, in one root session: it refuses anything that is not the `+m5`
+build, refuses to start while `/var/lib/pacman/db.lck` exists or a permit file is already there,
+prints the package's sha256, installs `titlebars-abi-check` into `/usr/local/lib/omarchy-k114s/`
+and both hooks (`00-k114s-titlebars-guard.hook`, `02-k114s-titlebars-abi.hook`) into
+`/etc/pacman.d/hooks/`, writes the permit `install omarchy-hyprland-titlebars` and `allow-low-esp`
+for the one transaction and removes them again on exit (an `allow-low-esp` that was already there
+stays), runs `pacman -U --noconfirm`, and then fails unless `titlebars.so` is on disk and
+`titlebars-abi-check` says `ok:` (expect `ok: ... compiled against the installed Hyprland`). If
+pacman asks about `IgnorePkg`, answer Y; no prompt is not an error (`--noconfirm` answers it).
+
+Why a permit and `allow-low-esp`. The package is not a boot-chain package, so the K114s hold guard
+on `main` (`00-k114s-hold-guard.hook`: `linux-aurora`, `m1n1-aurora`, `uboot-aurora`,
+`omarchy-aurora-firmware`, `omarchy-mac-boot`, `limine-mkinitcpio-hook`, plus a Remove of
+`omarchy`/`omarchy-settings`) never fires for it; only this package's own guard
+(`titlebars-abi-check --pre`) and, on `r3/update-tooling`, `k114s-guard` stop it, and both honor the
+narrow permit, which unlocks nothing else. A blanket `allow-coupled-update` would have disabled the
+boot-chain guard for any transaction that raced in, and a marker left by SIGKILL would have stayed
+in `/etc`; the permit lives in `/run` (gone at reboot). The K114s ESP space guard on `main`
+(`01-k114s-esp-space.hook`, `Target = *`, minimum 84 MiB = 88080384 bytes) aborts every
+transaction while `/boot/efi` has less; it has 87724032 bytes (83.66 MiB) free, so it stops this
+one too, harmlessly (PreTransaction, nothing changed) but for a reason that is not about this
+package: the transaction runs no mkinitcpio, Limine or boot-ctxr hook and writes nothing to the
+EFI partition (agent-run, hook triggers evaluated against the package's file list). Hence
+`allow-low-esp`, which `install.sh` still sets (the lock check above keeps another transaction from
+slipping in under it). On `r3/update-tooling` the space guard triggers on boot-file paths and
+packages only (`01-k114s-guard-esp.hook`), none of which this package has, so the marker is a
+no-op there. There, `noextract.list` keeps `titlebars.so` out while the installed version lacks
+`+m5`, which is true during this very `-U` from the channel's `0.4.0-1`: `install.sh` then dies
+with a message instead of reporting success. Once the two branches merge, run the install through
+`k114s-release`, or lift it for that file with
+`k114s-holds lift-noextract usr/lib/omarchy-hyprland-titlebars/titlebars.so`. The `sudo` timestamp
+is the only thing `install.sh` needs; do not split it into separate `sudo` calls.
+
 The transaction runs no boot-chain hook. Of the installed hooks, its package name and files match
-only the three pre-transaction guards that run for every package (Omarchy's update guard, the
-K114s ESP free-space guard, the limine-snapper lock) and systemd's `35-systemd-update.hook`
-(agent-run: the hook triggers evaluated against the package's file list, not a pacman run). The
-ESP guard can stop this transaction like any other when the ESP is below its limit; that is its
-own matter.
+only the three pre-transaction guards that run for every package on `main` (Omarchy's update
+guard, the K114s ESP free-space guard, the limine-snapper lock) and systemd's
+`35-systemd-update.hook` (agent-run: the hook triggers evaluated against the package's file list,
+not a pacman run).
+
+Optionally remove the channel build that was moved aside (nothing owns it once the package is
+replaced): `sudo rm /usr/lib/omarchy-hyprland-titlebars/titlebars.so.disabled-k114s`.
 
 Then the owner's check, which is the one that counts: float a workspace, click in a window, drag
 it by its titlebar, use the three buttons.
@@ -215,24 +291,31 @@ sudo mv /usr/lib/omarchy-hyprland-titlebars/titlebars.so /usr/lib/omarchy-hyprla
 
 Floating workspaces then work without titlebars, as they do now. The package can stay installed.
 
-## Optional guard
+## The guards
+
+Both hooks and the script are installed by `install.sh`; they are no longer optional, because the
+package alone does not keep the channel's build out (see "What holds it").
+
+`00-k114s-titlebars-guard.hook` with `titlebars-abi-check --pre`: PreTransaction, AbortOnFail,
+triggers on Install and Upgrade of `omarchy-hyprland-titlebars` and `hyprland-m5`. Stops a
+transaction that would change either without `allow-coupled-update` or a release permit
+(`/run/omarchy-k114s/permit`, a line `install PACKAGE`, at most an hour old). Pacman has not run
+this hook on this machine (agent-run: the script and `install.sh` in throwaway roots,
+`test-install.sh`, 19 checks; the hook's trigger syntax is the one `00-k114s-hold-guard.hook`
+uses). The cost is that an `omarchy update` whose refresh dropped the `IgnorePkg` line, and that
+would downgrade the plugin, stops with a message instead of finishing; `apply-holds` and a rerun
+fix it, as with the other held packages.
 
 `02-k114s-titlebars-abi.hook` with `titlebars-abi-check --disarm` is a PostTransaction pacman
-hook for the K114s guard set (`/etc/pacman.d/hooks/`, script in `/usr/local/lib/omarchy-k114s/`).
-After any transaction that installs or upgrades the plugin or a Hyprland it compares the plugin's
-`titlebars.abi` with the installed Hyprland's build ID and moves a mismatched `titlebars.so` to
-`titlebars.so.disabled-k114s`, which is what was done by hand on 2026-11-14. It would have caught
-the edge refresh that started this: a plugin without `titlebars.abi` beside a Hyprland that is not
-the channel's own `hyprland` package. It never arms anything. 17 tests in `test-abi-check.sh`
-pass (agent-run, throwaway roots; not run under pacman).
+hook. After any transaction that installs, upgrades or downgrades the plugin or a Hyprland it
+compares the plugin's `titlebars.abi` with the installed Hyprland's build ID and moves a
+mismatched `titlebars.so` to `titlebars.so.disabled-k114s`, which is what was done by hand on
+2026-11-14. It would have caught the edge refresh that started this: a plugin without
+`titlebars.abi` beside a Hyprland that is not the channel's own `hyprland` package. It never arms
+anything. 17 tests in `test-abi-check.sh` pass (agent-run, throwaway roots; not run under pacman).
 
-It is not installed and `linux/linux-persist.sh` does not know it; whether it joins the guard set
-is the lead's decision. For the lead:
-
-```bash
-sudo install -m 755 packaging/omarchy-hyprland-titlebars-m5/titlebars-abi-check /usr/local/lib/omarchy-k114s/titlebars-abi-check
-sudo install -m 644 packaging/omarchy-hyprland-titlebars-m5/02-k114s-titlebars-abi.hook /etc/pacman.d/hooks/02-k114s-titlebars-abi.hook
-```
+`linux/linux-persist.sh` does not know either file; whoever merges this with the K114s guard set
+should let it install them next to the other hooks.
 
 ## What to report upstream
 
@@ -294,9 +377,10 @@ fingerprint of the plugin-visible classes in the check would catch it.
   the dependency makes pacman say so instead of crashing later. A `hyprland-m5` rebuilt under the
   same version and release with another layout would get past pacman; the build-time pins and
   `titlebars-abi-check` catch that, the dependency does not.
-- **The epoch is sticky.** Going back to the channel's plugin, once `hyprland-m5` is fixed or
-  gone, is an explicit `pacman -S omarchy/omarchy-hyprland-titlebars` (a downgrade in pacman's
-  eyes) after the hold is lifted.
+- **The epoch is sticky, and it is not the protection.** Going back to the channel's plugin, once
+  `hyprland-m5` is fixed or gone, is an explicit `pacman -S omarchy/omarchy-hyprland-titlebars` (a
+  downgrade in pacman's eyes) after the hold is lifted and `allow-coupled-update` is set. Without
+  the guard hook the epoch protects only a plain `-Syu`, not `-Syyuu`, `-Suu` or `-S`.
 - **Other plugins.** Any other Hyprland plugin built for stock headers has the same problem on
   `hyprland-m5` if it touches `CMonitor` members after `m_scanoutNeedsCursorUpdate`. None is
   installed on this machine besides this one.
