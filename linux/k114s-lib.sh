@@ -109,8 +109,28 @@ uki_prefix() { # CUSTOM_UKI_NAME from /etc/default/limine, read not sourced
 standard_uki_rel() { echo "EFI/Linux/$(uki_prefix)_${1:-linux-aurora}.efi"; }
 
 # limine.conf: an entry starts with "/" (sub-entries with more slashes); Limine numbers every
-# entry in file order, directories and sub-entries included, and default_entry is that number.
-limine_default() { sed -n 's/^default_entry:[[:space:]]*\([0-9]*\).*/\1/p' "$1" | head -n 1; }
+# entry in file order, directories and sub-entries included, and default_entry is that number,
+# or an entry path such as "Omarchy/linux-k114s" (names joined by "/", the "+" of an expanded
+# folder is not part of a name; Limine 12.9.6 common/menu.c find_entry_by_path). A path keeps
+# naming the same entry when entries are added or removed in front of it (docs/r3a-promotion.md).
+limine_default() { # the value as written: an index or a path. The option name in any case, as Limine and k114s-boot-once read it
+  awk 'tolower(substr($0, 1, 14)) == "default_entry:" { v = substr($0, 15); sub(/^[ \t]+/, "", v); print v; exit }' "$1"
+}
+limine_paths() { # one line per entry, in Limine's numbering: INDEX<TAB>PATH
+  awk '{ line = $0; sub(/^[[:space:]]+/, "", line) }
+    line ~ /^\// { n++; match(line, /^\/+/); d = RLENGTH; name = substr(line, d + 1); sub(/^\+/, "", name); sub(/^[ \t]+/, "", name)
+      nm[d] = name; p = nm[1]; for (i = 2; i <= d; i++) p = p "/" nm[i]; print n "\t" p }' "$1"
+}
+limine_default_index() { # the number of the entry default_entry names; nothing if it names none (or uses an escape)
+  local value
+  value=$(limine_default "$1")
+  if [[ $value =~ ^[0-9]+$ ]]; then echo "$value"; return 0; fi
+  [[ -n $value && $value != *[\\#]* ]] || return 0
+  limine_paths "$1" | awk -F'\t' -v want="$value" '$2 == want { print $1; exit }'
+}
+limine_path_of() { # the entry path of entry INDEX; nothing if a name needs an escape (/, \ or #)
+  limine_paths "$1" | awk -F'\t' -v want="$2" '$1 == want { if ($2 !~ /[\\#]/) print $2; exit }'
+}
 limine_entry_of() { # the number of the entry whose path names EFI file REL; nothing if none or several
   awk -v want="$2" '
     /^[[:space:]]*\// { n++ }
@@ -118,13 +138,18 @@ limine_entry_of() { # the number of the entry whose path names EFI file REL; not
     END { if (hits == 1) print found }' "$1"
 }
 limine_title_of() { awk -v want="$2" '/^[[:space:]]*\// { n++; if (n == want) { sub(/^[[:space:]]*\/+\+?/, ""); print; exit } }' "$1"; }
-limine_set_default() { # rewrite default_entry in place, through a temp file on the same filesystem
-  local conf=$1 index=$2 count tmp
+limine_set_default() { # point default_entry at entry INDEX, in place, through a temp file on the same filesystem
+  # A default written as a path stays a path (the path of that entry), so that an entry the hook adds in front later
+  # cannot move it; a numeric default stays a number.
+  local conf=$1 index=$2 count tmp value
   count=$(grep -c -E '^[[:space:]]*/' "$conf" || true)
   [[ $index =~ ^[0-9]+$ ]] && ((index >= 1 && index <= count)) || return 1
-  grep -q '^default_entry:' "$conf" || return 1
+  grep -q -i '^default_entry:' "$conf" || return 1
+  value=$index
+  if [[ ! $(limine_default "$conf") =~ ^[0-9]+$ ]]; then value=$(limine_path_of "$conf" "$index"); [[ -n $value ]] || return 1; fi
   tmp=$conf.k114s-new
-  sed "s/^default_entry:.*/default_entry: $index/" "$conf" > "$tmp" && sync "$tmp" && mv -f "$tmp" "$conf"
+  K114S_VALUE=$value awk 'tolower(substr($0, 1, 14)) == "default_entry:" && !done { print "default_entry: " ENVIRON["K114S_VALUE"]; done = 1; next } { print }' "$conf" > "$tmp" &&
+    [[ $(limine_default_index "$tmp") == "$index" ]] && sync "$tmp" && mv -f "$tmp" "$conf" || { rm -f "$tmp"; return 1; }
 }
 limine_remove_entry_block() { # print CONF without the top-level entry that boots EFI file REL
   # The block runs from its comment marker ("### K114s ..." directly above, if any) or its title
