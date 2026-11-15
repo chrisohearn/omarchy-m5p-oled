@@ -1,0 +1,38 @@
+Factory reset: switched off on the K114s until it is qualified.
+
+Local change for this machine, not an upstream fix. Omarchy's Setup menu offers Reset Computer
+on any btrfs root, and omarchy-mac-boot's reset replaces the Limine menu with the stock template
+(which drops the K114s repair entry), rebuilds the initramfs and UKI from the @factory image, and
+erases the system. None of that has been run on this Mac, and the reset's own kernel check
+(factory_kernel_coherent) is expected to fail here (inferred; @factory not read) because /boot holds this Mac's own kernel. This stops the
+command before sudo, before the top-level mount and before any question, with nothing changed.
+
+It only applies where /proc/device-tree/compatible lists apple,k114s. Creating
+/etc/omarchy-k114s/factory-reset-qualified turns it off. Do that only after a qualified reset
+with a recovery set at hand (docs/platform-audit.md, "Factory reset").
+
+The Setup menu row itself lives in omarchy-settings-dev's omarchy-menu.jsonc, which this patch
+mechanism may not touch; docs/platform-audit.md gives the one-line user extension that hides it.
+
+Paths are relative to /usr.
+
+--- a/bin/omarchy-system-factory-reset
++++ b/bin/omarchy-system-factory-reset
+@@ -40,6 +40,17 @@
+ NEXT_NAME=@omarchy-reset-next
+ LOG_FILE=/var/log/omarchy-system-factory-reset.log
+ 
++# K114s local change: a factory reset is not qualified on this Mac, so it stops here, before
++# sudo, before the top-level mount and before any question. Create the marker only after a
++# qualified reset has been run with a recovery set (docs/platform-audit.md).
++if grep -qx 'apple,k114s' < <(tr '\0' '\n' 2>/dev/null <"${K114S_DT_COMPATIBLE:-/proc/device-tree/compatible}") &&
++  [[ ! -e ${K114S_RESET_QUALIFIED:-/etc/omarchy-k114s/factory-reset-qualified} ]]; then
++  echo "Factory reset is switched off on this Mac: it has not been qualified for the K114s boot chain." >&2
++  echo "It would rewrite the Limine menu (dropping the K114s repair entry) and the boot files, and erase this system." >&2
++  echo "Nothing was changed. See docs/platform-audit.md in omarchy-m5p-oled." >&2
++  exit 1
++fi
++
+ # Never replace a newer checkout reset with a different installed implementation.
+ if ! /usr/bin/cmp -s -- "${BASH_SOURCE[0]}" "$PACKAGED_PATH"; then
+   echo "Factory reset differs from the installed command. Install the matching Omarchy package before resetting." >&2
