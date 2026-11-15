@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 12 Nov 2026 11:16:19 -0700
+Subject: [PATCH 3/4] i2c: pasemi: report a NACK as a NACK while the STOP is
+ still going out
+
+With the interrupt enabled for MTN, the transfer wait returns as soon as
+the device has not acknowledged a byte. The controller has not put the
+STOP on the bus yet at that point, so SMSTA usually still has XIP set
+(0x10210106: XIP, MTN, MTE), and since XIP is tested first the transfer
+is reported as "Bus stuck" and fails with -EIO. Read a little later the
+same event gives 0x08210106 and "NACK"; both were seen for the same
+unpowered device within one boot of an M5 Pro MacBook Pro.
+
+Nothing is stuck there: the controller finishes the STOP by itself and
+the next transfer waits for the bus to go idle, resetting the controller
+if it does not. Test MTN (and arbitration loss) before XIP so that an
+unanswered address is logged as what it is and returns -ENXIO, which is
+what clients probing for a device expect. A transfer that ends with XIP
+set and no NACK is still reported as stuck.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+Signed-off-by: Thomas Glanzmann <thomas@glanzmann.de>
+---
+omarchy-m5p-oled note (not part of the upstream commit):
+Source: aurora-silicon/linux commit 48243e8f3d32b0cdcf2deef44172bf1a9df77ce0, pull request 1787
+(open on 2026-11-14), unchanged. Tested upstream on a K116s ("11 of 11 boots clean").
+Why here: the I2C controller of every bus on this Mac, the jack codec's included. A device that
+does not answer is reported as a NACK (-ENXIO) and no longer as "Bus stuck" (-EIO).
+
+ drivers/i2c/busses/i2c-pasemi-core.c | 19 ++++++++++++-------
+ 1 file changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/i2c/busses/i2c-pasemi-core.c b/drivers/i2c/busses/i2c-pasemi-core.c
+index 7105fc460..38bddbbce 100644
+--- a/drivers/i2c/busses/i2c-pasemi-core.c
++++ b/drivers/i2c/busses/i2c-pasemi-core.c
+@@ -196,24 +196,29 @@ static int pasemi_smb_waitready(struct pasemi_smbus *smbus)
+ 		return -ETIME;
+ 	}
+ 
+-	/* Still stuck in a transaction? */
+-	if (status & SMSTA_XIP) {
+-		dev_err(smbus->dev, "Bus stuck, status 0x%08x\n", status);
+-		return -EIO;
+-	}
+-
+ 	/* Arbitration loss? */
+ 	if (status & SMSTA_MTA) {
+ 		dev_err(smbus->dev, "Arbitration loss, status 0x%08x\n", status);
+ 		return -EBUSY;
+ 	}
+ 
+-	/* Got NACK? */
++	/*
++	 * Got NACK? The interrupt comes with the NACK, before the controller
++	 * has put the STOP on the bus, so XIP is usually still set here: this
++	 * is checked before XIP, and the transfer is over once the STOP is out
++	 * (the next transfer waits for that).
++	 */
+ 	if (status & SMSTA_MTN) {
+ 		dev_err(smbus->dev, "NACK, status 0x%08x\n", status);
+ 		return -ENXIO;
+ 	}
+ 
++	/* Still stuck in a transaction? */
++	if (status & SMSTA_XIP) {
++		dev_err(smbus->dev, "Bus stuck, status 0x%08x\n", status);
++		return -EIO;
++	}
++
+ 	/* Clear XEN */
+ 	reg_write(smbus, REG_SMSTA, SMSTA_XEN);
+ 

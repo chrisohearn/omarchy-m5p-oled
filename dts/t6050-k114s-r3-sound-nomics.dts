@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/* K114s r1 plus sound, the headphone jack alone: the fallback if the microphone array misbehaves. */
+#define K114S_R1_N1
+#define K114S_R1_USB
+#define K114S_SOUND_NO_MICS
+#include "t6050-k114s-common.dtsi"
+#include "t6050-k114s-sound.dtsi"

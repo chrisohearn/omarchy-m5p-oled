@@ -1,0 +1,22 @@
+#!/bin/sh
+# Install as /etc/systemd/user-environment-generators/70-k114s-gpu-desktop (root-owned, mode 0755).
+# K114s with the GPU's render node present and no display coprocessor card: the desktop stays on
+# the CPU unless the owner opts in. Prints nothing on a boot without the render node (r1), so that
+# boot is exactly as before. Runs after 30-systemd-environment-d-generator, so it overrides
+# /usr/lib/environment.d/90-omarchy-j714s-gpu.conf.
+#   opt in:   touch ~/.config/k114s-gpu-desktop     (then restart the desktop with gpu-desktop-restart)
+#   opt out:  rm ~/.config/k114s-gpu-desktop        (then restart the desktop with gpu-desktop-restart)
+#   optional: echo zink >~/.config/k114s-gpu-desktop   to run the desktop through zink instead
+drm=${K114S_SYS_ROOT:-/sys}/bus/platform/drivers/aurora
+ls "$drm"/*/drm/renderD* >/dev/null 2>&1 || exit 0
+[ -e /dev/dri/by-path/platform-display-subsystem-card ] && exit 0
+# The user manager runs generators with an almost empty environment: HOME is not set there.
+home=${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}
+opt="${home:-/nonexistent}/.config/k114s-gpu-desktop"
+if [ -e "$opt" ]; then
+  [ "$(cat "$opt" 2>/dev/null)" = zink ] && echo MESA_LOADER_DRIVER_OVERRIDE=zink
+  exit 0
+fi
+echo LIBGL_ALWAYS_SOFTWARE=1
+echo GBM_ALWAYS_SOFTWARE=1
+echo ASAHI_M5_BRINGUP=0

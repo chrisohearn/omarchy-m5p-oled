@@ -1,0 +1,15 @@
+#!/bin/sh
+# K114s: keep booting a Stage 2 candidate as a one-boot trial (aura-try), boot after boot,
+# for as long as each trial boot succeeds. Runs at shutdown. A boot that did not come up through the trial
+# (the trial hung and the owner forced power off; the loader marks the file spent before it boots) is NOT re-armed: the Mac then
+# stays on the configured, proven Stage 2 until someone arms it again.
+C=/etc/omarchy-k114s/stage2-trial; E=/boot/efi; L=/var/lib/k114s-recovery/stage2-trial.log
+[ -s "$C" ] || exit 0
+path=$(sed -n 1p "$C"); want=$(sed -n 2p "$C")
+booted=$(tr -d '\0' < /proc/device-tree/chosen/aurora,trial 2>/dev/null || true)
+if [ "$booted" != "$path" ]; then
+  echo "$(date -Is) this boot was not a trial of $path (booted: ${booted:-configured}); not re-arming" >> "$L"; exit 0
+fi
+have=$(sha256sum "$E/$path" 2>/dev/null | cut -c1-64)
+[ "$have" = "$want" ] || { echo "$(date -Is) $path hash $have != $want; not re-arming" >> "$L"; exit 0; }
+printf 'armed\n%s\n' "$path" > "$E/aura-try" && sync -f "$E" && echo "$(date -Is) re-armed $path" >> "$L"

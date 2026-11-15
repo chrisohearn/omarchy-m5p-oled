@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Thomas Glanzmann <thomas@glanzmann.de>
+Date: Thu, 12 Nov 2026 07:40:47 +0100
+Subject: [PATCH] dt-bindings: display: apple,dcp: accept K-board panel
+ compatibles
+
+The PROLED MacBook Pros are K boards (K114s/c, K116s/c). Like the J
+boards, their panel node can name the board before the generic
+compatible: the K116s uses "apple,panel-k116", "apple,panel". Accept
+apple,panel-k<n> where apple,panel-j<n> is accepted.
+
+Signed-off-by: Thomas Glanzmann <thomas@glanzmann.de>
+(cherry picked from commit 3adc985b5a61d091eb869343c9b29e0eb1407cc0)
+---
+ Documentation/devicetree/bindings/display/apple,dcp.yaml | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/display/apple,dcp.yaml b/Documentation/devicetree/bindings/display/apple,dcp.yaml
+index c18292bf4..d0bc33404 100644
+--- a/Documentation/devicetree/bindings/display/apple,dcp.yaml
++++ b/Documentation/devicetree/bindings/display/apple,dcp.yaml
+@@ -392,10 +392,10 @@ properties:
+               - apple,panel
+               - apple,panel-mini-led
+           - items:
+-              - pattern: '^apple,panel-j[0-9]+$'
++              - pattern: '^apple,panel-[jk][0-9]+$'
+               - const: apple,panel
+           - items:
+-              - pattern: '^apple,panel-j[0-9]+$'
++              - pattern: '^apple,panel-[jk][0-9]+$'
+               - const: apple,panel-mini-led
+               - const: apple,panel
+       width-mm:

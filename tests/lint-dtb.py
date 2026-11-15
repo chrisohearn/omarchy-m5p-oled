@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Device tree lint for the K114s repair: every gpio-reserved-ranges entry must fit its controller,
-and the AP pin controller must expose exactly the pins the tree names (pin 80)."""
+and the AP pin controller must expose exactly the pins the tree names (pin 80; 134 and 139 with the jack codec)."""
 import struct, sys
 def walk(b):
     magic,total,ost,ostr,_,ver,_,_,szstr,szst = struct.unpack_from('>10I',b); assert magic==0xd00dfeed
@@ -31,7 +31,9 @@ for f in sys.argv[1:]:
             exposed=sorted(set(range(n))-reserved)
             if n==221: exposed_ap=exposed
             print(f'  {f.split("/")[-1]} {path.split("/")[-1]}: {n} pins, exposed {exposed if len(exposed)<12 else str(len(exposed))+" pins"}')
-    want=[80] if b'pci106b,1900' in open(f,'rb').read() else []
+    blob=open(f,'rb').read()
+    want=[80] if b'pci106b,1900' in blob else []
+    if b'cirrus,cs42l84' in blob: want+=[134,139]  # the jack codec's interrupt and reset (dts/t6050-k114s-sound.dtsi)
     if compat!='apple,k114s': print(f'FAIL {f}: root compatible {compat}'); bad+=1
     if exposed_ap is not None and exposed_ap!=want: print(f'FAIL {f}: AP pin controller exposes {exposed_ap}, expected {want}'); bad+=1
 print('dtb lint:', 'FAILED' if bad else 'passed', f'({len(sys.argv)-1} trees)'); sys.exit(1 if bad else 0)
