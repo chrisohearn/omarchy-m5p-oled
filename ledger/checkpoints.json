@@ -81,6 +81,33 @@
       "note": "The standard UKI (rebuilt from the repair kernel, sha256 5534263077781a9f...) has not been booted. The EFI partition has 88 MB free; the space guard refuses package transactions until one UKI goes"
     },
     {
+      "id": "r3-gpu",
+      "what": "GPU (G17S) on the installed loader and running kernel: device tree r1 + GPU nodes only, booted through aura-try as a one-boot trial that re-arms itself after each good boot; desktop composites on the native driver after an opt-in guard",
+      "evaluated": "2026-11-14",
+      "integrated": "2026-11-14",
+      "built_tested": "2026-11-14: tree matches this Mac's ADT for every GPU register and interrupt (agent-run); three independent reviews",
+      "staged": "2026-11-14",
+      "applied": "2026-11-14 16:46 MST (aura-try)",
+      "hardware_verified": "2026-11-14 17:11 MST and every boot since: renderer Apple M5 Pro (G17S B1), firmware 26B8125, Hyprland about 6 % of a core against about 300 % on llvmpipe (agent-run); desktop works (owner-observed)",
+      "note": "docs/r3-gpu-result.md. Suspend stays masked until the mailbox-interrupt patches are in"
+    },
+    {
+      "id": "keyfile-unlock",
+      "what": "LUKS key file on the ESP so reboots need no passphrase (owner's decision 2026-11-14); passphrase slot kept; fstab nofail for /boot/efi; tries=4",
+      "applied": "2026-11-14 17:25 MST",
+      "hardware_verified": "2026-11-15 02:14 MST: unlocked with no prompt, key mount released, /boot/efi mounted (agent-run)"
+    },
+    {
+      "id": "r3a",
+      "what": "Next kernel: Bluetooth RFCOMM, ip6 netfilter matches, tipd async probe, #1647 s2idle + apple,k114s, #1688, #1868 120 Hz gate, #1844 0009, sound kernel bits",
+      "evaluated": "2026-11-14",
+      "integrated": "2026-11-14",
+      "built_tested": "2026-11-15: native build, QEMU module load 1965/1972 (same seven failures as baseline); install plan through three review rounds",
+      "staged": null,
+      "applied": null,
+      "hardware_verified": null
+    },
+    {
       "id": "r3",
       "what": "Display coprocessor and GPU at K116s parity, with the sleep and lid fixes (docs/matrix.md, 'Next candidate')",
       "evaluated": "2026-11-14",

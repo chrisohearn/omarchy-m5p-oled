@@ -8,23 +8,43 @@ has for this model and its siblings, adds the few K114s-specific pieces, and tur
 versioned bundles that are applied in place to an existing install. Scope is the whole machine:
 boot, input, radios, display, graphics, media, sound, power, updates.
 
-## Where it stands (2026-11-14)
+## Where it stands (2026-11-15)
 
-- **Boots.** A K114s booted this stack to the Hyprland desktop from its encrypted NVMe root, with
-  the built-in keyboard working (owner-observed, 2026-11-14). At that boot the trackpad failed
-  ("invalid report_size 524288") and there was no network: that trial's device tree left the
-  radio and USB ports off on purpose.
-- **Bundle r1** (2026-11-14): two repair kernels for the trackpad, a K114s device tree with
-  Wi-Fi/Bluetooth, two USB-C host ports and sensors, the K114s Wi-Fi firmware, and an apply and
-  rollback tool that runs from macOS. Kept as delivered in `releases/r1/`.
-- **Bundle r2** (2026-11-14): r1's boot files unchanged, plus update handling that keeps the K114s
-  boot chain intact through `omarchy update` and a channel refresh.
-- **Bundle r2c** (2026-11-14): r2 did not fit the 524 MB EFI partition (about 139 MB free). r2c
-  carries the same fixes in about 112 MB: one repair kernel image with the Wi-Fi firmware inside
-  its own initramfs. See [docs/bundle-r2c.md](docs/bundle-r2c.md).
-- **Not yet proven on hardware:** everything in r1, r2 and r2c. The first test is the next Linux boot.
-- Everything else (display coprocessor, GPU, sound, camera, sleep, ...) is tracked per subsystem
-  in [docs/matrix.md](docs/matrix.md), with the next candidate planned there.
+Omarchy runs natively on this Mac from its encrypted NVMe, with the desktop composited on the
+Apple GPU. Evidence labels: *owner-observed* (seen by the owner on the Mac), *agent-run* (checked
+on the Mac by the AI agent), *staged* (built and reviewed, not yet booted).
+
+| Area | State |
+| --- | --- |
+| Boot from encrypted NVMe, Limine, keyboard | working (owner-observed) |
+| Trackpad | working with aurora-silicon/linux #1568 (owner-observed) |
+| Wi-Fi | working (agent-run) |
+| Bluetooth controller | up (agent-run); hands-free profiles need the r3a kernel (staged) |
+| GPU (G17S): OpenGL, Vulkan, Hyprland on the GPU | working (owner-observed, agent-run): [docs/r3-gpu-result.md](docs/r3-gpu-result.md) |
+| Battery, fans, voltages | reading (agent-run) |
+| Disk unlock without a passphrase | working (agent-run): the owner's choice, a key file on the EFI partition |
+| Updates on Omarchy's Edge channel | guarded after one bad refresh: [incident](docs/incident-2026-11-14-edge-refresh.md) |
+| Headphone jack, microphones | staged (on main, not installed) |
+| Native panel mode, 120 Hz, brightness | designed (display coprocessor step, branch `r3/display-gpu`) |
+| Suspend and lid | blocked on purpose until the next kernel |
+| Speakers | blocked upstream: no protection data for this model ([why](docs/r3-audio-protection.md)) |
+| Camera, touchscreen, Touch ID, video decode, SD reader, Thunderbolt, external displays | not started |
+
+Per-subsystem detail, sources and next steps are in [docs/matrix.md](docs/matrix.md).
+
+### What got it here
+
+1. **Bundle r2c**, applied from macOS: a repair kernel with the trackpad fix and the K114s Wi-Fi
+   firmware, and a K114s device tree with Wi-Fi, Bluetooth, two USB-C ports and sensors
+   ([docs/bundle-r2c.md](docs/bundle-r2c.md)).
+2. **Update guards** in Linux (`linux/linux-persist.sh`), installed after an Edge channel refresh
+   downgraded the boot chain ([docs/incident-2026-11-14-edge-refresh.md](docs/incident-2026-11-14-edge-refresh.md)).
+3. **The GPU**: a device tree that adds only the GPU, booted through the loader's own one-boot
+   trial (`aura-try`) so the proven boot file is never overwritten, and a session guard that
+   moves the desktop onto the GPU only after an explicit opt-in.
+4. **A native build environment** on the Mac ([docs/r3-buildenv.md](docs/r3-buildenv.md)) and the
+   next kernel candidate, r3a (Bluetooth hands-free, firewall matches, sleep pieces, the 120 Hz
+   gate), built and under review.
 
 `ledger/checkpoints.json` records each change's state separately: evaluated, integrated,
 built/tested, staged, applied, awaiting reboot, hardware-verified.
@@ -67,8 +87,8 @@ Exact revisions are in `pins/sources.json`; who wrote what is in [NOTICE.md](NOT
 | `docs/upstream-applicability.md` | the detailed source review behind the matrix |
 | `docs/edge-update-path.md` | how updates on the Edge channel are kept safe, and how that was tested |
 | `docs/bundle-r2.md` | the bundle's own instructions |
-| `dts/` | K114s device tree sources (trial 1, r1 and its variants) |
-| `patches/linux/` | the two upstream trackpad series as used |
+| `dts/` | K114s device tree sources (trial 1, r1 and its variants, the r3 GPU and display trees) |
+| `patches/linux/` | kernel patches as used, with their upstream authorship |
 | `installer/` | the patches that admit `apple,k114s` in betizzel's installer build |
 | `macos/` | apply/rollback tool for the Linux EFI partition; runs from macOS |
 | `linux/` | update handling installed inside Linux; `omarchy-patches-install` for `patches/omarchy/` |
@@ -86,7 +106,8 @@ Exact revisions are in `pins/sources.json`; who wrote what is in [NOTICE.md](NOT
   that runs from macOS. The device tree is shared by all boot entries, so the original kernel
   entry alone is not a fallback; `rollback stage2` is.
 - A delivered bundle is never rebuilt. A change makes a new revision.
-- No automatic reboot. Hardware acceptance is the owner's.
+- Every new boot file is tried for one boot only, and a failed try falls back to the proven one by
+  itself. Hardware acceptance is the owner's.
 - No sibling's firmware, calibration or identity is reused. Speakers are never driven without
   protection data for this model.
 - Edge channel only. No Dev checkout.
