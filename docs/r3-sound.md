@@ -106,14 +106,24 @@ Read from the installed units and `/usr/lib/speakerguardd-v2/speakerguardd-gate`
   It is **slow**: `-provision` and `-selfcheck` are ordered before `systemd-user-sessions`, so the
   login screen comes about 30 s later.
 - `speakersafetyd.service` stays skipped by its own drop-in
-  (`ConditionPathExists=/usr/share/speakersafetyd/apple/k114.conf`; the file does not exist).
+  (`ConditionPathExists=/usr/share/speakersafetyd/apple/k114.conf`; the file does not exist). That
+  file name is **not** specific to this Mac (the K114c, M5 Max, shares it), so on its own it is not
+  a guard; see the next paragraph.
 - `aurora-speaker-upgrade.service` already runs at every boot and ends with "not now: no speaker
   card yet" (journal of 2026-11-14). It looks for a card with a speaker protection control. The
   K114 card has none, so the result stays the same.
 
-`linux/audio/install-audio.sh` adds a second condition to the five units,
-`ConditionPathExists=/proc/device-tree/sound/dai-link@1`, which is false while the card has only
-the jack link. That removes the wait. It adds to `90-k114s.conf` and replaces nothing.
+`linux/audio/install-audio.sh` adds a drop-in `99-k114s-speaker-guard.conf` to those five units,
+to `speakersafetyd`, `speakerguardd`, `speakerguardd-v2-sleep`, `speakerguardd-v2-seat.path` and
+`aurora-speaker-upgrade`: `ConditionPathExists=/etc/omarchy-k114s/speaker-qualification`, a file
+only the owner creates, by hand, when Stage B has every proof. Until then none of them runs, which
+also removes the 15 s waits, and a sibling model's `k114.conf` from a package update cannot arm a
+daemon here. It adds to every other condition and replaces nothing. (An earlier draft keyed the
+five units on `dai-link@1` alone; that would stop guarding if a tree put the Speaker link at another
+unit address, so it was replaced.) It also installs `tree-check`, which WirePlumber runs before it
+starts: a booted tree with a sound node that is not the Stage A card (for example a packaged J714s
+tree, which has a real speaker path) keeps WirePlumber, the only thing that opens cards for a user,
+from starting.
 
 ## User space
 
@@ -131,12 +141,12 @@ the generic verbs from `alsa-ucm-conf-aurora`; the J-model WirePlumber rules fro
 | `ucm2/aop_audio-k114-hpai.conf`, `ucm2/aop_audio-k114-HiFi.conf` | `/usr/share/alsa/ucm2/conf.d/aop_audio/MacBook Pro K114 High-Power Audio Interface.conf`, `.../aop_audio/k114/HiFi.conf` | card `AppleK114HPAI`: a 3-channel "Mic" device. No lid jack control: this kernel's driver has none on this card |
 | `wireplumber/82-k114-audio.conf` | `/etc/wireplumber/wireplumber.conf.d/` | names the raw array `RawMics`, puts a mono source on it, disables nodes on the jack card's PCM 1 and 2 |
 | `share/mic.json` | `/usr/local/share/omarchy-k114s/audio/` | the mono source: equal mix of the three microphones, 36 dB gain, 120 Hz high-pass, limiter. Same structure as the image's J714 graph; the gains are starting values, not measured on a K114s |
-| `systemd/91-k114s-no-speaker-link.conf` | the five `speakerguardd-v2*.service.d/` folders | the condition above |
+| `systemd/99-k114s-speaker-guard.conf`, `tree-check`, `systemd/99-k114s-stage-a-tree.conf` | the speaker units' drop-in folders; `/usr/local/lib/omarchy-k114s/audio/`; WirePlumber's user unit | the guard and the tree check above |
 
 Install and undo (root; the lead or the owner):
 
     sudo bash linux/audio/install-audio.sh
-    sudo bash linux/audio/install-audio.sh --undo
+    sudo bash linux/audio/install-audio.sh --undo    # the speaker guard stays; --remove-guard needs the owner's marker
     bash linux/audio/install-audio.sh --check
 
 It refuses any Mac that is not `apple,k114s`, keeps an existing file of the same name as
@@ -278,7 +288,15 @@ files are inert without the `/sound` node.
 - The microphone path anywhere: upstream has not tested it on the K116s either.
 - The microphone gains in `mic.json`, and the behaviour of WirePlumber and the UCM profiles with
   the real cards (parsed only).
-- The device tree against the dt-schema bindings (no `dt-validate` here).
+- The device tree against the dt-schema bindings (no `dt-validate` here). **A mismatch is known,
+  not unknown**: `Documentation/devicetree/bindings/sound/apple,t8152-aop-audio.yaml` (it covers
+  `apple,t6050-aop-audio`) wants `dma-names` with at least four entries in the order `cout`, `cin`,
+  `spkr`, `sense` (optionally `hpai`). This tree gives `cout`, `cin`, `hpai` (the `-nomics` variant
+  `cout`, `cin`), so `dt-validate` would fail on it. Runtime is unaffected: the driver requests
+  channels by name. It is deliberate: `spkr` and `sense` must not exist in a tree without
+  speakers, so the schema must not be satisfied by adding them. The honest fix is a small binding
+  patch that allows a jack-and-microphones form (`cout`, `cin`, `hpai`) beside the K114 driver
+  entry; not written.
 - The state of the amp shutdown line after boot on this Mac.
 - That the K114c shares this card; patch 0004 names the chassis, and only the K114s was looked at.
 

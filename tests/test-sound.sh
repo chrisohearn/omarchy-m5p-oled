@@ -6,13 +6,14 @@
 # KTREE: a kernel tree at the installed base (aurora-silicon/linux a34d26c2 + linux-j714s-27.2.patch).
 # It is only read. Tools: python3, a C preprocessor (CPP, default "cpp") and dtc (DTC, default "dtc").
 #
-#   1. build/k114s-adt.py against a made-up ADT: the PMP file it writes, and what it refuses;
+#   1. build/k114s-adt.py against a made-up ADT: the PMP file it writes, and what it refuses; and the
+#      self-test of tests/k114s-adt-sound-facts.py (the check of the real ADT is a root step, not run here);
 #   2. the sound trees compile against KTREE (with a stand-in PMP file from that made-up ADT);
 #   3. tests/lint-sound-dtb.py passes on them;
 #   4. the lint fails on trees that give the amplifiers a way to play (the K116s amp nodes, a Speaker
 #      link, the shutdown pin exposed, a speaker DMA channel, the K116 card);
 #   5. the ALSA UCM profiles parse with the installed alsaucm, where it and alsa-ucm-conf-aurora exist;
-#   6. linux/audio/install-audio.sh installs and undoes cleanly in a fake root;
+#   6. linux/audio/install-audio.sh installs and undoes cleanly in a fake root (--root, --with-beamformer; the guard and tree-check tests are in tests/test-audio-userland.sh);
 #   7. the installed speakerguardd v2 gate code, given the compiled tree, finds no speaker card.
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -67,6 +68,7 @@ refuse "adt: an ADT lacking a listed property is not called complete" $tool --ad
 expect "adt: show finds a node by name" $tool --adt "$W/k114s.adt" show audio-codec-output
 refuse "adt: a missing ADT is an error, not an empty file" $tool --adt "$W/none.adt" pmp-dtsi --names-from "$A/t6050-j714s-pmp-tunables.dtsi" -o "$W/none.dtsi"
 [ ! -e "$W/wrong.dtsi" ] && [ ! -e "$W/none.dtsi" ] && ok "adt: a refusal writes no file" || no "adt: a refusal left a file"
+expect "adt: the sound fact checker (tests/k114s-adt-sound-facts.py) passes its self-test" python3 -I "$here/tests/k114s-adt-sound-facts.py" --self-test
 
 # --- 2-4. compile and lint ---------------------------------------------------------------------------------
 # the kernel's dtc warning switches; a newer dtc no longer knows some of them
@@ -134,7 +136,7 @@ grep -rqE 'SectionDevice\."Speaker|Speaker (Switch|Volume|Playback)|hw:\$\{CardI
   no "ucm: a profile has a speaker device, a speaker control or PCM 1/2" || ok "ucm: no profile has a speaker device, a speaker control or PCM 1/2"
 
 # --- 6. the installer, in a fake root --------------------------------------------------------------------------
-R="$W/root"; mkdir -p "$R/usr/share/alsa/ucm2/conf.d/macaudio/cs42l84" "$R/etc/wireplumber/wireplumber.conf.d"
+R="$W/root"; mkdir -p "$R/usr/share/alsa/ucm2/conf.d/macaudio/cs42l84" "$R/etc/wireplumber/wireplumber.conf.d" "$R/proc/device-tree"
 : > "$R/usr/share/alsa/ucm2/conf.d/macaudio/cs42l84/HiFi-jack.conf"
 echo "someone else's" > "$R/etc/wireplumber/wireplumber.conf.d/82-k114-audio.conf"
 printf 'apple,k114s\0apple,t6050\0apple,arm-platform\0' > "$W/compat"; printf 'apple,j714s\0apple,t6050\0' > "$W/compat-j714s"
@@ -143,15 +145,40 @@ refuse "install: refuses a Mac that is not apple,k114s" env K114S_ROOT="$R" K114
 [ "$(find "$R" -type f | wc -l)" = 2 ] && ok "install: a refusal installs nothing" || no "install: a refusal left files"
 expect "install: installs into the root" inst
 expect "install: --check finds every file" inst --check
-[ "$(find "$R" -name '91-k114s-no-speaker-link.conf' | wc -l)" = 5 ] && ok "install: the five speakerguardd v2 units get the condition" || no "install: unit drop-ins"
+[ "$(find "$R" -name '99-k114s-speaker-guard.conf' | wc -l)" = 12 ] && ok "install: the nine speaker units, the seat path and the two user units get the guard" || no "install: unit drop-ins"
 [ "$(cat "$R/etc/wireplumber/wireplumber.conf.d/82-k114-audio.conf.k114s-orig")" = "someone else's" ] && ok "install: an existing file is kept beside the new one" || no "install: existing file lost"
 expect "install: a second run changes nothing" inst
 find "$R" -type f | sort > "$W/after-install"
 expect "install: --undo runs" inst --undo
-[ "$(find "$R" -type f | wc -l)" = 2 ] && [ "$(cat "$R/etc/wireplumber/wireplumber.conf.d/82-k114-audio.conf")" = "someone else's" ] &&
-  ok "install: --undo leaves the root as it was" || { no "install: --undo left a difference"; find "$R" -type f; }
-if find "$here/linux/audio" -type f -print0 | xargs -0 grep -l -iE 'speakersafetyd|Speaker Volume Unlock|Speaker Protection' | grep -q .; then
-  no "install: a shipped file names speakersafetyd or a speaker protection control"; else ok "install: no shipped file names speakersafetyd or a speaker protection control"; fi
+[ "$(find "$R" -type f | wc -l)" = 17 ] && [ "$(cat "$R/etc/wireplumber/wireplumber.conf.d/82-k114-audio.conf")" = "someone else's" ] &&
+  ok "install: --undo restores the root except the speaker guard and tree check (14 files and the directory list stay)" || { no "install: --undo left a difference"; find "$R" -type f; }
+refuse "install: --remove-guard is refused while the owner's marker does not exist" inst --remove-guard
+mkdir -p "$R/etc/omarchy-k114s"; : > "$R/etc/omarchy-k114s/speaker-qualification"
+expect "install: --remove-guard runs with the marker" inst --remove-guard
+rm -r "$R/etc/omarchy-k114s"
+[ "$(find "$R" -type f | wc -l)" = 2 ] && ok "install: --remove-guard leaves the root as it was" || { no "install: --remove-guard left a difference"; find "$R" -type f; }
+# --root and the beamformed graph (a second root: the flag, not the environment variable)
+R2="$W/root2"; mkdir -p "$R2/usr/share/alsa/ucm2/conf.d/macaudio/cs42l84" "$R2/proc/device-tree"; : > "$R2/usr/share/alsa/ucm2/conf.d/macaudio/cs42l84/HiFi-jack.conf"
+inst2() { K114S_DT_COMPATIBLE="$W/compat" bash "$here/linux/audio/install-audio.sh" --root "$R2" "$@"; }
+M="$R2/usr/local/share/omarchy-k114s/audio/mic.json"
+expect "install: --root installs into the given tree" inst2
+cmp -s "$M" "$here/linux/audio/share/mic.json" && ok "install: the plain microphone graph is the default" || no "install: default graph"
+expect "install: --with-beamformer switches the graph" inst2 --with-beamformer
+cmp -s "$M" "$here/linux/audio/share/mic-beamformer.json" && ok "install: the beamformed graph is in place" || no "install: beamformed graph"
+[ ! -e "$M.k114s-orig" ] && ok "install: switching graphs does not keep our own file as an original" || no "install: switching made a .k114s-orig"
+expect "install: --undo with --root" inst2 --undo
+mkdir -p "$R2/etc/omarchy-k114s"; : > "$R2/etc/omarchy-k114s/speaker-qualification"; inst2 --remove-guard >/dev/null; rm -r "$R2/etc/omarchy-k114s"
+[ "$(find "$R2" -type f | wc -l)" = 1 ] && ok "install: --root --undo and --remove-guard leave only the stand-in verb file" || { no "install: --root --undo left files"; find "$R2" -type f; }
+# the Stage B readiness report: silent, and it trips on anything that could admit a speaker path
+SR="$here/linux/audio/speaker-readiness.sh"; R3="$W/root3"; mkdir -p "$R3/usr/share/speakersafetyd/apple" "$R3/proc/device-tree/sound/dai-link@0" "$R3/sys/bus/i2c/devices"
+printf 'apple,k114-macaudio\0apple,macaudio\0' > "$R3/proc/device-tree/sound/compatible"
+rc=0; bash "$SR" --root "$R3" > "$W/sr.out" 2>&1 || rc=$?
+[ $rc = 0 ] && grep -q '^BLOCKED' "$W/sr.out" && ok "readiness: an empty root is blocked, no tripwire" || { no "readiness: empty root (exit $rc)"; cat "$W/sr.out"; }
+: > "$R3/usr/share/speakersafetyd/apple/k114.conf"; rc=0; bash "$SR" --root "$R3" > /dev/null 2>&1 || rc=$?; [ $rc = 3 ] && ok "readiness: a k114.conf trips it" || no "readiness: k114.conf did not trip"
+rm "$R3/usr/share/speakersafetyd/apple/k114.conf"; mkdir "$R3/proc/device-tree/sound/dai-link@1"; rc=0; bash "$SR" --root "$R3" > /dev/null 2>&1 || rc=$?; [ $rc = 3 ] && ok "readiness: a second card link trips it" || no "readiness: dai-link@1 did not trip"
+rmdir "$R3/proc/device-tree/sound/dai-link@1"; mkdir "$R3/sys/bus/i2c/devices/1-0038"; rc=0; bash "$SR" --root "$R3" > /dev/null 2>&1 || rc=$?; [ $rc = 3 ] && ok "readiness: a bound amplifier address trips it" || no "readiness: i2c 1-0038 did not trip"
+if find "$here/linux/audio/ucm2" "$here/linux/audio/wireplumber" "$here/linux/audio/share" -type f -print0 | xargs -0 grep -l -iE 'speakersafetyd|Speaker Volume Unlock|Speaker Protection' | grep -q .; then
+  no "install: a sound-stack file names speakersafetyd or a speaker protection control"; else ok "install: no sound-stack file names speakersafetyd or a speaker protection control"; fi
 
 # --- 7. what the installed speaker protection gate makes of the tree --------------------------------------------
 gatelib=/usr/lib/speakerguardd-v2
@@ -173,6 +200,8 @@ PY
   expect "gate: speakerguardd v2's own reader finds no speaker card in the tree" python3 -I "$W/gate.py" "$gatelib" "$W/t6050-k114s-r3-sound.dtb" "$W/dt"
   [ -d "$W/dt/sound" ] && [ ! -e "$W/dt/sound/dai-link@1" ] &&
     ok "gate: /sound exists and /sound/dai-link@1 does not (the unit condition linux/audio installs)" || no "gate: unit condition paths"
+  mkdir -p "$W/dtroot/proc"; ln -s "$W/dt" "$W/dtroot/proc/device-tree"
+  expect "guard: tree-check (what WirePlumber runs) accepts the compiled Stage A tree" bash "$here/linux/audio/tree-check" --root "$W/dtroot"
 else
   echo "skip gate: speakerguardd-v2 is not installed here"
 fi

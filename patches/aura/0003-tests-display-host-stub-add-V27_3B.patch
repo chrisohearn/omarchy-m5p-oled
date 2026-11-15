@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: k114s-integration <integration@localhost>
+Date: Sat, 14 Nov 2026 15:39:46 -0700
+Subject: [PATCH] tests: display host stub: add V27_3B
+
+The T6050 hand-off in src/kboot_display_handoff.c compares the OS firmware
+with V27_3B since betizzel/omarchy-m5's aura patch 0001 ("kboot: T6050:
+hand the GPU and the internal display over on 27.3 beta 1"). The host
+test's stand-in for src/firmware.h does not have it, so
+tests/run-t8122-display-handoff.sh stopped compiling on that series:
+
+  kboot_display_handoff.c: error: 'V27_3B' undeclared here
+
+Add it to the stub. Test-only: nothing in the loader binary changes.
+
+K114s integration (chrisohearn/omarchy-m5p-oled).
+---
+ tests/t8122_display_host/firmware.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/tests/t8122_display_host/firmware.h b/tests/t8122_display_host/firmware.h
+index a8dd1517..8afa6024 100644
+--- a/tests/t8122_display_host/firmware.h
++++ b/tests/t8122_display_host/firmware.h
+@@ -13,6 +13,7 @@ enum fw_version {
+     V26_7 = 103,
+     V27_0 = 104,
+     V27_2 = 105,
++    V27_3B = 106,
+ };
+ struct fw_version_info {
+     enum fw_version version;

@@ -1,0 +1,106 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled): interim, software-only dimming while the panel is the boot framebuffer.
+#
+# NOT a brightness control. It asks Hyprland to scale every pixel down in its final render pass
+# (decoration:screen_shader). 100% is whatever level the boot stage left the panel at; this tool
+# can only go below that. It cannot make the panel brighter. Remove it once the display
+# coprocessor port gives the panel a real backlight device.
+#
+#     k114s-soft-dim            print the current software level (percent of the boot level)
+#     k114s-soft-dim 60         set 60 %
+#     k114s-soft-dim +10 | -10  step
+#     k114s-soft-dim off        back to 100 % (no shader)
+#
+# The percentage is approximate luminance: pixel values are multiplied by (level/100)^(1/2.2).
+# Limits: 8-bit output, so low levels band; screenshots may or may not include the dimming;
+# a Hyprland config reload, a new session or a restart drops it (run the tool again).
+# Floor: 10 %, so the picture cannot be dimmed to black. Nothing is saved: the level is read
+# back from Hyprland's own option each time.
+#
+# Status: written from Hyprland 0.57.2 source (applyScreenShader); the shader compiles with
+# glslangValidator. NOT yet run against the compositor on the K114s, and its cost on the
+# software renderer this Mac uses today is not measured (K114S_DIM_DRY_RUN=1 prints the command
+# instead of running it; K114S_DIM_CURRENT=N stands in for the level read from Hyprland).
+# The on-screen note is a text line ("Software dim 60%"), not Omarchy's brightness bar;
+# K114S_DIM_NO_OSD=1 turns it off.
+#
+# Not installed by anything. See linux/brightness/README.md for where the files go.
+set -euo pipefail
+
+run_dir=${XDG_RUNTIME_DIR:-/tmp}/k114s-soft-dim
+floor=10
+
+# The level in force is the one in the shader Hyprland has loaded (dim-N.frag); none means 100.
+current() {
+  local v=${K114S_DIM_CURRENT:-}
+  if [[ -z $v ]]; then
+    v=$(hyprctl getoption decoration:screen_shader 2>/dev/null |
+      sed -n 's|^str: .*/k114s-soft-dim/dim-\([0-9]\{1,3\}\)\.frag$|\1|p') || v=""
+  fi
+  [[ $v =~ ^[0-9]+$ ]] && (( 10#$v >= floor && 10#$v <= 100 )) || v=100
+  echo "$(( 10#$v ))"
+}
+
+apply() {
+  local level=$1 shader arg lua
+  if (( level >= 100 )); then
+    arg='[[EMPTY]]'
+  else
+    mkdir -p "$run_dir"
+    # One file per level: a new path makes Hyprland load the new shader.
+    shader=$run_dir/dim-$level.frag
+    awk -v l="$level" 'BEGIN {
+      f = exp(log(l / 100) / 2.2)
+      print "#version 300 es"
+      print "precision mediump float;"
+      print "in vec2 v_texcoord;"
+      print "layout(location = 0) out vec4 fragColor;"
+      print "uniform sampler2D tex;"
+      print "void main() {"
+      print "    vec4 c = texture(tex, v_texcoord);"
+      printf "    fragColor = vec4(c.rgb * %.4f, c.a);\n", f
+      print "}"
+    }' >"$shader"
+    arg=$shader
+  fi
+  # This Hyprland is configured in Lua, where Omarchy's own scripts set options with
+  # `hyprctl eval 'hl.config(...)'` and fall back to `hyprctl keyword`. Same order here.
+  if (( level >= 100 )); then lua='hl.config({ decoration = { screen_shader = "" } })'
+  else
+    [[ $shader != *[\"\\]* ]] || { echo "k114s-soft-dim: unusable path: $shader" >&2; exit 1; }
+    lua="hl.config({ decoration = { screen_shader = \"$shader\" } })"
+  fi
+  if [[ -n ${K114S_DIM_DRY_RUN:-} ]]; then
+    echo "hyprctl eval '$lua' || hyprctl keyword decoration:screen_shader $arg"
+  else
+    hyprctl eval "$lua" >/dev/null 2>&1 ||
+      hyprctl keyword decoration:screen_shader "$arg" >/dev/null ||
+      { echo "k114s-soft-dim: Hyprland refused the screen shader" >&2; exit 1; }
+  fi
+  # A text line, not the brightness bar: this is not the panel's brightness.
+  if [[ -z ${K114S_DIM_DRY_RUN:-} && -z ${K114S_DIM_NO_OSD:-} ]] && command -v omarchy-osd >/dev/null; then
+    if (( level >= 100 )); then
+      omarchy-osd -i brightness -m "Software dim off" || true
+    else
+      omarchy-osd -i brightness -m "Software dim $level%" || true
+    fi
+  fi
+}
+
+case ${1:-} in
+"") current ;;
+off) apply 100 ;;
+[+-][0-9]*|[0-9]*)
+  [[ $1 =~ ^([+-]?)([0-9]{1,3})%?$ ]] || { echo "k114s-soft-dim: bad level: $1" >&2; exit 2; }
+  n=${BASH_REMATCH[2]}
+  case ${BASH_REMATCH[1]} in
+  +) level=$(( $(current) + 10#$n )) ;;
+  -) level=$(( $(current) - 10#$n )) ;;
+  *) level=$(( 10#$n )) ;;
+  esac
+  (( level > 100 )) && level=100
+  (( level < floor )) && level=$floor
+  apply "$level"
+  ;;
+*) echo "usage: k114s-soft-dim [N | +N | -N | off]" >&2; exit 2 ;;
+esac

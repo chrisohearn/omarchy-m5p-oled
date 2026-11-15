@@ -1,0 +1,18 @@
+# K114s (omarchy-m5p-oled): the title-bar plugin and hyprland-m5 change together or not at all.
+# In /etc/pacman.d/hooks/, which Omarchy's pacman.conf template does not touch; the script is
+# /usr/local/lib/omarchy-k114s/titlebars-abi-check (--pre). Installed by install.sh in the same
+# root session as the plugin package. pacman reports a downgrade as an Upgrade, so this stops
+# -Syyuu, -Suu and -S --needed that would bring the channel's plugin back, before anything changes.
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Target = omarchy-hyprland-titlebars
+Target = hyprland-m5
+
+[Action]
+Description = K114s: checking that the titlebars plugin and hyprland-m5 are not changed apart...
+When = PreTransaction
+Exec = /usr/local/lib/omarchy-k114s/titlebars-abi-check --pre
+AbortOnFail
+NeedsTargets
