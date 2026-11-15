@@ -62,6 +62,27 @@ if [[ -z $ROOT ]] && command -v systemctl >/dev/null; then
   fi
 fi
 
+# The user manager's merged units (a daemon-reload as the seat user is separate from the system one and
+# sudo cannot do it). Read-only. Only as the seat user on the real system; K114S_SYSTEMCTL replaces
+# systemctl (tests). A drop-in on disk that the user manager has not loaded is a tripwire like the system one.
+sc=${K114S_SYSTEMCTL:-systemctl}
+if [[ ( -z $ROOT || -n ${K114S_SYSTEMCTL:-} ) && $(id -u) != 0 ]] && command -v "$sc" >/dev/null; then
+  if ! "$sc" --user show -p Version >/dev/null 2>&1; then
+    say "unknown   no user manager reachable from here: run this as the seat user to check the user units"
+  else
+    wd=/etc/systemd/user/wireplumber.service.d/99-k114s-stage-a-tree.conf
+    if [[ -e $ROOT$wd ]]; then
+      if "$sc" --user cat wireplumber.service 2>/dev/null | grep -q '^ExecCondition=/usr/local/lib/omarchy-k114s/audio/tree-check$'; then good "systemctl --user cat wireplumber: the tree check is loaded"
+      else trip "systemctl --user cat wireplumber: the tree check is installed but not loaded (run: systemctl --user daemon-reload)"; fi
+    fi
+    for u in speakerguardd-v2-graph speakerguardd-v2-session; do
+      [[ -e $ROOT/usr/lib/systemd/user/$u.service ]] || continue
+      if "$sc" --user cat "$u.service" 2>/dev/null | grep -q "^$g\$"; then good "systemctl --user cat $u: the merged unit carries the guard"
+      else trip "systemctl --user cat $u: the merged unit does not carry the guard (run: systemctl --user daemon-reload)"; fi
+    done
+  fi
+fi
+
 # the tree that booted: the Stage A card, or no sound node (the same check WirePlumber runs before it starts)
 tc=$(dirname -- "${BASH_SOURCE[0]}")/tree-check
 if out=$("$tc" --root "$ROOT" 2>&1); then good "device tree: $out"; else trip "device tree: ${out//$'\n'/; }"; fi

@@ -111,12 +111,17 @@ r=$(mk); out=$(inst "$r" "$newf"); rc=$?
 ok "creates a file: refused, nothing installed" "$rc:$(test -e "$r/usr/bin/omarchy-new" && echo there || echo gone):$(test -e "$r/etc/pacman.d/hooks/03-k114s-omarchy-patches.hook" && echo hook || echo nohook)" "1:gone:nohook"
 foreign=$BASE/foreign; mkdir -p "$foreign"; mkpatch "$foreign/0001-foreign.patch" omarchy-unowned 'a\n' 'b\n'
 r=$(mk); printf 'a\n' > "$r/usr/bin/omarchy-unowned"; out=$(inst "$r" "$foreign"); rc=$?
-ok "file no package installed: refused" "$rc:$(grep -c 'neither omarchy nor omarchy-dev installed' <<<"$out")" "1:1"
+ok "file no package installed: refused" "$rc:$(grep -c 'none of omarchy, omarchy-dev and omarchy-mac installed' <<<"$out")" "1:1"
 # A file another omarchy-* package owns (the hook does not watch it): refused too.
 r=$(mk); d=$r/var/lib/pacman/local/omarchy-settings-dev-1-1; mkdir -p "$d"
 echo "./usr/bin/omarchy-unowned time=1.0 size=2 sha256digest=$(printf 'a\n' | sha256sum | cut -c1-64)" | gzip > "$d/mtree"
 printf 'a\n' > "$r/usr/bin/omarchy-unowned"; out=$(inst "$r" "$foreign"); rc=$?
 ok "file of another omarchy package: refused" "$rc:$(cat "$r/usr/bin/omarchy-unowned")" "1:a"
+# A file omarchy-mac owns (the platform data and audio rules): accepted, and applied.
+r=$(mk); d=$r/var/lib/pacman/local/omarchy-mac-1-1; mkdir -p "$d"
+echo "./usr/bin/omarchy-unowned time=1.0 size=2 sha256digest=$(printf 'a\n' | sha256sum | cut -c1-64)" | gzip > "$d/mtree"
+printf 'a\n' > "$r/usr/bin/omarchy-unowned"; out=$(inst "$r" "$foreign"); rc=$?
+ok "file of omarchy-mac: accepted and applied" "$rc:$(cat "$r/usr/bin/omarchy-unowned")" "0:b"
 
 # Applied by the first version of this tool (no records): the next run adopts it, once.
 legacy() { local r; r=$(mk); inst "$r" >/dev/null; rm -f "$r"/usr/local/lib/omarchy-k114s/omarchy-patches/{*.applied,.records}; echo "$r"; }
@@ -181,7 +186,7 @@ ok "no patch tool: installer refuses" "$rc:$(grep -c 'GNU patch is not installed
 H=$L/03-k114s-omarchy-patches.hook
 ok "hook: Exec is the installed applier" "$(sed -n 's/^Exec = //p' "$H")" /usr/local/lib/omarchy-k114s/omarchy-patches-apply
 ok "hook: after the transaction" "$(sed -n 's/^When = //p' "$H")" PostTransaction
-ok "hook: both package names" "$(sed -n 's/^Target = //p' "$H" | tr '\n' ' ')" "omarchy omarchy-dev "
+ok "hook: all three package names" "$(sed -n 's/^Target = //p' "$H" | tr '\n' ' ')" "omarchy omarchy-dev omarchy-mac "
 ok "hook: cannot abort a transaction" "$(grep -c AbortOnFail "$H")" 0
 
 # The real patches against the Omarchy revision this machine runs.

@@ -33,7 +33,7 @@ owner's boot of a tree that includes it.
 | `build/k114s-adt.py` | reads this Mac's Apple device tree on Linux (root); writes the PMP file |
 | `linux/audio/` | ALSA UCM profiles, WirePlumber rules, the microphone filter, unit conditions, installer |
 | `tests/lint-sound-dtb.py` | the speaker-safety lint for a compiled tree |
-| `tests/test-sound.sh` | all software tests for this candidate (40 checks) |
+| `tests/test-sound.sh` | all software tests for this candidate (57 checks) |
 | `tests/lint-dtb.py` | one line changed: with the jack codec, AP pins 134 and 139 are expected next to 80 |
 
 ## How the pieces fit
@@ -266,7 +266,7 @@ files are inert without the `/sound` node.
 
 ## Tests run (agent-run, 2026-11-14, on this Mac as an unprivileged user)
 
-- `tests/test-sound.sh` against the base tree with dtc 1.8.1 and gcc's preprocessor: 40 of 40.
+- `tests/test-sound.sh` against the base tree with dtc 1.8.1 and gcc's preprocessor: 57 of 57.
   It covers the ADT reader on a made-up ADT (9), compile and lint of both trees (4), a build that
   must fail without the PMP file (1), ten unsafe trees the lint must refuse (10), the UCM
   profiles through `alsaucm` (4), the installer in a fake root (10), and the installed

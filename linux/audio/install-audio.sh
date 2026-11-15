@@ -144,9 +144,14 @@ prune_dirs() {
   if (( ${#keep[@]} )) && [[ -d $STATE ]]; then printf '%s\n' "${keep[@]}" > "$STATE/dirs"; fi
 }
 reload() {
-  [[ -z $ROOT ]] || return 0
-  systemctl daemon-reload
-  say "systemd reloaded. Check the guard: systemctl cat speakersafetyd | grep ConditionPathExists"
+  # sudo cannot reach the seat user's manager: the user units (WirePlumber's tree check, the two v2 user
+  # guards) only take effect after the user's own daemon-reload, so every path that touches them says so
+  if [[ -z $ROOT ]]; then
+    systemctl daemon-reload
+    say "systemd reloaded. Check the guard: systemctl cat speakersafetyd | grep ConditionPathExists"
+  fi
+  say "user units: as the seat user (not through sudo) run: systemctl --user daemon-reload"
+  say "  then check: systemctl --user cat wireplumber speakerguardd-v2-graph  (bash linux/audio/speaker-readiness.sh does it too)"
 }
 
 if [[ $mode == --remove-guard ]]; then
@@ -188,5 +193,5 @@ fi
 reload
 if [[ -z $ROOT && $mode == install ]]; then
   say "The sound cards themselves need the r3 kernel and device tree: after that boot,"
-  say "log out and in again (or: systemctl --user daemon-reload; systemctl --user restart wireplumber pipewire pipewire-pulse)."
+  say "log out and in again (or, after the daemon-reload above: systemctl --user restart wireplumber pipewire pipewire-pulse)."
 fi
