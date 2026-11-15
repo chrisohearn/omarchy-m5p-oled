@@ -1,0 +1,13 @@
+#!/bin/sh
+# K114s: restart the desktop with a FRESH user manager (run as root).
+# A plain display-manager restart is not enough: uwsm restores the user manager's environment to
+# what it was before the first session of this boot (its env_pre file), so renderer settings from
+# the environment generator never change until the user manager itself restarts.
+user=${1:-$(loginctl list-sessions --no-legend 2>/dev/null | awk '$4 == "seat0" { print $3; exit }')}
+[ -n "$user" ] || { echo "gpu-desktop-restart: no seat0 user found; pass the user name" >&2; exit 1; }
+uid=$(id -u "$user") || exit 1
+systemctl stop sddm
+loginctl terminate-user "$user" 2>/dev/null
+i=0; while [ -d "/run/user/$uid/systemd" ] && [ $i -lt 20 ]; do sleep 1; i=$((i+1)); done
+sleep 2
+systemctl start sddm
