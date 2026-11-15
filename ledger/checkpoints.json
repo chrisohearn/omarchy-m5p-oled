@@ -69,8 +69,16 @@
       "space_plan": "live ESP 138,522,624 bytes free: peak 120,954,880 + 8 MiB margin; 21.9 MB free afterwards",
       "staged": "2026-11-14",
       "applied": "2026-11-14T20:46:41Z by the owner from macOS (check passed: 138.5 MB free, peak 121.0 MB + 8.4 MB margin; 17 files written and verified by hash; free afterwards 22 MB). Variant r1, Stage 2 r1, default entry 1.",
-      "awaiting_reboot": "yes: next boot of the repair entry tests trackpad, Wi-Fi, USB-C",
-      "hardware_verified": null
+      "awaiting_reboot": null,
+      "hardware_verified": "2026-11-14, two boots of the repair entry (13:51 and 15:12 MST), kernel K114S-R1, Stage 2 45a5dbef: trackpad works with fix B / r1 (owner-observed); Wi-Fi associates on wlan0 (agent-run); Bluetooth controller hci0 present and powered, nothing paired (agent-run); SMC fans and voltages read, several TAO* temperature keys read -127 C (agent-run); battery charge and cycle count read (agent-run); 18 CPUs online (agent-run). NOT working: no USB host controller registers although the r1 tree enables two ports (agent-run); no sound card; r1a and gp1c variants not tried",
+      "linux_persist": "applied 2026-11-14 14:32 MST, after the Edge refresh incident (docs/incident-2026-11-14-edge-refresh.md); holds since extended on the machine with omarchy-hyprland-titlebars, limine, asahi-fwextract, asahi-scripts"
+    },
+    {
+      "id": "edge-refresh-recovery",
+      "what": "Recovery from the 14:11 Edge channel refresh that downgraded eight packages and overwrote Stage 2 (docs/incident-2026-11-14-edge-refresh.md)",
+      "applied": "2026-11-14 14:22-15:10 MST by the agent, in Linux, no reboot in between",
+      "hardware_verified": "2026-11-14 15:12 MST: the Mac rebooted into the repair entry with the restored Stage 2 and packages (agent-run: hashes before reboot, uname -v, wlan0 after)",
+      "note": "The standard UKI (rebuilt from the repair kernel, sha256 5534263077781a9f...) has not been booted. The EFI partition has 88 MB free; the space guard refuses package transactions until one UKI goes"
     },
     {
       "id": "r3",
@@ -94,5 +102,13 @@
       "awaiting_reboot": null,
       "hardware_verified": null
     }
-  ]
+  ],
+  "owner_decisions": {
+    "recorded": "2026-11-14, answered by the owner in the agent's question dialogs (no ledger server on this machine)",
+    "scope": "stable and update-safe, plus building the next kernel on the Mac in the same run; then 'I want the Apple hardware working'",
+    "upstream": "reports and pull requests go out from the owner's account without per-item approval, under UPSTREAM.md",
+    "hold_release": "held packages are released automatically once the channel's version carries the K114s fix",
+    "channel": "Edge; omarchy-dev stays installed",
+    "hardware_acceptance": "reboots and hardware observations are the owner's"
+  }
 }
