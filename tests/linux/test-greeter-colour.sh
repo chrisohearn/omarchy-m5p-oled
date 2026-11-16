@@ -33,4 +33,22 @@ sed 's#--config /usr/share/sddm/hyprland.lua#--config /etc/sddm/hyprland-k114s.l
 bash "$S" --check >/dev/null 2>&1; ok "hand-installed state: --check passes" $? 0
 out=$(bash "$S" 2>&1); ok "hand-installed state: --install says already installed, changes no byte and makes no .bak" "$? $(echo "$out" | grep -c 'already installed') $(sum "$C")$(sum "$MY") $(ls "$C".* 2>/dev/null | wc -l)" "0 1 $hand 0"
 bash "$S" --undo >/dev/null 2>&1; ok "hand-installed state: --undo points the conf back at the stock file and removes the copy" "$(grep -c -F -- '--config /usr/share/sddm/hyprland.lua' "$C") $(grep -c -F -- '--config /etc/sddm/hyprland-k114s.lua' "$C") $(test -e "$MY"; echo $?)" "1 0 1"
+# put() (#141): a staging write that fails after partial output leaves the target and no staging file; the mode fallback still works
+putfn=$(awk '/^put\(\) \{/ { p = 1 } /^case / { p = 0 } p' "$S")   # from put() to the case statement that follows it
+T=$BASE/put; mkdir -p "$T"; printf 'original\n' > "$T/f"; chmod 600 "$T/f"; before=$(sum "$T/f")
+( die() { exit 1; }; cat() { printf 'partial'; return 1; }; eval "$putfn"; echo new | put "$T/f" ) 2>/dev/null; rc=$?
+ok "put: a failed staging write stops, keeps the target and leaves no staging file" "$rc $(sum "$T/f") $(ls "$T" | wc -l)" "1 $before 1"
+( die() { exit 1; }; eval "$putfn"; echo new | put "$T/f" ); rc=$?
+ok "put: a good write replaces the target and keeps its mode" "$rc $(command cat "$T/f") $(stat -c %a "$T/f")" "0 new 600"
+( die() { exit 1; }; eval "$putfn"; echo fresh | put "$T/g" ); rc=$?
+ok "put: a new file gets mode 644 (the fallback)" "$rc $(command cat "$T/g") $(stat -c %a "$T/g") $(ls "$T" | wc -l)" "0 fresh 644 2"
+# the callers (#141 review): a failed write in --install or --undo stops the script before the conf is repointed or the copy removed
+mk=$BASE/mkbin; mkdir -p "$mk"; real=$(command -v mktemp)
+printf '#!/bin/sh\ncase "$1" in *"$FAIL_STAGE"*) exit 1 ;; esac\nexec %s "$@"\n' "$real" > "$mk/mktemp"; chmod +x "$mk/mktemp"
+rm -rf "$K114S_SDDM_ROOT/etc/sddm" "$C".*; cp "$L/gpu-desktop/70-k114s-greeter-software.conf" "$C"; c0=$(sum "$C")
+PATH=$mk:$PATH FAIL_STAGE=hyprland-k114s.lua bash "$S" >/dev/null 2>&1; rc=$?
+ok "install: a failed copy write stops, the conf still points at stock and no empty copy is left" "$rc $(sum "$C") $(test -e "$MY"; echo $?)" "1 $c0 1"
+bash "$S" >/dev/null 2>&1; i1=$(sum "$C")$(sum "$MY")
+PATH=$mk:$PATH FAIL_STAGE=70-k114s-greeter-software.conf bash "$S" --undo >/dev/null 2>&1; rc=$?
+ok "undo: a failed conf write stops and keeps both the conf and the copy" "$rc $(sum "$C")$(sum "$MY")" "1 $i1"
 finish "greeter colour tests"
