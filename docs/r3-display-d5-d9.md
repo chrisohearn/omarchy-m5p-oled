@@ -474,6 +474,7 @@ Expected: the last line with about 106.0 million free. Undo: C1b.
     cmp -s "$REPO/linux/brightness/systemd/k114s-first-boot.conf" "$bd/k114s-first-boot.conf" || stop "the brightness drop-in is not installed (I0, E7); nothing is armed"
     sudo test -e /var/lib/k114s-backlight/restore-enabled && stop "brightness restore is turned on; nothing is armed"
     [ "$(grep -c -E '^hl\.monitor\(\{ output = "eDP-[12]", mode = "preferred", position = "auto", scale = 2 \}\)$' ~/.config/hypr/monitors.lua)" = 2 ] || stop "monitors.lua does not have the eDP-1 and eDP-2 rules (I0); nothing is armed"
+    bash "$REPO/linux/display/k114s-dcp-colour" --check >/dev/null 2>&1 || stop "the DCP colour fix is not in monitors.lua (section 4a: bash $REPO/linux/display/k114s-dcp-colour); nothing is armed"
     [ "$(sudo sed -n 1p /boot/efi/aura-try)" = spent ] || stop "aura-try does not read spent; nothing is armed"
     # F15: the session stays awake through the window; what it was is kept once, for D9x
     sudo test -e "$D/idle-before" || omarchy-toggle-idle --status | jq -r .enabled | sudo tee "$D/idle-before" >/dev/null
@@ -712,7 +713,7 @@ Record `T3 PASSED` (D5, D7, D8, G6a, G6b) in the recovery log with the start lev
 **T4a. Drop the mask and arm, from the T3 boot, after D5 and D7 passed.**
 
     (
-    : "${K:?STOP: set K, REPO, D, R5, RT and DO first (section 3)}" "${D:?STOP: set D first}"
+    : "${K:?STOP: set K, REPO, D, R5, RT and DO first (section 3)}" "${REPO:?STOP: set REPO first}" "${D:?STOP: set D first}"
     findmnt /boot/efi >/dev/null || { echo "STOP: /boot/efi is not mounted"; exit 1; }
     stop() { echo "STOP: $*"; exit 1; }
     B5=90b351377d6fcbad00ddc4c2fb74fce4313dd7fa5f4978ba895a7c41be523e30; GPU=9825a10317866865b49d26bc1df2d0d04a818d385ca62c1a3ce81d96f3d6b8fc
@@ -723,6 +724,7 @@ Record `T3 PASSED` (D5, D7, D8, G6a, G6b) in the recovery log with the start lev
     case $(uname -r) in 7.3.0-17.v272-11-k114s-r3b-ARCH | 7.3.0-17.v272-4-k114s-r3a-ARCH) ;; *) stop "an unexpected kernel; nothing is armed" ;; esac
     [ "$(systemctl is-active snapper-cleanup.timer limine-snapper-sync.service snapper-cleanup.service | sort -u)" = inactive ] || stop "the snapshot sync runs (E12): block F's stop lines first; nothing is armed"
     [ "$(sudo sha256sum /boot/efi/m1n1/boot-ctxr.bin | cut -c1-64)" = $GPU ] || stop "the configured Stage 2 is not P's file; nothing is armed"
+    bash "$REPO/linux/display/k114s-dcp-colour" --check >/dev/null 2>&1 || stop "the DCP colour fix is not in monitors.lua (section 4a: bash $REPO/linux/display/k114s-dcp-colour); nothing is armed"
     [ "$(sudo sha256sum /boot/efi/$S2 | cut -c1-64)" = $B5 ] || stop "$S2 is not 90b35137...; nothing is armed"
     [ "$(sudo sed -n 1p /boot/efi/aura-try)" = spent ] || stop "aura-try does not read spent; nothing is armed"
     [ -e /usr/lib/modprobe.d/aurora-m5-vrr.conf ] && grep -q -x 'options appledrm fw27_panel_vrr=1' /usr/lib/modprobe.d/aurora-m5-vrr.conf || stop "the installed aurora-m5-vrr.conf is not the J714s file (fw27_panel_vrr=1) the mask replaces; nothing is armed"
@@ -832,6 +834,7 @@ block P.
     B5=90b351377d6fcbad00ddc4c2fb74fce4313dd7fa5f4978ba895a7c41be523e30; BT=5b6b83c8cd5e59333182f6ca37f22b1e99bd029daa1342d186daee096b292fda
     PINL=beceb683b63a6d421ce58061a55c14a6d09e0381a23c1a543df55f4cc8007392; GPU=9825a10317866865b49d26bc1df2d0d04a818d385ca62c1a3ce81d96f3d6b8fc
     for m in T3-booted T4-booted D5-passed D7-passed G6b-passed M9-passed; do sudo test -s "$D/$m" || stop "no $D/$m: that gate has not passed (section 2, F5)"; done
+    bash "$REPO/linux/display/k114s-dcp-colour" --check >/dev/null 2>&1 || stop "the DCP colour fix is not in monitors.lua (section 4a: bash $REPO/linux/display/k114s-dcp-colour); nothing was changed"
     for s in D6 D8; do
       o=; for r in passed failed skipped; do sudo test -s "$D/$s-$r" && o=$r; done
       [ -n "$o" ] || stop "no outcome recorded for $s (passed, failed or skipped: write $D/$s-skipped to skip it on purpose)"
@@ -1047,6 +1050,7 @@ checked with block P9 and, as the user in the desktop, `k114s-display-check.sh -
       sudo diff -r -q "$D/limine_history.before-window" "/boot/efi/$(cat /etc/machine-id)/limine_history" >/dev/null || stop "limine_history changed since W0: block Xs, then block C9 again"
     fi
     [ "$(uname -r)" = $REL ] || stop "this boot is $(uname -r), not r3b"
+    bash "$REPO/linux/display/k114s-dcp-colour" --check >/dev/null 2>&1 || stop "the DCP colour fix is not in monitors.lua (a black screen on a DCP boot: bash $REPO/linux/display/k114s-dcp-colour, then restart Hyprland)"
     uname -v | grep -q 'K114S-R3B-B1' || stop "this kernel is not the brightness build (uname -v: $(uname -v))"
     [ "$(tail -c +5 /sys/firmware/efi/efivars/LoaderEntrySelected-$BLI | iconv -f UTF-16LE -t UTF-8 | tr -d '\0')" = Omarchy.linux-k114s-r3b ] || stop "Limine did not start Omarchy.linux-k114s-r3b"
     [ -e /sys/firmware/efi/efivars/LoaderEntryOneShot-$BLI ] && stop "a one-shot request is pending: this was not a default boot"
@@ -1280,6 +1284,47 @@ acknowledgements so a later window cannot reuse them: `sudo rm -f /var/lib/k114s
     )
 
 Expected: as the first runbook's C2.
+
+### 4a. Colour management and the black panel (found in boot 1, 2026-11-15)
+
+**Finding.** On every boot where the display coprocessor (DCP, `appledrm`) drove the panel, the desktop was black until
+Hyprland's colour management was turned off (`render:cm_enabled = false`). The connector reported `Colorspace BT2020_RGB` while
+colour management was on (agent-run read). `modetest` test patterns in `XR24` and `AR24` lit the panel (owner-observed), so
+the hand-off, the scanout and the panel were fine; and the desktop with `cm_enabled = false` lit it too (owner-observed).
+Brightness writes had reached the panel all along: the D5 ladder read back correctly (agent-run) and the owner saw the panel
+dim and recover (owner-observed), so "black" was never a zero-brightness panel. Root cause: Hyprland's colour-management
+path (monitor preset `edid`) produced all-black frames on this panel. **Evidence label: owner-observed for the picture,
+agent-run for the connector property; the Hyprland-side mechanism is not read in source and stays unknown.**
+
+**Correction to this runbook's start.** T2 (the first window's hand-off) was **agent-checked only**: its checks read the
+device tree, the loader log, the kernel log, the connector and the compositor's state, and the owner never saw its picture. The
+first line of this document and F5 call T2 "passed" for the hand-off, which stays true for what those reads prove; they could
+not show a black picture, and the black screens seen afterwards were not a failed hand-off.
+
+**The fix** is `linux/display/dcp-colour.lua`, added to `monitors.lua` by `linux/display/k114s-dcp-colour` (user session, no
+sudo, no reload, Hyprland reads it at its next start):
+
+    if os.getenv("ASAHI_M5_BRINGUP") == "1" then hl.config({ render = { cm_enabled = false } }) end
+
+`ASAHI_M5_BRINGUP=1` is printed by the user-environment generator `60-aurora-m5-display` only when
+`/dev/dri/by-path/platform-display-subsystem-card` exists, so on a simpledrm boot the line does nothing. Install:
+`bash "$REPO/linux/display/k114s-dcp-colour"`. It is idempotent, keeps the file as it was in `monitors.lua.k114s-dcp-colour.bak`
+(first install only), replaces a changed block, and prints where it wrote. Check: `--check` (exit 0 when the block is there and
+equal). Undo: `--undo` removes the block and leaves the backup. T3a, T4a, D9a and C9 stop when `--check` fails (nothing armed,
+nothing written; C9 writes no marker).
+
+**Boot 1 results (2026-11-15, T3, kernel r3b.b1, with the fix).**
+
+| Item | Result | Label |
+| --- | --- | --- |
+| Desktop on the DCP at 3024x1986, 120 Hz | seen | owner-observed (picture), agent-run (mode read) |
+| T3b | 22 ok, 0 BAD | agent-run |
+| D5 ladder | read back; the owner saw the panel dim and recover | agent-run, owner-observed |
+| D7 DPMS off and on, three times | panel went off and woke each time | owner-observed |
+| D8 night light on and off | no DCP crash line | agent-run |
+| Look: colours, text, movement | colours normal, text sharp, movement smooth | owner-observed |
+| Notch | covered some text: the cutout overlay (patch 0003) is now installed; not looked at again yet | owner-observed, then unknown |
+| G6b | **stopped**: an initramfs built from this boot (`mkinitcpio -k 7.3.0-17.v272-11-k114s-r3b-ARCH`) contains `appledrm`, which blocks D9 (F16) | agent-run |
 
 ## 5. Ways back
 

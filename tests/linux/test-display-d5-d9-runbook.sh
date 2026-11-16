@@ -34,7 +34,7 @@ w("r3b1.pkg", os.urandom(700))
 PY
 chmod 644 "$W/fake/"*
 # the hardware wrapper of D5: the real k114s-backlight-check, with the two host-dependent lines (the device-tree floor and the DRM driver) as on the K114s
-mkdir -p "$W/repo/linux/brightness"
+mkdir -p "$W/repo/linux/brightness" "$W/repo/linux/display"; cp "$REPO_DIR"/linux/display/* "$W/repo/linux/display/"
 cat > "$W/repo/linux/brightness/k114s-backlight-check" <<SH
 #!/bin/bash
 export K114S_BL_KLOG=\$FAKE_W/klog
@@ -135,6 +135,7 @@ fresh2() { # the Mac as window 1 left it (I0's files in place), the build area, 
   printf 'options appledrm fw27_panel_vrr=1\n' > "$W/usrmodprobe/aurora-m5-vrr.conf"; printf 'options appledrm fw27_panel_vrr=0\n' > "$W/modprobe/aurora-m5-vrr.conf"
   mkdir -p "$W/systemd/systemd-backlight@backlight:apple-panel-bl.service.d"; cp "$REPO_DIR/linux/brightness/systemd/k114s-first-boot.conf" "$W/systemd/systemd-backlight@backlight:apple-panel-bl.service.d/"
   printf 'hl.monitor({ output = "eDP-2", mode = "preferred", position = "auto", scale = 2 })\n' >> "$W/home/.config/hypr/monitors.lua"
+  HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" >/dev/null   # the DCP colour fix (section 4a), as the root installs it before boot 1
   echo 500 > "$BLD/brightness"; echo 500 > "$BLD/actual_brightness"; echo 1000 > "$BLD/max_brightness"; echo platform > "$BLD/type"; echo linear > "$BLD/scale"; : > "$BLD/writes.log"
   echo 1 > "$W/sys/class/drm/card2-eDP-1/vrr_capable"; echo Y > "$W/sys/module/appledrm/parameters/fw27_panel_vrr"
   echo '[    5.1] apple-drm display-subsystem: brightness requests below 10 nits are raised to 10 nits' > "$W/klog"
@@ -212,6 +213,7 @@ session0 s5; rm "$D/N-acked-1"; run <<< "$bT3a"; ok "T3a: without the acknowledg
 session0 s5; FAKE_IDLEFAIL=1 run <<< "$bT3a"; ok "T3a: a stay-awake mode that does not turn on stops, nothing armed" "$rc $(ls "$W/efivars" | grep -c LoaderEntryOneShot) $(sed -n 1p "$W/esp/aura-try")" "1 0 spent"
 session0 s5; echo junk >> "$W/esp/m1n1/boot-ctxr-disp-bl.bin"; run <<< "$bT3a"; ok "T3a: a trial file that is not the D5 Stage 2 stops" "$rc $(ls "$W/efivars" | grep -c LoaderEntryOneShot)" "1 0"
 session0 s5; sed -i '/eDP-2/d' "$W/home/.config/hypr/monitors.lua"; run <<< "$bT3a"; ok "T3a: without the eDP-2 rule nothing is armed" "$rc $(echo "$out" | grep -c 'eDP-1 and eDP-2 rules')" "1 1"
+session0 s5; rm "$W/home/.config/hypr/monitors.lua.k114s-dcp-colour.bak"; HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" --undo >/dev/null; run <<< "$bT3a"; ok "T3a: without the DCP colour fix in monitors.lua nothing is armed" "$rc $(echo "$out" | grep -c 'DCP colour fix') $(ls "$W/efivars" | grep -c LoaderEntryOneShot)" "1 1 0"
 session0 s5; run <<< "$bT3a"; before=$(espstate); run <<< "$bT3a"; ok "T3a: a second arm while armed stops, aura-try unchanged" "$rc $(sed -n 1p "$W/esp/aura-try")" "1 armed"
 
 # --- the T3 boot: block F, T3b, then D5, D7, D7b, D8 ---------------------------------------------------------------------------
@@ -271,6 +273,7 @@ ok "T4a: exit 0, the mask is out and its copy kept, the one-shot names r3b, aura
   "0 1 1 Omarchy.linux-k114s-r3b armed m1n1/boot-ctxr-disp-bl.bin 1"
 alld57; rm "$D/N-acked-2"; FAKE_UNAME=$REL run <<< "$bT4a"; ok "T4a: without the acknowledgement of N (N-acked-2) nothing is armed, the mask stays and no reboot is scheduled" "$rc $(echo "$out" | grep -c 'N-acked-2') $(ls "$W/efivars" | grep -c LoaderEntryOneShot) $(test -e "$W/modprobe/aurora-m5-vrr.conf"; echo $?)" "1 1 0 0"
 alld57; rm "$D/D7-passed"; FAKE_UNAME=$REL run <<< "$bT4a"; ok "T4a: without D7 nothing is armed and the mask stays" "$rc $(test -e "$W/modprobe/aurora-m5-vrr.conf"; echo $?) $(ls "$W/efivars" | grep -c LoaderEntryOneShot)" "1 0 0"
+alld57; rm "$W/home/.config/hypr/monitors.lua.k114s-dcp-colour.bak"; HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" --undo >/dev/null; FAKE_UNAME=$REL run <<< "$bT4a"; ok "T4a: without the DCP colour fix nothing is armed and the mask stays" "$rc $(echo "$out" | grep -c 'DCP colour fix') $(test -e "$W/modprobe/aurora-m5-vrr.conf"; echo $?)" "1 1 0"
 alld57; : > "$W/usrmodprobe/aurora-m5-vrr.conf"; FAKE_UNAME=$REL run <<< "$bT4a"; ok "T4a: an installed aurora-m5-vrr.conf that is not the J714s file stops, the mask stays" "$rc $(test -e "$W/modprobe/aurora-m5-vrr.conf"; echo $?)" "1 0"
 alld57; printf 'options appledrm fw27_panel_vrr=1\n# x\n' > "$W/modprobe/aurora-m5-vrr.conf"; FAKE_UNAME=$REL run <<< "$bT4a"; ok "T4a: a file that is not the mask is not touched" "$rc $(grep -c '# x' "$W/modprobe/aurora-m5-vrr.conf")" "1 1"
 alld57; run <<< "$bT4a"; ok "T4a: a second run after the mask is gone re-arms from the kept copy (the mask file stays out)" "$rc $(test -e "$W/modprobe/aurora-m5-vrr.conf"; echo $?)" "0 1"
@@ -310,6 +313,7 @@ ok "D9a: exit 0, D6 and D8 outcomes shown, D9a-passed written" "$rc $(echo "$out
 ok "D9a: the real Stage 2 hook, in a throw-away root, wrote the D9 file byte for byte (that is what it checks), and wrote nothing on the fake ESP" "$(echo "$out" | grep -c '^D9a: ') $(sum "$W/esp/m1n1/boot-ctxr.bin")" "1 $(sum "$W/fake/gpu.bin")"
 ready; rm "$D/G6b-passed"; run <<< "$bD9a"; ok "D9a: without G6b-passed it stops" "$rc $(test -e "$D/D9a-passed"; echo $?)" "1 1"
 ready; rm "$W/mkinitcpio.conf.d/99-k114s-no-appledrm.conf"; run <<< "$bD9a"; ok "D9a: without the no-appledrm drop-in installed it stops" "$rc $(echo "$out" | grep -c 'G6a') $(test -e "$D/D9a-passed"; echo $?)" "1 1 1"
+ready; rm "$W/home/.config/hypr/monitors.lua.k114s-dcp-colour.bak"; HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" --undo >/dev/null; run <<< "$bD9a"; ok "D9a: without the DCP colour fix it stops" "$rc $(echo "$out" | grep -c 'DCP colour fix') $(test -e "$D/D9a-passed"; echo $?)" "1 1 1"
 ready; rm "$D/M9-passed"; run <<< "$bD9a"; ok "D9a: without M9-passed it stops" "$rc $(test -e "$D/D9a-passed"; echo $?)" "1 1"
 ready; echo "M9 passed: tool 0000" > "$D/M9-passed"; run <<< "$bD9a"; ok "D9a: an M9 record that names another tool stops" "$rc $(echo "$out" | grep -c 'name the tool now staged')" "1 1"
 ready; rm "$D/D6-passed"; run <<< "$bD9a"; ok "D9a: no outcome for D6 stops; D6-skipped is accepted" "$rc $(echo "$out" | grep -c 'no outcome recorded for D6')" "1 1"
@@ -383,6 +387,7 @@ promote; dboot; FAKE_REPO=$FR run <<< "$bC9"; dboot; FAKE_REPO=$FR run <<< "$bC9
 promote; dboot; FAKE_UNAME=7.3.0-17.v272-4-k114s-r3a-ARCH FAKE_REPO=$FR run <<< "$bC9"; ok "C9: an r3a boot stops" "$rc" 1
 promote; boot $REL m1n1/boot-ctxr-disp-bl.bin Omarchy.linux-k114s-r3b; run <<< "$bF"; FAKE_REPO=$FR run <<< "$bC9"; ok "C9: a boot that came through an aura-try trial stops" "$rc $(echo "$out" | grep -c 'aura-try trial')" "1 1"
 promote; dboot; FAKE_REPO=$FR FAKE_DCHECK=BAD run <<< "$bC9"; ok "C9: a BAD from the display check stops and leaves no marker" "$rc $(ls "$D" | grep -c '^C9-passed-')" "1 0"
+promote; dboot; rm "$W/home/.config/hypr/monitors.lua.k114s-dcp-colour.bak"; HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" --undo >/dev/null; FAKE_REPO=$FR run <<< "$bC9"; ok "C9: without the DCP colour fix it stops and leaves no marker" "$rc $(echo "$out" | grep -c 'DCP colour fix') $(ls "$D" | grep -c '^C9-passed-')" "1 1 0"
 promote; boot $REL "" Omarchy.linux-k114s; printf '1.0.0b13-g22b71758-dirty\0' > "$W/chosen/asahi,m1n1-stage2-version"; run <<< "$bF"; FAKE_REPO=$FR run <<< "$bC9"; ok "C9: Limine that started the r3a entry stops" "$rc $(echo "$out" | grep -c 'did not start Omarchy.linux-k114s-r3b')" "1 1"
 
 # --- the first update: U0 and U1 ----------------------------------------------------------------------------------------------------
