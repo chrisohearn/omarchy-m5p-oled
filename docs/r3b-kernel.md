@@ -59,7 +59,7 @@ changes. All agent-run.
 | `sleep-lid/0002` (devices below a kernel-trained port may leave D0, #1647) | **not needed on a K114s**, not carried | it exists for the K116s's second, kernel-trained port (SD reader). No tree of this repository enables the K114s SD reader (`dts/t6050-k114s-sd.dtsi` is a draft, included nowhere). Needed again only if that draft is enabled |
 | `sleep-lid/0003` (K114s admitted to s2idle) | **still needed**, re-cut to apply without 0001 and 0002: `r3b/0005` | forward fails and reverse fails (context from 0001/0002); the K114c is already admitted in the base, the K114s is not (`apple_pcie_check_adopted_s2idle`) |
 | `sleep-lid/0004`, `0005`, `0006` (#1688: eDP connector for a boot framebuffer marked `apple,internal-panel`; the K114/K116 dtsi line; binding) | **T6050-generic, missing, not needed to boot: send to betizzel** (section 7) | forward applies, reverse fails, no log hit |
-| `sleep-lid/0007` (#1615: unreadable battery manufacture date) | **T6050-generic, missing: send to betizzel** | forward applies; log none. It makes an unreadable manufacture date return `-ENODATA`, which the power-supply core skips. Observed on this K114s: 30 `manufacture_year ... -95` lines in five minutes (`docs/r3-sleep-lid.md`) |
+| `sleep-lid/0007` (#1615: unreadable battery manufacture date) | **T6050-generic, missing: send to betizzel** | forward applies; log none. It makes an unreadable manufacture date return `-ENODATA`, which the power-supply core skips. Observed on this K114s: 30 `manufacture_year ... -95` lines in five minutes (`docs/r3-sleep-lid.md`). Not carried in r3b to r3b.c1, which was wrong: it also decides whether a saved charge limit comes back at boot (section 10). Carried from r3b.c2 |
 | `sleep-lid/0008` (PMP power domains always on, #1789) | **in v272-11** (their 0028, same patch) | reverse applies cleanly; all 8 added lines present |
 | `sleep-lid/0009` (GPU mailbox receive by interrupt, `41c359da`, #1844) | **in v272-11** | log: merge `adb5a7e344` of #1844, commits `41c359da81` and `788441e089` are in the history. See risk 1 |
 | `display-gpu/0003` to `0006` (#1868: 120 Hz-only T6050 internal panel modes) | **in v272-11**, in upstream's merged shape | log: merge `1177fdf5f9` (#1868), `3176918ba2`, `84b3b93c04`, `10f14b7ff8`. The base scopes the gate with `dcp->hw.only_120hz_modes`, our `0006` did it with an fw-compat test: same behaviour, different lines (`0006` reverse applies; `0003` to `0005` differ in a few comment and condition lines only) |
@@ -337,3 +337,32 @@ connector stays `Unknown-1` (the `eDP-1` monitor rule and every `eDP-1 connected
 'magicmouse|report_size'` and pointer movement); the lid close tests are blocked by the connector.
 
 Packaging, `check-package.sh` and the Stage 2 builder are reusable as they are.
+
+## 10. r3b.c2: the battery fix the r3b series left out (2026-11-16)
+
+**Seen on hardware (owner session, 2026-11-16).** The charge limit was set to 80 % with `omarchy-battery-charge-limit 80`
+(the SMC took it: end 80, start 75; `/etc/udev/macsmc-battery.conf` holds `CHARGE_CONTROL_END_THRESHOLD=80`). After one
+reboot into r3b.c1 the control file read **100** again (agent-run). That boot logged `failed to report 'manufacture_year'
+property: -95` ten times or more, and `udevadm info` for `macsmc-battery` listed no properties beyond `DEVPATH` and
+`SUBSYSTEM`. So no udev rule ran for the battery, neither asahi-scripts' `93-macsmc-battery-charge-control` nor Omarchy's
+`94-omarchy-mac-battery-charge-limit`, and nothing restored the saved limit. The r3b.b1 boots before it log the same lines.
+r3a carries the fix (`sleep-lid/0007`, aurora-silicon/linux#1615), and r3b did not take it (section 1, "send to betizzel");
+since the D9 promotion r3b is what this Mac boots.
+
+**The fix.** `patches/linux/r3b-c2.series`: r3b.c1 plus `sleep-lid/0007`, unchanged (it applies to the r3b.c1 tree
+`08ddebb521` without fuzz). The release, the package name and the configuration stay; the version is `7.3.0.r3b.c2-1`, so it
+upgrades r3b.c1 in place. `PKGBUILD` refuses `K114S_CAND=r3b-c2` on a tree without the fix.
+
+| Check | Result | Label |
+| --- | --- | --- |
+| `git am` of `sleep-lid/0007` on r3b.c1 | head `ecbecd26ad`, tree `e078a06e67c5` | agent-run |
+| `K114S_LABEL=K114S-R3B-C2 kmake O=build/r3b-c2 Image modules dtbs` (full build, the r3b.c1 `.config`) | exit 0, no warning in `drivers/power/supply` or `drivers/gpu/drm/apple`; release `7.3.0-17.v272-11-k114s-r3b-ARCH` | agent-run |
+| `k114s-cmp-modules build/r3b-c2` against the installed r3b.c1 | 1972 of 1972 SAME: `macsmc-power` is built in (`CONFIG_MACSMC_POWER=y`), so only the Image differs | agent-run |
+| `K114S_CAND=r3b-c2 makepkg`, then `check-package.sh` against `linux-aurora` and `linux-k114s` | all passed (the brightness floor, the Display P3 default and the 500-nit cap are checked for every `r3b.c<N>`) | agent-run |
+
+Package (outside the repository, `$K114S_BUILD_ROOT/integrate/release-r3b-c2/`, with `SHA256SUMS`):
+`linux-k114s-r3b-7.3.0.r3b.c2-1-aarch64.pkg.tar.zst`, sha256 `57dfac86c2a51d73847a7e3e114fc1eb7b378282a73ca4b4c94ab5b6be8ed20f`.
+Install as r3b.c1 (`docs/r3-hdr.md`, section 6 step 1, and block P9 before and after); after the reboot,
+`charge_control_end_threshold` must read the saved value and the boot log must have no `-95` line. The way back is the r3b.c1
+package (`$K114S_BUILD_ROOT/integrate/release-r3b-c1/`) or the r3a entry.
+

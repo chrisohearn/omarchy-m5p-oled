@@ -30,5 +30,8 @@ r3b/0005-PCI-apple-qualify-the-K114s-for-suspend-to-idle-over.patch
 #       display-gpu/0009, 0010, sound/0001, usb/0001 (reverse-apply cleanly)
 #   not needed on a K114s (not carried):  sleep-lid/0001, 0002 (K116s, #1647; 0002 only for a kernel-trained second port)
 #   T6050-generic, missing in v272-11, the K114s boot does not need them (not carried, send to betizzel):
-#       sleep-lid/0004, 0005, 0006 (#1688, eDP connector for apple,internal-panel), sleep-lid/0007 (#1615,
-#       battery manufacture_year), sound/0002 (tas2764 bus quiet), sound/0003 (i2c-pasemi NACK)
+#       sleep-lid/0004, 0005, 0006 (#1688, eDP connector for apple,internal-panel), sound/0002 (tas2764 bus quiet),
+#       sound/0003 (i2c-pasemi NACK)
+#   sleep-lid/0007 (#1615, battery manufacture_year) was in this list, and that was wrong: without it the battery's
+#       uevent fails with -95, so udev never handles macsmc-battery and a saved charge limit is not restored at boot
+#       (seen on hardware, 2026-11-16). r3b.c2 carries it (patches/linux/r3b-c2.series).
