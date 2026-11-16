@@ -31,7 +31,7 @@ DCP's, so the aura #226 pin admits it.
   on the K116s, and a USB-C port controller logs read failures meanwhile
   (upstream-reported, K116s).
 - The K116s tree keeps the right port USB-only ("dcpext0's DisplayPort route through ATC2 stays
-  off") and describes no USB4 router (see `docs/r3-usb.md`), so there is no twin to copy.
+  off") and, like the K114s tree (see `docs/r3-usb.md`), describes no USB4 router, so there is no twin to copy.
 - The internal panel is not on DCP yet (D4 of `docs/r3-display-plan.md`). External display needs
   that first.
 
@@ -46,7 +46,7 @@ accepts.
 
 1. After D4 passes, prepare a disabled `dcpext` route for one port as a dts draft, tested with
    `tests/lint-display-gpu-dtb.py`; do not enable it by default (the 27.2 timeout above).
-2. Upstream: report K114s specifics on aura #226 (draft in the issue comment), watch linux
+2. Upstream: report K114s specifics on aura #226 (write the report first; the #23 comment only summarises the offline pass), watch linux
    #1921, #1806, #1829.
 3. Owner trial (needs an external-display tree): plug a USB-C monitor into the left-front port
    with `tests/hardware/k114s-plug-probe.sh`, watching for hangs. Until then there is nothing
