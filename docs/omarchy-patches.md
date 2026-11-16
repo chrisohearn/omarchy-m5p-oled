@@ -5,7 +5,7 @@ user-space scripts that this machine needs before Omarchy ships them. Each one i
 change that is still open, kept here as a patch with its authorship (see `NOTICE.md`).
 
 The Omarchy package (`omarchy`, or `omarchy-dev` on the Edge channel) owns most of
-`/usr/bin/omarchy-*`, and `omarchy-mac` (the Apple Silicon platform data and audio rules) owns a few files that patches 0003 and 0004 change, and every update replaces those files. So a fix made by hand there is silently lost on the next
+`/usr/bin/omarchy-*`. `omarchy-mac` (the Apple Silicon platform data and audio rules) owns a few files that patches 0003 and 0004 change. Every update replaces those files. So a fix made by hand there is silently lost on the next
 `omarchy update`. A pacman hook puts the patches back after every transaction that installs or
 upgrades the package, and stops reapplying them once they no longer fit.
 
@@ -41,7 +41,7 @@ picked up by the running bar: run `omarchy-restart-shell` once after installing 
 A patch may only change files the `omarchy`, `omarchy-dev` or `omarchy-mac` package installed (the three the hook
 watches), as recorded in the package database. The installer refuses one that creates or deletes a
 file (a file it created could later collide with one Omarchy ships and stop an update) or that changes
-a file neither package installed, such as one of `omarchy-settings-dev`'s.
+a file none of those three packages installed, such as one of `omarchy-settings-dev`'s.
 
 ## What the hook does after each update
 

@@ -42,6 +42,12 @@ run --restore "$bk"; ok "restore again: nothing is overwritten" "$rc $(echo "$ou
 echo tampered >> "$bk/files/m1n1/boot.bin.old"; rm -f "$X/boot/efi/m1n1/boot.bin.old"
 run --restore "$bk"; ok "restore: a backup that does not match its SHA256SUMS restores nothing" "$rc $(test -e "$X/boot/efi/m1n1/boot.bin.old"; echo $?)" "1 1"
 run --restore "$X/nothing"; ok "restore: a folder that is not a backup is refused" "$rc" 1
+mk; run --apply; bk2=$(ls -d "$X"/var/lib/k114s-recovery/esp-trim-* | head -1); s1=$(snap)
+mkdir -p "$bk2/files/vendorfw"; cp "$X/boot/efi/limine.conf" "$bk2/files/vendorfw/foreign"; cp "$bk2/SHA256SUMS" "$X/sums.orig"; (cd "$bk2/files" && sha256sum vendorfw/foreign) >> "$bk2/SHA256SUMS"
+run --restore "$bk2"; ok "restore: a backup holding a path the tool never saves restores nothing" "$rc $(echo "$out" | grep -c 'never saves')" "1 1"
+rm -rf "$bk2/files/vendorfw"; cp "$X/sums.orig" "$bk2/SHA256SUMS"; echo x > "$bk2/files/.Trashes/unlisted"
+run --restore "$bk2"; ok "restore: an unlisted file in an allowed folder restores nothing" "$rc $(echo "$out" | grep -c 'does not list')" "1 1"
+ok "restore refusals left the ESP as the apply left it" "$(snap)" "$s1"
 mk; unset K114S_NO_MOUNTCHECK; out=$(K114S_TEST=1 K114S_ROOT=$X bash "$TOOL" --apply 2>&1); rc=$?
 ok "a folder that is not a mount point is refused (no K114S_NO_MOUNTCHECK)" "$rc $(echo "$out" | grep -c 'not a mount point')" "1 1"
 ok "the ESP is untouched by that" "$(test -e "$X/boot/efi/.Trashes"; echo $?)" 0

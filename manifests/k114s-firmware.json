@@ -1,0 +1,262 @@
+{
+ "adt": [
+  {
+   "path": "/arm-io/isp0",
+   "role": "camera ISP; Linux file isp_*.dat (see files)",
+   "segment_names": [
+    "__TEXT",
+    "__DATA"
+   ],
+   "uuid": "980F533B-34EA-3FBA-878C-809F6AF57345"
+  },
+  {
+   "path": "/arm-io/mtp/iop-mtp-nub",
+   "role": "keyboard/trackpad; Linux file tpmtfw-k114s.bin",
+   "segment_names": [
+    "__TEXT",
+    "__DATA",
+    "__OS_LOG"
+   ],
+   "uuid": "F8E067B5-EEE6-3DEB-8198-7648D893B0E1"
+  },
+  {
+   "firmware_name": "k114saop",
+   "firmware_type": "scrt",
+   "path": "/arm-io/aop/iop-aop-nub",
+   "role": "audio/sensor coprocessor, board image k114saop; booted by iBoot, no file in /lib/firmware",
+   "segment_names": [
+    "__TEXT",
+    "__DATA",
+    "__ETEXT",
+    "__EDATA",
+    "__SHARED",
+    "__EDATA_S",
+    "__OS_LOG"
+   ],
+   "uuid": "5A958F9B-BCF4-33DF-8DAB-C016FCD829DE"
+  },
+  {
+   "path": "/arm-io/aop2/iop-aop2-nub",
+   "role": "second always-on coprocessor image; iBoot-loaded",
+   "segment_names": [
+    "__TEXT",
+    "__SHARED",
+    "__SHARED_DATA_RW",
+    "__DATA"
+   ],
+   "uuid": "5C35A408-3C00-3CC2-A690-0DA2C7330723"
+  },
+  {
+   "firmware_name": "t6050pmp",
+   "path": "/arm-io/pmp0/iop-pmp0-nub",
+   "role": "power management processor; tunables in the DT",
+   "segment_names": [
+    "__TEXT",
+    "__DATA",
+    "__ETEXT"
+   ],
+   "uuid": "7F8ACED5-3692-3328-9132-D10A2AEF56A3"
+  },
+  {
+   "firmware_name": "t6050smc",
+   "path": "/arm-io/smc/iop-smc-nub",
+   "role": "SMC; iBoot-loaded",
+   "uuid": "00000000-0000-0000-0000-000000000000"
+  },
+  {
+   "path": "/arm-io/dcp/iop-dcp-nub",
+   "role": "display coprocessor",
+   "segment_names": [
+    "__TEXT",
+    "__DATA",
+    "__SHARED",
+    "__SHARED_DATA_RW",
+    "__OS_LOG",
+    "unknown",
+    "unknown",
+    "unknown",
+    "unknown",
+    "unknown"
+   ],
+   "uuid": "3D6C8857-E6F1-3D2E-9DFF-587028AE0C6E"
+  },
+  {
+   "path": "/arm-io/scaler0",
+   "role": "scaler; not used by this kernel",
+   "segment_names": [
+    "__TEXT",
+    "__DATA"
+   ],
+   "uuid": "00000000-0000-0000-0000-000000000000"
+  },
+  {
+   "path": "/arm-io/scaler1",
+   "role": "scaler; not used by this kernel",
+   "segment_names": [
+    "__TEXT",
+    "__DATA"
+   ],
+   "uuid": "00000000-0000-0000-0000-000000000000"
+  },
+  {
+   "path": "/arm-io/ave0",
+   "role": "video encoder; not used by this kernel",
+   "segment_names": [
+    "__TEXT",
+    "__DATA"
+   ],
+   "uuid": "B05BC8EA-45A8-3A10-9825-C4E3A3EF1F64"
+  },
+  {
+   "path": "/arm-io/ane0",
+   "role": "neural engine; firmware preloaded by iBoot",
+   "segment_names": [
+    "__TEXT",
+    "__DATA"
+   ],
+   "uuid": "00A33A9D-4534-322F-B6F9-DAF254DD94D4"
+  },
+  {
+   "firmware_name": "GFX",
+   "path": "/arm-io/gfx-asc/iop-gfx-nub",
+   "role": "GPU ASC, from the GPU tree",
+   "segment_names": [
+    "__TEXT",
+    "__DATA",
+    "__DATA_SHARED_RO"
+   ],
+   "uuid": "8A2891FC-D479-37E8-895D-71B4D88ECB51"
+  },
+  {
+   "firmware_name": "GFX1",
+   "path": "/arm-io/gfx1-asc/iop-gfx1-nub",
+   "role": "GPU ASC, secondary",
+   "segment_names": [
+    "__TEXT",
+    "__DATA",
+    "__DATA_SHARED_RO"
+   ],
+   "uuid": "58FF964E-F74B-31C2-8179-3837D6ADA9C2"
+  }
+ ],
+ "built": "2026-11-15",
+ "files": [
+  {
+   "consumer": "dockchannel-hid multi-touch (K114s)",
+   "name": "apple/tpmtfw-k114s.bin",
+   "sha256": "fb7b969941a05b145626faa0ecd8951291cedf4b4ca71f23cd2b47ed9d165c9b",
+   "source": "extracted"
+  },
+  {
+   "consumer": "ambient-light sensor factory calibration (per unit)",
+   "name": "apple/aop-als-cal.bin",
+   "per_unit": true,
+   "source": "extracted"
+  },
+  {
+   "consumer": "ambient-light sensor raw factory calibration (per unit; Asahi asahi_firmware/als.py)",
+   "name": "apple/HmCA-*",
+   "per_unit": true,
+   "source": "extracted"
+  },
+  {
+   "consumer": "ASMedia USB controller",
+   "name": "asmedia/asm2214a-apple.bin",
+   "sha256": "691bb72aa21fe609fa7565c7f4478b078bb8c4161edd441326ce0c008e5f74bd",
+   "source": "extracted"
+  },
+  {
+   "consumer": "camera ISP (sensor-specific file; which one this Mac uses is not known)",
+   "name": "apple/isp_1820_01XX.dat",
+   "sha256": "23b7f76aca7e0ea8b462d8bc20a7a218b2d86015d62867fca6c5f38cdbf36e1d",
+   "source": "extracted"
+  },
+  {
+   "consumer": "camera ISP (sensor-specific file; which one this Mac uses is not known)",
+   "name": "apple/isp_1822_02XX.dat",
+   "sha256": "1292c640b07497fed42f035319462a212108fd4c3fba2f3883226ef31bd5107f",
+   "source": "extracted"
+  },
+  {
+   "consumer": "camera ISP (sensor-specific file; which one this Mac uses is not known)",
+   "name": "apple/isp_1921_01XX.dat",
+   "sha256": "b0c47560b845b40f8f096c82fac0f7adbaa171fbd10c84dc6a119593e2ab1d12",
+   "source": "extracted"
+  },
+  {
+   "consumer": "camera ISP (sensor-specific file; which one this Mac uses is not known)",
+   "name": "apple/isp_1922_02XX.dat",
+   "sha256": "9483c3fa909d86debb8924e07be094335be75c9b2c63b7dddcbb727f2483363d",
+   "source": "extracted"
+  },
+  {
+   "consumer": "camera ISP (sensor-specific file; which one this Mac uses is not known)",
+   "name": "apple/isp_8720_01XX.dat",
+   "sha256": "c398e4922eae2ad5acfdb312e4f9149482131440cfebda93fec0a38208fec12f",
+   "source": "extracted"
+  },
+  {
+   "consumer": "camera ISP (sensor-specific file; which one this Mac uses is not known)",
+   "name": "apple/isp_8723_01XX.dat",
+   "sha256": "d05e1befd2a54dba750a24709bf9bd2bbb55a158b91ce047810292b0c4e17ce4",
+   "source": "extracted"
+  },
+  {
+   "consumer": "AVD video decoder",
+   "name": "apple/avd-fw-v2-t0.bin",
+   "package_owned": true,
+   "sha256": "0c80d2a0ddf55e7e9b2f5cce61a21a7b74975a59b51d369901ebde4bbd5346ad",
+   "source": "avd-fw package (Asahi open replacement, not Apple bytes)"
+  },
+  {
+   "consumer": "AVD video decoder",
+   "name": "apple/avd-fw-v3-t0.bin",
+   "package_owned": true,
+   "sha256": "c75b02e1193e01fbcedb84acd655860358fdcf1e40530f97013f63fda9761e61",
+   "source": "avd-fw package (Asahi open replacement, not Apple bytes)"
+  },
+  {
+   "consumer": "AVD video decoder",
+   "name": "apple/avd-fw-v3-t1.bin",
+   "package_owned": true,
+   "sha256": "9bf43997a62a0629992f98e9d0a6b713d137fd97c5413c9adf341687ed1eb8a9",
+   "source": "avd-fw package (Asahi open replacement, not Apple bytes)"
+  },
+  {
+   "consumer": "AVD video decoder",
+   "name": "apple/avd-fw-v4-t0.bin",
+   "package_owned": true,
+   "sha256": "cb39bea536c7e7ddf995c38fdd49d4f58de03f17bae2efaf158045ddf04b0e44",
+   "source": "avd-fw package (Asahi open replacement, not Apple bytes)"
+  },
+  {
+   "consumer": "AVD video decoder",
+   "name": "apple/avd-fw-v5-t0.bin",
+   "package_owned": true,
+   "sha256": "beb8cfc4ffbd379aaa0216fbdce5863c7997c030c0b4ff35f22c135a2ba27b4e",
+   "source": "avd-fw package (Asahi open replacement, not Apple bytes)"
+  },
+  {
+   "consumer": "AVD video decoder",
+   "name": "apple/avd-fw-v5-t1.bin",
+   "package_owned": true,
+   "sha256": "d5201233a4f7703c9f473773d9e59937a3ed31be6be61ffd0e2f1ad438ba9e4d",
+   "source": "avd-fw package (Asahi open replacement, not Apple bytes)"
+  },
+  {
+   "consumer": "AVD video decoder",
+   "name": "apple/avd-fw-v5-t2.bin",
+   "package_owned": true,
+   "sha256": "e3c3c3fa8f7945953342b3de9a58dee0a70faab3dea44827b3a71c416beca440",
+   "source": "avd-fw package (Asahi open replacement, not Apple bytes)"
+  }
+ ],
+ "name": "K114s firmware inventory",
+ "note": "Hashes and names only. No Apple bytes. Files are checked at /lib/firmware/<name>; the ADT rows at the running ADT (build/k114s-adt.py firmware-report).",
+ "schema": 1,
+ "target": {
+  "adt_device": "k114sap",
+  "board_id": "0x14",
+  "model": "Mac17,13"
+ }
+}

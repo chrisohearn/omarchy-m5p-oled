@@ -17,7 +17,7 @@ while IFS= read -r f; do
   if [ -f "$f" ] && LC_ALL=C grep -qP '\x00' "$f" 2>/dev/null; then flag "not a text file: $f"; fi
 done <<< "$files"
 # 2. no private strings
-pattern='/Users/[a-z]|/home/[a-z][a-z0-9]*/|BEGIN [A-Z ]*PRIVATE KEY|gh[opsu]_[A-Za-z0-9]{20,}|[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.(me|com|net|org|io)\b|([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}'
+pattern='/Users/[a-z]|/home/[a-z][a-z0-9]*/|BEGIN [A-Z ]*PRIVATE KEY|gh[opsu]_[A-Za-z0-9]{20,}|[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.(me|com|net|org|io)\b|([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}|HmCA-[0-9]'
 hits=$(echo "$files" | tr '\n' '\0' | xargs -0 grep -n -I -E "$pattern" 2>/dev/null |
   grep -v -E 'noreply@anthropic\.com|users\.noreply\.github\.com|@localhost|build/check-publishable\.sh|git@github\.com' || true)
 if [ -n "$hits" ]; then echo "$hits" | cut -c1-200; flag "private-looking strings (above)"; fi
@@ -25,8 +25,11 @@ if [ -n "$hits" ]; then echo "$hits" | cut -c1-200; flag "private-looking string
 #     ${XDG_CONFIG_HOME:-~/.config}/omarchy-m5p-oled/publish-deny), so the list itself is never published
 deny=${K114S_PUBLISH_DENY:-${XDG_CONFIG_HOME:-$HOME/.config}/omarchy-m5p-oled/publish-deny}
 if [ -r "$deny" ]; then
+  n=0
   while IFS= read -r p; do
+    n=$((n+1))
     case "$p" in ''|'#'*) continue ;; esac
+    echo | grep -E -e "$p" >/dev/null 2>&1; [ $? -le 1 ] || { flag "the local deny list has a line that is not a valid extended regex (line $n)"; continue; }
     h=$(echo "$files" | tr '\n' '\0' | xargs -0 grep -l -I -E -e "$p" 2>/dev/null || true)
     [ -z "$h" ] || { echo "$h"; flag "a term from the local deny list is in the files above"; }
   done < "$deny"
