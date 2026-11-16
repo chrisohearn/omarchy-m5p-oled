@@ -70,7 +70,7 @@ const k114 = { width: 3024, height: 1986, transform: 0 };
 const out = [];
 out.push(["without the entry the K114s mode has no floor", floor(o, 3024, 1986, 2, k114) === 0]);
 out.push(["with it, the floor is 48 logical px at scale 2 (96 rows)", floor(p, 3024, 1986, 2, k114) === 48]);
-out.push(["the booted simpledrm framebuffer is named Unknown-1, which the eDP entry does not reach (the eDP line alone)", floor(B.parseCutouts(fs.readFileSync(process.argv[3], "utf8").toString()).filter(e => e.connector === "eDP"), 3024, 1986, 2, k114, 0, "Unknown-1") === 0]);
+out.push(["the booted simpledrm framebuffer is named Unknown-1, which the eDP entry does not reach (the patched eDP lines alone)", floor(p.filter(e => e.connector === "eDP"), 3024, 1986, 2, k114, 0, "Unknown-1") === 0]);
 out.push(["with the local Unknown-1 line the framebuffer gets the same 48 logical px floor", floor(p, 3024, 1986, 2, k114, 0, "Unknown-1") === 48]);
 out.push(["with it, before Hyprland reports a mode (logical size times Qt's ratio)", floor(p, 3024, 1986, 2, null) === 48]);
 out.push(["a calibrated [bar] notch-height replaces the derived one on a matching panel", floor(p, 3024, 1986, 2, k114, 44) === 44]);
