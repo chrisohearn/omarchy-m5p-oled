@@ -20,7 +20,11 @@ case ${1:-install} in
     [[ $(id -u) == 0 || -n $ROOT ]] || die "run with sudo"
     [[ -f $HERE/$CONF && -f $HERE/$NAMEF ]] || die "$HERE/$CONF or $HERE/$NAMEF is missing"
     case $(head -n 1 "$HERE/$NAMEF") in MacBook*) die "$HERE/$NAMEF starts with MacBook: UPower would still ignore the capacity" ;; esac
-    if cmp -s "$HERE/$CONF" "$DCONF" && cmp -s "$HERE/$NAMEF" "$DNAME"; then echo "k114s-upower-percentage: already installed"; exit 0; fi
+    if cmp -s "$HERE/$CONF" "$DCONF" && cmp -s "$HERE/$NAMEF" "$DNAME"; then
+      # the files may be in place from a run whose restart failed or was cut short: restart again, it is cheap
+      restart || die "already installed, but upower did not restart (systemctl status upower)"
+      echo "k114s-upower-percentage: already installed; upower restarted"; exit 0
+    fi
     mkdir -p "$(dirname "$DCONF")" "$(dirname "$DNAME")"
     install -m 0644 "$HERE/$NAMEF" "$DNAME"
     install -m 0644 "$HERE/$CONF" "$DCONF"

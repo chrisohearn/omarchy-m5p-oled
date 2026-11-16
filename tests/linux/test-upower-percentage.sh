@@ -19,7 +19,7 @@ run() { out=$(K114S_ROOT=$X bash "$TOOL" "$@" 2>&1); rc=$?; }
 run --check; ok "check before install fails" "$rc" 1
 run; ok "install: exit 0, both files are the repository's, mode 644" "$rc $(cmp -s "$CONF" "$DC"; echo $?) $(cmp -s "$NAMEF" "$DN"; echo $?) $(stat -c %a "$DC") $(stat -c %a "$DN")" "0 0 0 644 644"
 run --check; ok "check after install passes" "$rc $(echo "$out" | grep -c 'installed')" "0 1"
-run; ok "install twice: already installed" "$rc $(echo "$out" | grep -c 'already installed')" "0 1"
+run; ok "install twice: already installed, and the restart is tried again" "$rc $(echo "$out" | grep -c 'already installed; upower restarted')" "0 1"
 echo '# edited' >> "$DC"; run --check; ok "check: an edited drop-in is not installed" "$rc" 1
 run; ok "install replaces an edited drop-in" "$rc $(cmp -s "$CONF" "$DC"; echo $?)" "0 0"
 run --undo; ok "undo removes both files and nothing else" "$rc $(test -e "$DC"; echo $?) $(test -e "$DN"; echo $?) $(cat "$X/etc/systemd/system/upower.service.d/10-other.conf") $(cat "$X/etc/omarchy-k114s/stage2-trial")" "0 1 1 keep keep"
@@ -28,5 +28,8 @@ mkdir -p "$(dirname "$DC")"; echo '[Service]' > "$DC"; run --undo; ok "undo keep
 cp -r "$P" "$BASE/p2"; printf 'MacBook Pro\n' > "$BASE/p2/upower-product-name"
 out=$(K114S_ROOT=$X bash "$BASE/p2/k114s-upower-percentage" 2>&1); ok "install refuses a name that starts with MacBook" "$? $(test -e "$DN"; echo $?)" "1 1"
 run --bogus; ok "an unknown argument stops" "$rc" 1
-out=$(env -u K114S_ROOT bash "$TOOL" 2>&1); ok "install without root and without K114S_ROOT stops" "$? $(echo "$out" | grep -c 'run with sudo')" "1 1"
+# as root this would be a real install, so it runs only for a plain user
+if [ "$(id -u)" != 0 ]; then
+  out=$(env -u K114S_ROOT bash "$TOOL" 2>&1); ok "install without root and without K114S_ROOT stops" "$? $(echo "$out" | grep -c 'run with sudo')" "1 1"
+else echo "SKIPPED the no-root refusal (running as root: it would install for real)"; fi
 finish "upower percentage tests"
