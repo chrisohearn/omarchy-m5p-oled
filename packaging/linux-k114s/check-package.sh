@@ -17,7 +17,7 @@ set -u
 pkg=${1:?usage: check-package.sh PACKAGE.pkg.tar.zst [other kernel package] [Module.symvers]}; other=${2:-linux-aurora}
 symvers=${3:-${K114S_BUILD_ROOT:-$HOME/k114s-build}/build/${K114S_CAND:-r3a}/Module.symvers}
 here=$(cd "$(dirname "$0")" && pwd); w=$(mktemp -d); trap 'rm -rf "$w"' EXIT
-fail=0; ok() { echo "ok   $*"; }; no() { echo "FAIL $*"; fail=1; }
+fail=0; skipped=0; ok() { echo "ok   $*"; }; no() { echo "FAIL $*"; fail=1; }
 bsdtar -xf "$pkg" -C "$w" || { echo "cannot unpack $pkg"; exit 2; }
 n=$(ls "$w/usr/lib/modules" | wc -l); [ "$n" = 1 ] && ok "one module directory" || no "$n module directories"
 rel=$(ls "$w/usr/lib/modules"); m=$w/usr/lib/modules/$rel
@@ -27,6 +27,10 @@ if pacman -Q "$other" >/dev/null 2>&1; then
   [ -n "$orel" ] && [ "$orel" != "$rel" ] && ok "release differs from $other's ($orel)" || no "release equals $other's"
   comm -12 <(bsdtar -tf "$pkg" | grep -v '^\.' | sed 's|^|/|' | grep -v '/$' | sort) <(pacman -Qlq "$other" | grep -v '/$' | sort) > "$w/common"
   [ ! -s "$w/common" ] && ok "no file in common with $other" || { no "files in common with $other:"; head "$w/common"; }
+else
+  # Said, not passed silently: without the other kernel installed, the two checks against it did not run.
+  echo "SKIP $other is not installed: the release-differs and no-common-file checks against it did not run"
+  skipped=2
 fi
 [ -f "$m/vmlinuz" ] && ok "vmlinuz $(stat -c %s "$m/vmlinuz") bytes" || no "no vmlinuz"
 info() { sed -n "s/^$1 = //p" "$w/.PKGINFO"; }
@@ -56,5 +60,7 @@ if [ -s "$symvers" ]; then sv=(-e -E "$symvers"); what="depmod -a -e"; else sv=(
 out=$(depmod -b "$w/usr" -a "${sv[@]}" -w "$rel" 2>&1 | grep -v 'duplicate module alias\|^spi:tpm_tis_spi')
 [ -z "$out" ] && ok "$what: no error, no unresolved symbol" || { no "$what:"; echo "$out" | head; }
 strings -a "$m/vmlinuz" | grep -q "Linux version $rel " && ok "vmlinuz banner names $rel" || no "vmlinuz banner"
-[ $fail = 0 ] && echo "check-package: all passed" || echo "check-package: FAILED"
+if [ $fail != 0 ]; then echo "check-package: FAILED"
+elif [ $skipped != 0 ]; then echo "check-package: all run checks passed; $skipped skipped ($other is not installed)"
+else echo "check-package: all passed"; fi
 exit $fail
