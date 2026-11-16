@@ -17,6 +17,12 @@
  *       after a command that failed ("apple-spmi ...: fault 0x... (n so far)"). Use it only if
  *       a plug test fails with SPMI errors in the log. NOT booted on a K114s.
  *
+ *   K114S_R3_USB_ATC0
+ *       The left-back port (ATC0, hpm0 on nub-spmi-a0 0x0c) as a third USB-C host port (issue
+ *       #72). A draft, flagged: it compiles and lints, and has NOT been booted. See the section
+ *       below and docs/r3-usb-atc0.md for what else has to change before a boot means anything
+ *       (the loader still treats port 0 as its debug link).
+ *
  * Copyright The Asahi Linux Contributors
  */
 
@@ -47,5 +53,172 @@
 &nub_spmi_a1 {
 	reg = <0x2 0x8a1a8000 0x0 0x4000>,
 	      <0x2 0x8a1a4000 0x0 0x4000>;
+};
+#endif
+
+#ifdef K114S_R3_USB_ATC0
+/*
+ * Left-back port (ATC0). Every address, interrupt, power domain and tunable below is the
+ * T6050 ATC0 description of aurora-silicon/linux t6050-j716c-left-usb4.dtsi (J716c, the same
+ * SoC, from that machine's ADT) plus the base's own disabled usb_drd0/usb0_dart nodes in
+ * t6050-peripherals.dtsi (K114S inventory). It has NOT been compared with this Mac's ADT:
+ * "sudo python3 tests/k114s-usb-root-probe.py adt" must show /arm-io/usb-drd0, atc-phy0,
+ * acio-phy-cpu0, dart-usb0 and hpm0 equal first. The ATC1 nodes in t6050-dieX.dtsi
+ * differ from these only by the 0x1000000 per port offset, which is a cross-check of the
+ * numbers (see docs/r3-usb-atc0.md).
+ *
+ * The PHY's tunables are not here: the loader copies them from the ADT, and aura's
+ * t6050_setup_atc() skips port index 0 ("Port 0 carries aura's debug link: never describe
+ * it"). Until that changes the PHY has no tunables. The driver accepts port index 0
+ * (atc-t6050-dp.c at a34d26c: port > 5 is the only bound; aurora-silicon/linux #1268).
+ */
+/ {
+	aliases {
+		atcphy0 = &atc0_phy;
+	};
+};
+
+&{/soc@200000000} {
+	atc0_phy_mbox: mailbox@2a3148000 {
+		compatible = "apple,t6050-asc-mailbox", "apple,asc-mailbox-v4";
+		reg = <0x2 0xa3148000 0x0 0x4000>;
+		interrupts = <AIC_IRQ 0 841 IRQ_TYPE_LEVEL_HIGH>,
+			     <AIC_IRQ 0 842 IRQ_TYPE_LEVEL_HIGH>,
+			     <AIC_IRQ 0 843 IRQ_TYPE_LEVEL_HIGH>,
+			     <AIC_IRQ 0 844 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "send-empty", "send-not-empty", "recv-empty", "recv-not-empty";
+		#mbox-cells = <0>;
+	};
+
+	atc0_phy: phy@2a3000000 {
+		compatible = "apple,t6050-combo-phy";
+		reg = <0x2 0xa3000000 0x0 0x2c000>,
+		      <0x2 0xa2a90000 0x0 0x4000>,
+		      <0x2 0xa2800000 0x0 0x4000>,
+		      <0x2 0xa3200000 0x0 0x4000>,
+		      <0x2 0xa3244000 0x0 0x4000>,
+		      <0x2 0xa0000000 0x0 0x8000>,
+		      <0x2 0xa0020000 0x0 0x4000>,
+		      <0x2 0xa3250000 0x0 0x4000>,
+		      <0x2 0xa3140000 0x0 0x4000>,
+		      <0x2 0xa30c0000 0x0 0x10000>,
+		      <0x2 0xa2a84000 0x0 0x4000>;
+		reg-names = "core", "usb2phy", "usb2-digital", "reset", "fabric", "axi2af", "lioa",
+			    "common-cfg", "usb-control", "firmware-data", "pipehandler";
+		#phy-cells = <1>;
+		#reset-cells = <1>;
+		apple,port-index = <0>;
+		apple,guest-port-reserved;
+		mode-switch;
+		orientation-switch;
+		mboxes = <&atc0_phy_mbox>;
+		power-domains = <&ps_atc0_usb_aon>, <&ps_atc0_common>, <&ps_atc0_phymxwrap>,
+				<&ps_atc0_usb>;
+		power-domain-names = "usb-aon", "common", "wrapper", "usb";
+		status = "okay";
+
+		port {
+			atc0_phy_typec: endpoint {
+				remote-endpoint = <&typec0_ss>;
+			};
+		};
+	};
+};
+
+&nub_spmi_a0 {
+	hpm0: usb-pd@c {
+		compatible = "apple,sn201202x";
+		reg = <0xc SPMI_USID>;
+
+		typec0: connector {
+			compatible = "usb-c-connector";
+			label = "USB-C Left-back";
+			power-role = "dual";
+			data-role = "dual";
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+
+					typec0_hs: endpoint {
+						remote-endpoint = <&usb_drd0_hs>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+
+					typec0_ss: endpoint {
+						remote-endpoint = <&atc0_phy_typec>;
+					};
+				};
+			};
+		};
+	};
+};
+
+/* The fabric domains ps_atc0_common sits behind, enabled as the J716c does */
+&ps_fab0_piogw {
+	status = "okay";
+};
+
+&ps_fab3_soc {
+	status = "okay";
+};
+
+&ps_atc0_common {
+	status = "okay";
+};
+
+&ps_atc0_usb_aon {
+	status = "okay";
+};
+
+&ps_atc0_phymxwrap {
+	status = "okay";
+};
+
+&ps_atc0_usb {
+	status = "okay";
+};
+
+&usb_drd0 {
+	status = "okay";
+	dr_mode = "otg";
+	usb-role-switch;
+	role-switch-default-mode = "host";
+	resets = <&atc0_phy 0>;
+	phys = <&atc0_phy PHY_TYPE_USB2>, <&atc0_phy PHY_TYPE_USB3>;
+	phy-names = "usb2-phy", "usb3-phy";
+	apple,tunable-gbl-default = <0x64 0x2 0x0>, <0x10 0xfff80000 0x00680000>;
+	apple,tunable-gbl-host = <0x4 0x0001ef00 0x00002f00>, <0x1c 0x00000100 0x0>,
+		<0x2c 0x000a07ff 0x000800c8>, <0x100 0x02000100 0x02000100>,
+		<0x504 0x00001000 0x0>, <0x528 0xff0000ff 0x06000006>,
+		<0x52c 0xff0000ff 0x08000008>, <0x580 0xffffffff 0x6f000006>,
+		<0x584 0xffffffff 0x00060000>;
+	apple,tunable-dbg = <0x0 0x8 0x8>;
+	apple,tunable-cfg-host = <0x20 0xff 0x1b>;
+	apple,tunable-link = <0x10 0xff000000 0xff000000>, <0x20 0x7ff00000 0x4e900000>,
+		<0x24 0x001f8000 0x000b8000>, <0x60 0x0003ffff 0x00000600>;
+	apple,tunable-cio = <0x20 0x00ff0000 0x001e0000>;
+
+	port {
+		usb_drd0_hs: endpoint {
+			remote-endpoint = <&typec0_hs>;
+		};
+	};
+};
+
+&usb0_dart {
+	apple,dma-range = <0x100 0x4000 0x0 0xffff0000>;
+	status = "okay";
+};
+
+&usb0_dart1 {
+	apple,dma-range = <0x100 0x4000 0x0 0xffff0000>;
+	status = "okay";
 };
 #endif
