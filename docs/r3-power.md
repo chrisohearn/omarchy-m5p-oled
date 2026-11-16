@@ -44,7 +44,7 @@ What the replica run shows:
   the battery, so rules 93 and 94 never ran. The path unit
   `macsmc-battery-charge-control-end-threshold.path` belongs to asahi-scripts, is static and inactive
   on this boot, and was never pulled in. It is not needed to save a limit:
-  `omarchy-battery-charge-limit` writes the saved file itself. Until a kernel with #1615 is booted, a
+  `omarchy-battery-charge-limit` writes the saved file itself. On a kernel without #1615 a
   saved 80 is not restored at boot; do not blame the SMC for that.
 - Not tested: whether the SMC accepts 80 and derives start 75, whether charging stops on AC at 80,
   and the boot restore (which depends on #1615). Owner step: `sudo
@@ -55,11 +55,22 @@ What the replica run shows:
 ## #52 battery status
 
 The logger prints sysfs and UPower side by side and flags `MISMATCH` when they disagree on
-charging or discharging, which is the 92 % versus 97 % case of #52. Agent-run on AC at 100 %:
-both agree (`Full` / `fully-charged`). The discharge comparison and the `-95` fix (#1615) need the
-owner and a kernel with #1615. The `manufacture_year` -95 line repeats with each read or uevent of
-the battery attributes (first about 0.5 s after boot, and continuing); it is not a fixed count per
-boot (agent-run: one review saw the count go from 43 to 60).
+charging or discharging, which is the 92 % versus 97 % case of #52.
+
+**The -95 defect is fixed on r3a (agent-run, 2026-11-15, kernel `7.3.0-17.v272-4-k114s-r3a-ARCH`,
+which carries sleep-lid/0007 = #1615).** Read-only checks on the booted r3a:
+
+- `cat .../macsmc-battery/manufacture_year` returns "No data available" (-ENODATA, was -95).
+- `cat .../macsmc-battery/uevent` prints 31 `POWER_SUPPLY_*` lines (it was empty).
+- `journalctl -k -b` holds 0 lines with `manufacture_year` and 0 with `synthetic uevent` or `-95`.
+- `udevadm info` on the battery now has a full record (`TAGS=:systemd:`, `SYSTEMD_WANTS` set to the
+  charge-control path unit), and that path unit is active (waiting). So udev handles the battery and
+  rules 93 and 94 can run (see the boot-restore note above; #53 still needs its owner run).
+- Charging at 71 %: sysfs `Charging` / 71 and UPower `charging` / 70.18 % agree.
+
+Not yet proven: UPower against sysfs during a discharge. Owner step: unplug AC and run
+`tests/hardware/k114s-battery-log.sh 30 > battery.log` for a few minutes, plug back in, and confirm
+no `MISMATCH` line. The #1615 PR is still an open draft upstream, so r3a carries it as a patch.
 
 ## #56 why the profile is `performance`, and what it is on battery
 
@@ -109,4 +120,13 @@ Power, AC Input Power, 3.8 V Rail, Heatpipe), fan1 and fan2 at 0 RPM (min 2000, 
 others (Tz11 to Tz18, Tz1j, TNLc, TNSz, TNVn) read 0. The logger lists these once as absent and
 leaves them out of the hottest list. The hottest channels at idle were TVDM, TVDC, TVD0, TCMb at
 about 51 °C. No CPU thermal zone (only `thermal_zone0`, the battery). Masking the TAO keys needs the
-ADT key list and a dts change: not done. #1944 (fan manual control) is not ported.
+ADT key list and a dts change: not done. The #1944 property is ported as an off-by-default macro in `dts/t6050-k114s-fan.dtsi` (see `docs/r3b-kernel.md`).
+
+Update 2026-11-15 (agent-run, r3a kernel on the GPU desktop, no load generated): the fans now spin. Three samples
+10 s apart with `tests/hardware/k114s-thermal-log.sh 10 3` read fan1 2198 to 2201 RPM and fan2 2370 to 2379 RPM
+(min 2000, max 8400 and 9072; `fanN_target` 2200 and 2376, read only) at 22 to 26 W total system power with the
+hottest channels TVDM, TVDC, TVD0 and TCMb at 68 to 69 C (one TCMb spike to 82.8 C). So a fan reading above its
+minimum is now logged, but at desktop load, not a sustained load. Absent channels at this boot: TfCB, TAOC, TAOI,
+TAOJ, TAOP, Tz11 to Tz18, Tz1j, TNLc, TNSz, TNVn (-127 or 0); the logger already keeps them out of the hottest list.
+Still open: a sustained-load run with the logger (owner), the ADT key list for the TAO* keys, and CPU thermal zones.
+

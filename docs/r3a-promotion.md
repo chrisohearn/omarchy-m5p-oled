@@ -850,9 +850,10 @@ the update, nothing has changed: read the free space; do not use `allow-low-esp`
     grep -m1 '^IgnorePkg = ' /etc/pacman.conf | grep -q -w linux-k114s || stop "the holds block is gone (run sudo /usr/local/lib/omarchy-k114s/apply-holds)"
     [ "$(systemctl is-enabled k114s-trial-default-revert.service)" = masked ] || stop "k114s-trial-default-revert.service is no longer masked"
     sudo test -s /boot/efi/k114s-repair/promotion/repair-block.conf && sudo test -s /boot/efi/k114s-repair/r2c/repair-uki.txt || stop "a file restore-repair needs is gone from the ESP"
+    sudo true || stop "sudo is not available (a failed sudo would look like a diff)"
     sudo sh -c "cd /boot/efi && { sha256sum m1n1/boot-ctxr.bin k114s-repair/k114s.dtb EFI/Linux/*.efi; sha256sum /usr/local/lib/omarchy-k114s/k114s.dtb; grep -i '^default_entry' limine.conf; grep -E '^[[:blank:]]*/' limine.conf; grep -E '^[[:blank:]]*path:' limine.conf; sed -n 1p aura-try; }" | sudo diff "$P/before-update.txt" -
     r=${PIPESTATUS[1]}
-    case $r in 0) echo "no boot file changed" ;; 1) echo "the diff above is the change: read it (only the two images and their path: lines may differ)" ;; *) stop "the before-record could not be read or compared (diff exit $r; $P is root-only, so it is read with sudo)" ;; esac
+    case $r in 0) echo "no boot file changed" ;; 1) echo "the diff above is the change: compare it with the Expected text below (new image hashes, their path: lines, a Snapshots sub-entry)" ;; *) stop "the before-record could not be read or compared (diff exit $r; $P is root-only, so it is read with sudo)" ;; esac
     echo "ESP free: $(df -B1 --output=avail /boot/efi | tail -1)"
     echo "P6d: the boot chain checks out; reboot, then run block C"
     )

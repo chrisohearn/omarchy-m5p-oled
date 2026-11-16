@@ -1,0 +1,40 @@
+From: chrisohearn <chrisohearn@users.noreply.github.com>
+Subject: [PATCH] kboot: T6050: describe port 0's ATC tunables unless aura-debug is on
+
+DRAFT for issue #72. Not built into a Stage 2, not booted. Offered upstream to
+aurora-silicon/aura rather than carried (see docs/r3-usb-atc0.md).
+
+t6050_setup_atc() skips every PHY with apple,port-index 0 ("Port 0 carries
+aura's debug link: never describe it"), whatever the boot options say. A
+device tree that describes the left-back port (the Linux driver accepts index
+0 since aurora-silicon/linux #1268) then gets a PHY without the tunables the
+loader copies from the ADT. Skip port 0 only while aura-debug is enabled, which
+is when the debug link owns it.
+
+diff --git i/src/kboot_atc.c w/src/kboot_atc.c
+index e50c4cd..acc0a64 100644
+--- i/src/kboot_atc.c
++++ w/src/kboot_atc.c
+@@ -4,6 +4,7 @@
+ 
+ #include "kboot_atc.h"
+ #include "adt.h"
++#include "boot_options.h"
+ #include "devicetree.h"
+ #include "malloc.h"
+ #include "pmgr.h"
+@@ -1204,8 +1205,12 @@ static T6050_ATC_INIT void t6050_setup_atc(void *dt)
+             const fdt32_t *index = fdt_getprop(dt, node, "apple,port-index", &len);
+             u32 port = index && len == 4 ? fdt32_ld(index) : 0;
+ 
+-            /* Port 0 carries aura's debug link: never describe it */
+-            if (!port || port > 5)
++            /*
++             * Port 0 carries aura's debug link while aura-debug is on: never describe it then.
++             * Without it nothing of aura's uses the port after the hand-off, and a device tree
++             * that describes port 0 (K114S_R3_USB_ATC0) gets its tunables like any other port.
++             */
++            if (!index || len != 4 || (!port && aura_debug_enabled()) || port > 5)
+                 continue;
+             t6050_clear_atc(dt, node);
+             bool ok = !t6050_export_atc(dt, node, port, c == 1);
