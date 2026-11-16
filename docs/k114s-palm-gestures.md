@@ -41,3 +41,18 @@ To judge gestures after that, uncomment the `hl.gesture` workspace line in the u
 ## Done when
 
 A capture shows contacts, and either palm rejection works or the missing class/tool type is filed upstream (see "Gap and proposal" above).
+
+## Swipe direction: Mac style (the owner's preference, 2026-11-16)
+
+Omarchy now ships default gestures (`default/hypr/gestures.lua`, omacom/omarchy#16891, merged 2026-10-28): three fingers
+left and right go to the previous and next workspace, and four fingers move the active window the same way. That is a
+deliberate choice upstream, so it was not reported as a bug. On this Mac the owner wants the macOS direction, where the
+desktop follows the fingers: a swipe left goes to the next workspace.
+
+`linux/input/k114s-mac-swipes` adds that as a marked block (`linux/input/mac-swipes.lua`) to the user's
+`~/.config/hypr/input.lua`, which loads after the defaults. The block unsets the four default left and right gestures, then
+sets them reversed. Like `k114s-dcp-colour`, it takes `--install` (the default), `--check` and `--undo`, and keeps a
+first-install backup. Install refuses while `input.lua` sets one of those gestures outside the block, because Hyprland
+rejects a second gesture on the same fingers and direction. Owner-observed after the install: the swipes go the right way,
+and `hyprctl configerrors` is empty (agent-run).
+
