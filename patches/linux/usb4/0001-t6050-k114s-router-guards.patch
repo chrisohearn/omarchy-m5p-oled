@@ -1,0 +1,41 @@
+From: chrisohearn <chrisohearn@users.noreply.github.com>
+Subject: [PATCH] arm64: dts: apple: t6050: create the USB4 routers for the K114s
+
+The T6050_K114S board has the same ACIO1/ACIO2 routers as the J714s and K114c at the same
+addresses (checked against its ADT, tests/k114s-adt-usb4-facts.py). t6050-max.dtsi builds the
+ATC2 router and its pmgr domains only for the listed boards, and t6050-peripherals.dtsi
+leaves out the inventory's apciec1/apciec2 DARTs for the boards whose tunnel nodes define them.
+Add the K114s to those three guards. Applies on aurora-silicon/linux with #1791 and #1841.
+
+---
+--- a/arch/arm64/boot/dts/apple/t6050-max.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-max.dtsi
+@@ -199,7 +199,7 @@
+ #endif
+ };
+ 
+-#if defined(T6050_J714C) || defined(T6050_J714S) || defined(T6050_J716C) || defined(T6050_K114C)
++#if defined(T6050_J714C) || defined(T6050_J714S) || defined(T6050_J716C) || defined(T6050_K114C) || defined(T6050_K114S)
+ /*
+  * ATC2's USB4/Thunderbolt router (ADT /arm-io/acio2, acio-cpu2 and dart-acio2), powered per
+  * connection: the PHY enters CIO mode, then the router's domains come on (ATC2_CIO, _PCIE, _USB,
+--- a/arch/arm64/boot/dts/apple/t6050-peripherals.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-peripherals.dtsi
+@@ -1528,7 +1528,7 @@
+ 		status = "disabled";
+ 	};
+ 
+-#if !defined(T6050_J714S) && !defined(T6050_J716C)
++#if !defined(T6050_J714S) && !defined(T6050_K114S) && !defined(T6050_J716C)
+ 	apciec1_dart: iommu@2ac000000 {
+ 		compatible = "apple,t6050-dart", "apple,t8110-dart";
+ 		reg = <0x2 0xac000000 0x0 0x20000>;
+@@ -1549,7 +1549,7 @@
+ 		status = "disabled";
+ 	};
+ 
+-#if !defined(T6050_J714C) && !defined(T6050_J714S) && !defined(T6050_J716C) && !defined(T6050_K114C)
++#if !defined(T6050_J714C) && !defined(T6050_J714S) && !defined(T6050_J716C) && !defined(T6050_K114C) && !defined(T6050_K114S)
+ 	apciec2_dart: iommu@384000000 {
+ 		compatible = "apple,t6050-dart", "apple,t8110-dart";
+ 		reg = <0x3 0x84000000 0x0 0x20000>;
