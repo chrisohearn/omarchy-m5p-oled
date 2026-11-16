@@ -8,7 +8,7 @@
 #   media-smoke.sh              static checks, vulkaninfo --summary, one grim shot, one 3 s wf-recorder clip
 #   media-smoke.sh --no-capture skip the grim and wf-recorder steps (they read the live screen)
 #   media-smoke.sh --vkcube     also run vkcube for 10 s: LOOK AT THE PANEL, a spinning cube means pass
-#   media-smoke.sh --chromium   also run headless Chromium for 20 s and read its GPU feature status
+#   (Chromium GPU status: run tests/hardware/chromium-gpu-report.sh; --dump-dom cannot read chrome://gpu)
 #
 # The screenshot and the clip are looked at only for size and format, then deleted; they show the
 # screen, so never attach them anywhere. Output holds no serial numbers, addresses or home paths.
@@ -16,10 +16,10 @@
 # MEDIA_SMOKE_ROOT prefixes the file paths read (tests/hardware/test-media-smoke.sh sets it).
 set -u
 root=${MEDIA_SMOKE_ROOT:-}
-capture=1 vkcube=0 chromium=0
+capture=1 vkcube=0
 for a in "$@"; do
   case $a in
-    --no-capture) capture=0 ;; --vkcube) vkcube=1 ;; --chromium) chromium=1 ;;
+    --no-capture) capture=0 ;; --vkcube) vkcube=1 ;;
     *) sed -n '2,16p' "$0"; exit 2 ;;
   esac
 done
@@ -82,19 +82,6 @@ fl=${XDG_CONFIG_HOME:-$HOME/.config}/chromium-flags.conf
 if [[ -e $root/usr/share/omarchy/bin/omarchy-cmd-electron-gl-wrap ]]; then echo "INFO electron GL wrapper present"
 else echo "INFO no omarchy-cmd-electron-gl-wrap: no software-GL forcing, Chromium uses the render node"; fi
 [[ -e $root/dev/dri/renderD128 ]] && pass "render node present" || bad "no render node"
-if [[ $chromium -eq 1 ]]; then
-  if have chromium; then
-    # --dump-dom of chrome://gpu needs a window-less GPU process; the feature lines are the evidence.
-    timeout -k 5 20 chromium --headless=new --enable-gpu --use-angle=gl-egl --user-data-dir="$tmp/prof" --no-first-run --enable-logging=stderr --v=0 \
-      --dump-dom chrome://gpu >"$tmp/gpu.html" 2>"$tmp/gpu.err"
-    rc=$?
-    echo "INFO chromium exit $rc; GPU-process crash lines: $(grep -ci 'gpu process.*\(crash\|exit\)' "$tmp/gpu.err")"
-    sed -e 's/<[^>]*>/ /g' "$tmp/gpu.html" | tr -s ' \n' | grep -iE 'Canvas:|Compositing:|Rasterization:|GL_RENDERER|Skia|ANGLE' | head -8
-    if grep -qiE 'GL_RENDERER.*(SwiftShader|llvmpipe|softpipe)' "$tmp/gpu.html"; then bad "chromium used a software renderer: no GPU evidence"
-    elif grep -qE 'GL_RENDERER.*Apple M5 Pro' "$tmp/gpu.html"; then pass "chromium GL_RENDERER is the Apple M5 Pro"
-    else echo "INFO chromium GL_RENDERER not read: no GPU evidence either way"; fi
-  else skip "chromium missing"; fi
-fi
 
 echo "== Widevine (#31)"
 cdm=$root/opt/WidevineCdm/chromium
