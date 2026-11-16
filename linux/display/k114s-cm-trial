@@ -28,7 +28,8 @@ try="hl.monitor({ $rule, cm = \"$preset\" }); hl.config({ render = { cm_enabled 
 "$hyprctl" monitors 2>/dev/null | grep -q '^Monitor eDP-1 ' || die "no eDP-1 monitor in this Hyprland session"
 # 1. the way back, before anything changes
 unit=k114s-cm-trial-revert-$$
-"$srun" --user --quiet --collect --unit="$unit" --on-active="${secs}s" \
+# AccuracySec: a timer otherwise fires anywhere in the minute after it is due (systemd.timer), too late for a black panel
+"$srun" --user --quiet --collect --unit="$unit" --on-active="${secs}s" --timer-property=AccuracySec=100ms \
   -E XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" -E HYPRLAND_INSTANCE_SIGNATURE="$HYPRLAND_INSTANCE_SIGNATURE" \
   "$(command -v "$hyprctl" || echo "$hyprctl")" eval "$back" >/dev/null 2>&1 ||
   die "could not schedule the revert (systemd-run --user); nothing changed"
@@ -36,11 +37,12 @@ echo "k114s-cm-trial: revert scheduled in ${secs} s (unit $unit.timer)"
 # 2. the trial
 "$hyprctl" eval "$try" >/dev/null 2>&1 || echo "k114s-cm-trial: the trial command failed; the revert still runs"
 echo "k114s-cm-trial: colour management ON, eDP-1 preset $preset. Owner: is the panel lit, and how do colours look?"
-"$hyprctl" monitors 2>/dev/null | grep -E 'colorManagementPreset' | sed 's/^[[:space:]]*/  now: /'
+edp_preset() { "$hyprctl" monitors 2>/dev/null | awk '/^Monitor / { m = $2 } m == "eDP-1" && $1 == "colorManagementPreset:" { print $2; exit }'; }
+echo "  now: eDP-1 colorManagementPreset $(edp_preset)"
 # 3. wait for the revert, then check it
 sleep "${K114S_CM_TRIAL_WAIT:-$((secs + 3))}"
 cm=$("$hyprctl" getoption render:cm_enabled 2>/dev/null | head -1)
-pr=$("$hyprctl" monitors 2>/dev/null | grep -E 'colorManagementPreset' | head -1 | sed 's/.*: *//')
+pr=$(edp_preset)   # the eDP-1 block only: other outputs have presets of their own
 if [ "$cm" = "bool: false" ] && [ "$pr" = srgb ]; then
   echo "k114s-cm-trial: reverted: render:cm_enabled false, eDP-1 preset srgb"
 else
