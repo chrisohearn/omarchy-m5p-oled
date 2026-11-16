@@ -1,0 +1,34 @@
+# K114s r3b.c3 kernel: r3b.c2 plus the upstream form of the EDR cap and a choosable VRR minimum (a VRR test kernel).
+#
+# Same base, release suffix and configuration as r3b.c2 (patches/linux/r3b-c2.series): the release stays
+# 7.3.0-17.v272-11-k114s-r3b-ARCH and the package stays linux-k114s-r3b (version 7.3.0.r3b.c3-1), so it upgrades
+# r3b.c2 in place. Only appledrm.ko differs from r3b.c2 (k114s-cmp-modules), and by default it behaves as r3b.c2:
+# - hdr/0004 brings the carried cap up to the version offered in aurora-silicon/linux#2087 after its review (no EDR
+#   when a cap is set and the SDR maximum is unknown; the K114s's SDR maximum is 1000 nits, so nothing changes here);
+# - vrr/0001 adds fw27_panel_vrr_min (default 24, the old constant): the lowest rate offered with fw27_panel_vrr, so
+#   a watched D6 rerun can try another minimum without a rebuild (docs/r3-vrr.md).
+# Build: K114S_LABEL=K114S-R3B-C3 (uname -v), output $K114S_BUILD_ROOT/build/r3b-c3, package K114S_CAND=r3b-c3.
+#
+# 1. the r3b.b1 series (patches/linux/r3b-b1.series), unchanged and in its order
+r3b/0001-HID-dockchannel-hid-clamp-Report-Size-items-where-th.patch
+r3b/0002-HID-dockchannel-hid-pad-short-reports-to-the-clamped.patch
+r3b/0003-HID-magicmouse-drop-the-GD-Mouse-usages-on-dockchann.patch
+r3b/0004-HID-magicmouse-parse-the-0x5a-MTP-report-of-the-K114.patch
+sound/0004-ASoC-apple-macaudio-Add-K114-with-the-speakers-off.patch
+r3b/0005-PCI-apple-qualify-the-K114s-for-suspend-to-idle-over.patch
+# 2. localversion.10-pkgrel  -17.v272-11-k114s-r3b   (as r3b; not a patch file)
+brightness/0001-drm-apple-answer-the-PMU-temperature-for-every-panel.patch
+brightness/0002-drm-apple-apply-the-syslog-debug-filter-to-the-inter.patch
+brightness/0003-drm-apple-take-the-27.2-D590-notification-as-a-no-op.patch
+brightness/0005-dt-bindings-display-apple-dcp-optional-panel-brightn.patch
+brightness/0006-drm-apple-hold-brightness-requests-at-the-panel-s-fl.patch
+# 3. the HDR series (docs/r3-hdr.md), applied with `git am` on top of 1 and 2. 0001 and 0002 are offered upstream
+#    (aurora-silicon/linux#2060); 0003 is K114s-only (the 500-nit default of the cap).
+hdr/0001-drm-apple-describe-an-internal-panel-without-a-known.patch
+hdr/0002-drm-apple-cap-the-panel-peak-a-firmware-27-panel-s-E.patch
+hdr/0003-drm-apple-K114s-no-panel-EDR-above-500-nits-by-defau.patch
+# 4. the battery fix, as r3a carries it (r3a.series), applied with `git am` on top of 1 to 3
+sleep-lid/0007-power-supply-macsmc-skip-an-unreadable-manufacture-d.patch
+# 5. the follow-ups (docs/r3-vrr.md, docs/r3-hdr.md), applied with `git am` on top of 1 to 4
+hdr/0004-drm-apple-no-EDR-when-a-cap-is-set-and-the-SDR-maxim.patch
+vrr/0001-drm-apple-let-the-firmware-27-panel-s-VRR-minimum-be.patch

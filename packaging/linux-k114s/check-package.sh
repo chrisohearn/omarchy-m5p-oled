@@ -12,6 +12,7 @@
 #   - the kernel inside vmlinuz carries the same release string
 #   - a brightness build (version ...r3b.b<N>, linux-k114s-r3b) carries the floor of patches/linux/brightness 0006 in appledrm
 #   - an HDR build (version ...r3b.c<N>) also carries the floor, and hdr 0001-0003: the Display P3 default and the 500-nit EDR cap
+#   - from r3b.c3, appledrm also has fw27_panel_vrr_min with its default of 24 (vrr 0001)
 # usage: check-package.sh PACKAGE.pkg.tar.zst [OTHER-KERNEL-PACKAGE=linux-aurora] [Module.symvers]
 # Run it once per other kernel (linux-aurora, and linux-k114s for an r3b package): each must be installed.
 # The symbol check needs the build's Module.symvers (default $K114S_BUILD_ROOT/build/${K114S_CAND:-r3a}/Module.symvers); without it only plain depmod -a runs.
@@ -77,6 +78,12 @@ case $ver in
     else no "version $ver: appledrm lacks the Display P3 default (hdr 0001)"; fi
     if [ -n "$drm" ] && modinfo -F parm "$drm" | grep -q '^fw27_panel_edr_max_nits:.*(default: 500)'; then ok "version $ver: appledrm caps panel EDR at 500 nits by default (hdr 0002, 0003)"
     else no "version $ver: appledrm lacks the 500-nit EDR cap (hdr 0002, 0003)"; fi ;;
+esac
+# From r3b.c3 (docs/r3-vrr.md) appledrm also has the VRR minimum parameter, at the old 24 Hz by default.
+case $ver in
+  *.c[3-9]*)
+    if [ -n "$drm" ] && modinfo -F parm "$drm" | grep -q '^fw27_panel_vrr_min:.*(default: 24)'; then ok "version $ver: appledrm has fw27_panel_vrr_min, default 24 (vrr 0001)"
+    else no "version $ver: appledrm lacks fw27_panel_vrr_min with default 24 (vrr 0001)"; fi ;;
 esac
 if [ $fail != 0 ]; then echo "check-package: FAILED"
 elif [ $skipped != 0 ]; then echo "check-package: all run checks passed; $skipped skipped ($other is not installed)"

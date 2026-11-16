@@ -366,3 +366,22 @@ Install as r3b.c1 (`docs/r3-hdr.md`, section 6 step 1, and block P9 before and a
 `charge_control_end_threshold` must read the saved value and the boot log must have no `-95` line. The way back is the r3b.c1
 package (`$K114S_BUILD_ROOT/integrate/release-r3b-c1/`) or the r3a entry.
 
+## 11. r3b.c3: the EDR cap as offered upstream, and a choosable VRR minimum (2026-11-16)
+
+`patches/linux/r3b-c3.series` is r3b.c2 plus two patches:
+- `hdr/0004` brings the carried EDR cap up to the version offered in aurora-silicon/linux#2087 after its review: no
+  EDR when a cap is set and the SDR maximum is unknown. This Mac's SDR maximum is 1000 nits, so nothing changes here.
+- `vrr/0001` adds `appledrm.fw27_panel_vrr_min` (default 24, the old constant) for the next D6 test (`docs/r3-vrr.md`).
+
+| Check | Result | Label |
+| --- | --- | --- |
+| `git am` of hdr/0001-0003, sleep-lid/0007, hdr/0004, vrr/0001 on r3b.b1 `c492e07e75` | tree `d983cb3a1574`, the same as the built tree (head `9db3d0470f`) | agent-run |
+| `K114S_LABEL=K114S-R3B-C3 kmake O=build/r3b-c3 Image modules dtbs` | exit 0, no warning in `drivers/gpu/drm/apple` or `drivers/power/supply` | agent-run |
+| `k114s-cmp-modules build/r3b-c3` against the installed r3b.c2 | `DIFF(.text) appledrm.ko`, 1971 of 1972 SAME | agent-run |
+| KUnit in QEMU (`build/r3b-c3-kunit`, `modprobe appledrm` and `dcp_backlight_test`) | 0 `not ok` in the run; `apple-display-parser` 43/43, `apple-dcp-backlight` 30/30, `dcp_refresh_range_test` ok (with the new fallback cases), `edr_peak_test` and `edr_peak_bound_test` ok | emulator/replica |
+| `K114S_CAND=r3b-c3 makepkg`, then `check-package.sh` against `linux-aurora` and `linux-k114s` | all passed, including `fw27_panel_vrr_min, default 24` | agent-run |
+
+Package: `$K114S_BUILD_ROOT/integrate/release-r3b-c3/linux-k114s-r3b-7.3.0.r3b.c3-1-aarch64.pkg.tar.zst`, sha256
+`2b0b8ab77534a4b57e8ec9d2f4ea4532edb17ecf1a3709d47aa4def0026d1759`. Not installed or booted: the install and the VRR test
+are one owner-watched boot (`docs/r3-vrr.md` section 5).
+

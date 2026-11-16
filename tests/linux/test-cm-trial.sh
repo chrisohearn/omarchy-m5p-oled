@@ -31,7 +31,7 @@ chmod +x "$F/hyprctl" "$F/systemd-run"
 export K114S_HYPRCTL=$F/hyprctl K114S_SYSTEMD_RUN=$F/systemd-run HYPRLAND_INSTANCE_SIGNATURE=test XDG_RUNTIME_DIR=$BASE
 reset() { rm -f "$F/calls" "$F/no-edp" "$F/srun-fails" "$F/ext" "$F/cm-stuck"; echo false > "$F/cm"; echo srgb > "$F/preset"; }
 bash -n "$S"; ok "the script parses" $? 0
-for bad in "" "hdr" "dp3 3" "dp3 121" "dp3 2x"; do
+for bad in "" "hdr10" "dp3 3" "dp3 121" "dp3 2x"; do
   reset; bash "$S" $bad >/dev/null 2>&1; ok "refuses '$bad' and calls nothing" "$? $(test -e "$F/calls"; echo $?)" "1 1"
 done
 reset; touch "$F/no-edp"; bash "$S" dp3 >/dev/null 2>&1; ok "no eDP-1: refuses before scheduling anything" "$? $(grep -c '^systemd-run' "$F/calls")" "1 0"
@@ -52,4 +52,9 @@ ok "an external srgb output first: eDP-1 still on dp3 is reported, exit 1" "$rc 
 reset; echo dp3 > "$F/ext"; out=$(FAKE_DELAY=1 K114S_CM_TRIAL_WAIT=3 bash "$S" dp3 2>&1); rc=$?
 ok "an external dp3 output first: eDP-1 back on srgb passes" "$rc $(echo "$out" | grep -c 'reverted:')" "0 1"
 [ -s "$F/bg" ] && kill $(cat "$F/bg") 2>/dev/null   # the fakes' pending reverts
+# the HDR presets of the watched EDR test (docs/r3-hdr.md section 8) run and revert like the others
+for p in hdr hdredid; do
+  reset; out=$(FAKE_DELAY=1 K114S_CM_TRIAL_WAIT=3 bash "$S" $p 20 2>&1); rc=$?
+  ok "$p: accepted, set with cm on, and reverted to srgb" "$rc $(grep -c -F "cm = \"$p\" }); hl.config({ render = { cm_enabled = true } })" "$F/calls") $(echo "$out" | grep -c 'reverted:')" "0 1 1"
+done
 finish "colour-management trial tests"
