@@ -1,0 +1,42 @@
+# K114s r3b.t1 touch trial kernel (issue #48): r3b.c1 plus the touch-screen series. Not booted; not a shipped kernel.
+#
+# Same base, release suffix and configuration delta as r3b.c1 (patches/linux/r3b-c1.series), plus the options the touch
+# path needs (docs/r3-touchscreen.md). Build: K114S_LABEL=K114S-R3B-T1 (uname -v), output $K114S_BUILD_ROOT/build/r3b-t1.
+# No package name is chosen yet: a trial install must not replace the r3b.c1 package the default boot uses.
+# docs/r3-touchscreen.md has the heads, the build result, what is not verified and the owner-session steps.
+#
+# 1. the r3b.b1 series (patches/linux/r3b-b1.series), unchanged and in its order
+r3b/0001-HID-dockchannel-hid-clamp-Report-Size-items-where-th.patch
+r3b/0002-HID-dockchannel-hid-pad-short-reports-to-the-clamped.patch
+r3b/0003-HID-magicmouse-drop-the-GD-Mouse-usages-on-dockchann.patch
+r3b/0004-HID-magicmouse-parse-the-0x5a-MTP-report-of-the-K114.patch
+sound/0004-ASoC-apple-macaudio-Add-K114-with-the-speakers-off.patch
+r3b/0005-PCI-apple-qualify-the-K114s-for-suspend-to-idle-over.patch
+# 2. localversion.10-pkgrel  -17.v272-11-k114s-r3b   (as r3b; not a patch file)
+brightness/0001-drm-apple-answer-the-PMU-temperature-for-every-panel.patch
+brightness/0002-drm-apple-apply-the-syslog-debug-filter-to-the-inter.patch
+brightness/0003-drm-apple-take-the-27.2-D590-notification-as-a-no-op.patch
+brightness/0005-dt-bindings-display-apple-dcp-optional-panel-brightn.patch
+brightness/0006-drm-apple-hold-brightness-requests-at-the-panel-s-fl.patch
+# 3. the HDR series (docs/r3-hdr.md), applied with `git am` on top of 1 and 2. 0001 and 0002 are offered upstream
+hdr/0001-drm-apple-describe-an-internal-panel-without-a-known.patch
+hdr/0002-drm-apple-cap-the-panel-peak-a-firmware-27-panel-s-E.patch
+hdr/0003-drm-apple-K114s-no-panel-EDR-above-500-nits-by-defau.patch
+# 4. the touch series (docs/r3-touchscreen.md), cherry-picked (-x) from aurora-silicon/linux pull request heads fetched
+#    2026-11-16, in this order, all clean on r3b.c1: #2004 aea7476f5f; #1605 a7b2febb96 (4 commits); #2014 0d1408c7df
+#    (3); #2015 e3188ea021 (3); #2016 867f5174d6 (its own commit; it stacks on #2015). #1737, #1568 and #2011 are
+#    already in section 1 (r3b/0001-0004). All are drafts upstream except #2004.
+#    touch/0002 is exported with one line of context (git format-patch -U1) so an upstream MAINTAINERS address stays out of
+#    the repository (build/check-publishable.sh); `git am` of the twelve still reproduces the built tree 0e77e870a11f.
+touch/0001-pinctrl-apple-clear-bit-4-of-the-GPIO-mode-on-the-T6.patch
+touch/0002-HID-apple-mtp-kiwi-add-the-MTP-touch-screen-driver.patch
+touch/0003-HID-dockchannel-hid-bring-up-the-kiwi-touch-screen-i.patch
+touch/0004-dt-bindings-input-apple-dockchannel-hid-document-the.patch
+touch/0005-arm64-dts-apple-t6050-k114c-enable-the-kiwi-touch-sc.patch
+touch/0006-dt-bindings-input-apple-dockchannel-hid-allow-a-seco.patch
+touch/0007-dt-bindings-soc-apple-rtk-helper-asc4-allow-a-second.patch
+touch/0008-arm64-dts-apple-t6050-k114-k116-give-the-MTP-DART-st.patch
+touch/0009-dt-bindings-input-apple-dockchannel-hid-add-the-T605.patch
+touch/0010-HID-dockchannel-hid-receive-T6050-MTP-reports-throug.patch
+touch/0011-arm64-dts-apple-t6050-k114-k116-use-the-T6050-DockCh.patch
+touch/0012-HID-dockchannel-hid-look-again-after-a-receive-ring-.patch

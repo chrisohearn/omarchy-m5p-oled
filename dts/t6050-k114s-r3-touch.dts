@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s touch trial tree (docs/r3-touchscreen.md, issue #48): the D9 default tree
+ * (t6050-k114s-r3b-brightness.dts, unchanged) plus the kiwi touch screen
+ * (t6050-k114s-kiwi.dtsi). Only for the touch trial kernel (patches/linux/r3b-t1.series), booted
+ * one-shot. Not booted on a K114s. Never the default tree and never in a shipped Stage 2.
+ */
+#include "t6050-k114s-r3b-brightness.dts"
+#define K114S_R3_TOUCH
+#include "t6050-k114s-kiwi.dtsi"

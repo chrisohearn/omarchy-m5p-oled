@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 19:11:12 +0000
+Subject: [PATCH 08/12] arm64: dts: apple: t6050-k114-k116: give the MTP DART
+ streams 0 and 1 to the transport
+
+With the MTP receive ring enabled on a K114c, the coprocessor wrote the ring
+over DART stream 1 while the transport listed stream 0 only. The DART reported
+"translation fault: SID:1 write BPF reject" at the ring address, the
+coprocessor crashed with a DMA error, and the keyboard and trackpad stopped.
+
+List both streams on the HID transport. apple_dart_device_group() needs every
+stream of a device in one IOMMU group, and the MTP helper shares stream 0 with
+the transport. With the helper on stream 0 only, the DART probe failed with
+-22 on a K114c boot, so the helper lists both streams too. The helper's list is
+set here, for the K114 and K116 boards, and not in t6050-max.dtsi, so other
+T6050 boards keep stream 0 only.
+
+Nothing in the base uses stream 1 yet; the ring driver change is a separate PR.
+
+Signed-off-by: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+(cherry picked from commit 0d1408c7df796287c43a3dc62bf85e0d7225e430)
+---
+ arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+index 2fa146288f..0a4ca91798 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+@@ -190,6 +190,11 @@ &fpwm2 {
+ 	status = "disabled";
+ };
+ 
++/* The helper and its HID transport share one IOMMU group, so both list streams 0 and 1. */
++&mtp {
++	iommus = <&mtp_dart 0>, <&mtp_dart 1>;
++};
++
+ /*
+  * The keyboard, trackpad and touchscreen: the HID transport on the MTP's
+  * DockChannel FIFO, laid out as on J716c (ADT dockchannel-mtp/mtp-transport).
+@@ -200,7 +205,11 @@ mtp_hid: input@8000 {
+ 		reg = <0x8000 0x1000>, <0xc000 0x1000>,
+ 		      <0x0 0x1000>, <0x4000 0x1000>;
+ 		reg-names = "config", "data", "rmt-config", "rmt-data";
+-		iommus = <&mtp_dart 0>;
++		/*
++		 * The coprocessor writes the MTP receive ring over DART stream 1. Both
++		 * streams must be in one IOMMU group, so the helper lists the same two.
++		 */
++		iommus = <&mtp_dart 0>, <&mtp_dart 1>;
+ 		interrupt-parent = <&mtp_dockchannel>;
+ 		interrupts = <2 IRQ_TYPE_LEVEL_HIGH>,
+ 			     <3 IRQ_TYPE_LEVEL_HIGH>;
+-- 
+2.56.1
+

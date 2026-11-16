@@ -1,0 +1,110 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 02:10:33 +0000
+Subject: [PATCH 05/12] arm64: dts: apple: t6050-k114c: enable the kiwi touch
+ screen interface
+
+The touch screen of the 14 inch MacBook Pro with the M5 Max rides the
+dockchannel MTP as its own "kiwi" interface. It sequences its own power:
+with power method 2 the host drives the touchscreen reset (nub GPIO 25,
+active low) and its optional supply enable (nub GPIO 26), instead of the
+shared multi-touch AFE reset on the SMC.
+
+Enable the shared always-on NUB GPIO power domain and controller the way
+J714s does, with its seven interrupts, mux the 24 MHz clock (nub pin
+22) and display sync (AP pin 11) pads through the transport node pinctrl,
+and enable the interface with its k114c firmware name.
+
+The reset polarity, the GPIO numbers and the two pad function values
+(pin 22 and pin 11, function 1) are those of the device tree that gave
+touch on the hardware on a kernel based on v7.2.11.
+
+Booted on a K114c on an earlier base with the first revision of this
+series: the interface binds, reports ready with status 0 and streams
+17861-byte frames at about 123 Hz.
+
+Signed-off-by: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+(cherry picked from commit a7b2febb963a3610ee5e7792bbaa00b80eb174a5)
+---
+ .../arm64/boot/dts/apple/t6050-k114-k116.dtsi | 11 +++---
+ arch/arm64/boot/dts/apple/t6050-k114c.dts     | 38 +++++++++++++++++++
+ 2 files changed, 44 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+index f7cedd1a4c..2fa146288f 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+@@ -223,11 +223,12 @@ stm {
+ 		/*
+ 		 * The touchscreen (ADT mtp-transport/kiwi, image-tag "fsat"). macOS
+ 		 * sends it firmware through the same CBOR bootloader as the trackpad.
+-		 * Its power, reset, 24 MHz clock and display-sync lines are SoC GPIOs
+-		 * (nub-gpio0 0x1a, 0x19, 0x16; gpio0 0xb), with an SMC power reference
+-		 * (pKW4('rCIO', 0x20000)) and the TSRC clock source. How that load and
+-		 * the report format map onto this transport is still being worked
+-		 * out, so the interface stays off until it has been tested.
++		 * Its power (nub-gpio0 0x1a) and reset (0x19) lines are GPIOs; the 24
++		 * MHz clock (nub-gpio0 0x16) and display-sync (gpio0 0xb) pads are pad
++		 * functions, muxed by the transport node's pinctrl-0. The ADT also
++		 * names an SMC power reference (pKW4('rCIO', 0x20000)) and the TSRC
++		 * clock source. A board enables the interface once its settings have
++		 * been tested (the K114c so far).
+ 		 */
+ 		kiwi: kiwi {
+ 			status = "disabled";
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114c.dts b/arch/arm64/boot/dts/apple/t6050-k114c.dts
+index 13ea865ba5..3112915bc7 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k114c.dts
+@@ -12,6 +12,7 @@
+ /* Defined before the includes: t6050-max.dtsi guards the ATC2 router on it. */
+ #define T6050_K114C
+ #include "t6050-k114-k116.dtsi"
++#include <dt-bindings/pinctrl/apple.h>
+ 
+ / {
+ 	compatible = "apple,k114c", "apple,t6050", "apple,arm-platform";
+@@ -581,3 +582,40 @@ &acio2 {
+ 			<&ps_atc2_cio_usb>, <&ps_atc2_cio_auss>, <&ps_atc2_pcie>;
+ 	apple,pcie-tunnel = <&acio2_pcie_tunnel>;
+ };
++
++/*
++ * The touchscreen (kiwi). It sequences its own power: power method 2 with
++ * its own reset line (nub GPIO 25, active low) and supply enable (nub GPIO
++ * 26), not the shared multi-touch AFE reset. The GPIO numbers, pin values
++ * and polarities are those of a device tree that gave touch on this machine.
++ */
++&ps_nub_gpio {
++	status = "okay";
++};
++
++&nub_gpio0 {
++	status = "okay";
++
++	kiwi_clk24_pins: kiwi-clk24-pins {
++		pinmux = <APPLE_PINMUX(22, 1)>;
++	};
++};
++
++&pinctrl_ap {
++	kiwi_dsync_pins: kiwi-dsync-pins {
++		pinmux = <APPLE_PINMUX(11, 1)>;
++	};
++};
++
++&mtp_hid {
++	pinctrl-0 = <&kiwi_clk24_pins>, <&kiwi_dsync_pins>;
++	pinctrl-names = "default";
++};
++
++&kiwi {
++	firmware-name = "apple/tpkiwifw-k114c.bin";
++	apple,power-method = <2>;
++	apple,reset-gpios = <&nub_gpio0 25 GPIO_ACTIVE_LOW>;
++	apple,power-gpios = <&nub_gpio0 26 GPIO_ACTIVE_HIGH>;
++	status = "okay";
++};
+-- 
+2.56.1
+

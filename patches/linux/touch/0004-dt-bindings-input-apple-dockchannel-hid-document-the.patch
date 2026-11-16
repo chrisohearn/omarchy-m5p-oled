@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 23:22:25 +0000
+Subject: [PATCH 04/12] dt-bindings: input: apple,dockchannel-hid: document the
+ kiwi interface properties
+
+The kiwi (touch screen) interface of the dockchannel MTP owns its power
+sequencing lines instead of sharing the multi-touch analog front end
+reset. Document apple,power-method, apple,reset-gpios and
+apple,power-gpios on the kiwi child node, mirroring how the multi-touch
+child documents its power method. Without apple,reset-gpios the driver
+falls back to the shared AFE reset of the parent and does not power-cycle
+the touchscreen itself; the text says so.
+
+The 24 MHz clock and display sync pads are pad functions selected by the
+transport node pinctrl, not GPIO properties, so they need no binding
+entries.
+
+Signed-off-by: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+(cherry picked from commit b1e78d5fcc993ca3d9688e408282c13f44fef768)
+---
+ .../bindings/input/apple,dockchannel-hid.yaml | 27 +++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/input/apple,dockchannel-hid.yaml b/Documentation/devicetree/bindings/input/apple,dockchannel-hid.yaml
+index 598ab3da81..20984450f1 100644
+--- a/Documentation/devicetree/bindings/input/apple,dockchannel-hid.yaml
++++ b/Documentation/devicetree/bindings/input/apple,dockchannel-hid.yaml
+@@ -231,6 +231,33 @@ properties:
+           Name of the touchscreen firmware that the host sends to the
+           coprocessor when the interface is first opened.
+ 
++      apple,power-method:
++        $ref: /schemas/types.yaml#/definitions/uint32
++        enum: [1, 2]
++        default: 1
++        description:
++          The power sequencing protocol of the coprocessor firmware, as
++          described above. With power method 2 the touchscreen owns its
++          lines, so apple,reset-gpios should be given. Without it the driver
++          falls back to the shared apple,afe-reset-gpios of the parent and
++          does not power-cycle the touchscreen itself.
++
++      apple,reset-gpios:
++        maxItems: 1
++        description:
++          Reset line of the touchscreen, described with the level that
++          asserts the reset as its active level. Unlike the multi-touch
++          analog front end reset the touchscreen owns the line, and with
++          power method 2 the host drives it itself during the start
++          sequence instead of using the shared reset of the parent.
++
++      apple,power-gpios:
++        maxItems: 1
++        description:
++          Optional supply enable line of the touchscreen, raised to power
++          the interface on and lowered to power it off during power
++          method 2 transitions.
++
+   mtp:
+     type: object
+     additionalProperties: false
+-- 
+2.56.1
+

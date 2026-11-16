@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 19:25:26 +0000
+Subject: [PATCH 11/12] arm64: dts: apple: t6050-k114-k116: use the T6050
+ DockChannel HID compatible
+
+Select the MTP receive ring on the K114 and K116 boards, whose MTP DART streams 0
+and 1 are described.
+
+Signed-off-by: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+(cherry picked from commit e3188ea02108991efef1d5c127e469101a0d5943)
+---
+ arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+index 0a4ca91798..4419e8b1e9 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+@@ -201,7 +201,7 @@ &mtp {
+  */
+ &mtp_dockchannel {
+ 	mtp_hid: input@8000 {
+-		compatible = "apple,dockchannel-hid";
++		compatible = "apple,t6050-dockchannel-hid", "apple,dockchannel-hid";
+ 		reg = <0x8000 0x1000>, <0xc000 0x1000>,
+ 		      <0x0 0x1000>, <0x4000 0x1000>;
+ 		reg-names = "config", "data", "rmt-config", "rmt-data";
+-- 
+2.56.1
+
