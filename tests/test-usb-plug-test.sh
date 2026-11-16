@@ -4,7 +4,7 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 r=$tmp/sys; fail=0
-mkdir -p "$r/class/typec/port0" "$r/bus/usb/devices/1-1" "$r/bus/usb/devices/1-0:1.0"
+mkdir -p "$r/class/typec/port0" "$r/class/typec/port0-partner" "$r/class/typec/port0/port0-partner" "$r/bus/usb/devices/1-1" "$r/bus/usb/devices/1-0:1.0"
 echo "host [device]" > "$r/class/typec/port0/data_role"
 for f in "idVendor 0bda" "idProduct 8156" "speed 5000" "bDeviceClass 00" "product LAN" "serial SECRETSERIAL0001"; do
   set -- $f; echo "$2" > "$r/bus/usb/devices/1-1/$1"
@@ -14,4 +14,8 @@ out=$(K114S_SYSFS=$r bash "$here/hardware/k114s-usb-plug-test.sh" --snapshot 2>&
 echo "$out" | grep -q -E '1-1 vid:pid 0bda:8156 speed 5000' && echo "ok   device listed with speed" || { echo "FAIL device line"; fail=1; }
 echo "$out" | grep -q '1-0:1.0' && { echo "FAIL interface listed"; fail=1; } || echo "ok   no interface node"
 echo "$out" | grep -q SECRETSERIAL && { echo "FAIL serial printed"; fail=1; } || echo "ok   no serial"
+echo "$out" | grep -q -- '-partner' && { echo "FAIL partner dir listed as a port"; fail=1; } || echo "ok   no -partner line"
+echo "$out" | grep -q 'partner=yes' && echo "ok   partner detected" || { echo "FAIL partner=yes"; fail=1; }
+echo "$out" | grep -q 'No such file' && { echo "FAIL stderr noise"; fail=1; } || echo "ok   no stderr noise"
+echo "$out" | grep -q 'kernel log since' && { echo "FAIL host log read"; fail=1; } || echo "ok   host log not read"
 exit $fail
