@@ -18,11 +18,15 @@ die() { echo "k114s-edr-cap: $*" >&2; exit 1; }
 # "others install" exempts the one-boot test file when it holds only the test's 1200 line, because install removes it;
 # for --check and --undo that file counts like any other (#169).
 others() {
-  local f d
+  local f d seen=" "
+  # highest priority first: a file masks a same-named one in a later directory, which modprobe then never reads (#171)
   for d in etc/modprobe.d run/modprobe.d usr/local/lib/modprobe.d usr/lib/modprobe.d lib/modprobe.d; do
     [[ $d == lib/modprobe.d && -L $ROOT/lib ]] && continue   # /lib is /usr/lib on Arch
     for f in "$ROOT/$d"/*.conf; do
-      [[ -e $f && $f != "$DEST" ]] || continue
+      [[ -e $f ]] || continue
+      case $seen in *" ${f##*/} "*) continue ;; esac
+      seen="$seen${f##*/} "
+      [[ $f != "$DEST" ]] || continue
       grep -v '^[[:space:]]*#' "$f" | grep -q 'fw27_panel_edr_max_nits' || continue
       [[ ${1:-} == install && $f == "$TRIAL" && "$(grep -v '^#' "$f" | sed '/^[[:space:]]*$/d')" == 'options appledrm fw27_panel_edr_max_nits=1200' ]] && continue
       echo "$f"
