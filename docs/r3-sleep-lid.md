@@ -292,3 +292,27 @@ needs root or the macOS tool; nothing in this branch installs anything.
 A K114s line for #1647 (the six lines of 0003) with the test results, as a comment on that pull
 request; and a K114s confirmation or failure for #1688 and #1615, which both still say "not
 booted". Candidates only: nothing is sent before hardware results exist (`UPSTREAM.md`).
+
+## Status 2026-11-15 (after the r3a promotion)
+
+Agent-run, read-only, on the promoted r3a kernel on the GPU Stage 2:
+
+| Fact | Result |
+| --- | --- |
+| Kernel | `7.3.0-17.v272-4-k114s-r3a-ARCH`: it carries `0001`-`0003` (K114s admitted to s2idle), so the "r3a never booted" blocker is gone |
+| `/sys/power/mem_sleep`, `pm_test` | `[s2idle]`; `pm_test` offers `none core processors platform devices freezer` (so `CONFIG_PM_DEBUG` is live) |
+| `suspend_stats` | success 0, fail 0: nothing has been tried |
+| `hibernate`, `hybrid-sleep`, `suspend-then-hibernate` targets | masked |
+| `ps_pms`, `ps_pmp`, `ps_pms_sram` in `/proc/device-tree` | not present in the running tree: `0008` and `apple,always-on` have nothing to act on yet |
+| `2302600000.mailbox-recv` interrupt count | rising (about 400/s in the promotion log): the GPU mailbox receive interrupt reaches the AIC on this Mac, the gate for `0010` |
+| Boot log | `pcie-apple ...: adopted port 0, endpoint 01:00`, the line the suspend check keys on |
+
+What is still open before a real suspend:
+
+1. **`0010`** (receive by interrupt only) is not in r3a. The interrupt evidence above is the K114s proof the earlier gate asked for; `0010` belongs to the shared T6050 kernel lane (betizzel/omarchy-m5, r3b). Suspend on the GPU tree stays forbidden until a kernel with `0010` boots (#1843 panicked in noirq without it).
+2. **PMP nodes** are not in the running tree, so `0008` cannot help yet. Upstream reports PMP crashes at wake without always-on domains.
+3. **Masked targets** (`suspend.target` and `sleep.target` kept `masked`/`static` on purpose) stay until 1 and 2 are done. The lid and the menu therefore do nothing, by design.
+
+`tests/linux/test-sleep-gates.sh` (in `run-r3.sh`) guards the static pieces: `0003` admits only `apple,k114s`, the series order, the sleep fragment in the r3a tree and the masked-target check in `k114s-boot-once`.
+
+The only attended step that is safe now is the freezer level (tasks frozen for about 5 s, no device is suspended, no GPU or PCIe callback runs): `sudo tests/hardware/k114s-sleep-check.sh pm-test freezer`. Levels `devices` and `platform` wait for 1 and 2.

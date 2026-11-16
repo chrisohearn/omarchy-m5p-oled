@@ -15,7 +15,7 @@ dt_set_t6050_isp in src/kboot.c) depend on, then re-runs the loader's own gate o
 
 Only addresses, interrupt numbers, stream ids, power-state offsets, the firmware uuid and the
 sensor type are printed. Serial numbers, calibration and firmware bytes are never read.
-Exit 0: every shared fact holds and the loader gate would pass with sensor type 0xba.
+Exit 0: every shared fact holds and the loader gate (sensor type 0xba, OS firmware V27_2) would pass.
 Exit 1: a fact differs. Exit 2: the ADT is unreadable or is not a K114s.
 """
 import importlib.util
@@ -29,6 +29,7 @@ sf = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sf)
 
 K116S_SENSOR, K114C_SENSOR, K114S_SENSOR = 0xBC, 0xB9, 0xBA   # K114s: read from this ADT, not from upstream
+OS_FW_V27_2 = "mBoot-20457.41.3"                               # aura firmware.c: V27_2 (the 27.2 OS stub); 27.3 beta 1 is mBoot-20457.60.65.0.1
 UUID = "980F533B-34EA-3FBA-878C-809F6AF57345"                  # the isp_bni/adc-nyx-sck11pm firmware (K116s, aura #188)
 SZ_16K = 0x4000
 
@@ -70,6 +71,9 @@ def loader_gate(t, want_sensor):
     sensor = (sf.u32s(t.prop("arm-io/isp0", "sensor-type")) or [None])[0]
     if ram is None or not ram_size:
         return "no dram range"
+    os_fw = sf.text(ch["props"].get("firmware-version"))   # the table's firmware key (aura os_firmware), not system-firmware-version
+    if os_fw != OS_FW_V27_2:
+        return "OS firmware %s is not %s (V27_2): the row is keyed to it" % (os_fw, OS_FW_V27_2)
     if sensor != want_sensor:
         return "sensor type %s is not 0x%x" % (hex(sensor) if sensor is not None else None, want_sensor)
     if len(seg) != 2 or len(t.prop("arm-io/isp0", "segment-ranges")) != 64:
@@ -148,7 +152,10 @@ def run(t, out=sys.stdout):
     for i, s in enumerate(seg):
         print("info segment %d: phys %s size %s (iBoot places these; they move after an update)"
               % (i, hexs(s["phys"]), hexs(s["size"])), file=out)
-    print("info chosen system-firmware-version: %s" % sf.text(ch["props"].get("system-firmware-version")), file=out)
+    print("info chosen firmware-version (OS, the loader table's key; V27_2 is %s): %s"
+          % (OS_FW_V27_2, sf.text(ch["props"].get("firmware-version"))), file=out)
+    print("info chosen system-firmware-version (system iBoot, not part of the key): %s"
+          % sf.text(ch["props"].get("system-firmware-version")), file=out)
     print("info /product/camera camera-hdr-version: %s" % hexs((sf.u32s(t.prop("product/camera", "camera-hdr-version")) or [None])[0]), file=out)
     print("info isp0 children (sensor nodes): %s" % hexs(t.children("arm-io/isp0")), file=out)
     print("info K114c row 0xb9 does NOT match this ADT: %s" % loader_gate(t, K114C_SENSOR), file=out)

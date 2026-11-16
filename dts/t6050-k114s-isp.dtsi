@@ -7,7 +7,7 @@
  * base tree's t6050-j716c-isp.dtsi, which adds the isp/isp-dart0..2 aliases and describes isp0, its
  * three DARTs and the camera power states, all DISABLED. The boot loader enables them only after
  * it has read isp0's segment-ranges from the ADT, reserved the firmware and the heap, and found a
- * row for this board in its t6050_isp_boards table. That row is patches/aura/0004: without it the
+ * row for this board in its t6050_isp_boards table. That row is patches/aura/camera/0001: without it the
  * loader refuses ("board or firmware not in the table") and the camera stays off, harmlessly.
  *
  * tests/k114s-adt-camera-facts.py reads this Mac's ADT and compares it with the values that file
@@ -23,7 +23,7 @@
  *
  * Nothing here is enabled unless the including tree defines K114S_R3_ISP. Include it after
  * t6050-k114s-common.dtsi. It needs the kernel's apple-isp driver (VIDEO_APPLE_ISP=m is in the
- * running kernel), the ISP firmware files in /lib/firmware/apple, the loader row of patches/aura/0004
+ * running kernel), the ISP firmware files in /lib/firmware/apple, the loader row of patches/aura/camera/0001
  * and linux #1831 (the 27.2 firmware version parser; without it the driver reads UNKNOWN and sends the
  * 12.x set-file record).
  */

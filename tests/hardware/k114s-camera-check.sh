@@ -1,6 +1,6 @@
 #!/bin/bash
 # OWNER-RUN, ATTENDED. After a one-boot trial of a tree that includes dts/t6050-k114s-isp.dtsi (macro
-# K114S_R3_ISP) on a loader with patches/aura/0004, this reports whether the camera came up. READ-ONLY:
+# K114S_R3_ISP) on a loader with patches/aura/camera/0001, this reports whether the camera came up. READ-ONLY:
 # changes no setting, loads no module, opens no window, and captures nothing unless you pass --capture.
 # Needs no root, but kernel messages and the loader log read better with it (it says so).
 #
@@ -33,7 +33,7 @@ ls /dev/video* /dev/media* >/dev/null 2>&1 && ok "video or media nodes: $(ls /de
 echo "--- kernel messages (isp, camera); root shows more"
 (dmesg 2>/dev/null || sudo -n dmesg 2>/dev/null) | grep -i -E "apple-isp|apple_isp|isp0|camera|imx958" | tail -25 || true
 echo "--- loader log (camera lines); root only"
-for m in /dev/mtd1ro /dev/mtd0ro; do sudo -n strings "$m" 2>/dev/null | grep -i -E "\bISP\b|isp0|camera" | tail -8; done
+for m in /dev/mtd/by-name/aura_stage2.log /dev/mtd/by-name/aura_stage1.log; do sudo -n strings "$m" 2>/dev/null | grep -i -E "\bISP\b|isp0|camera" | tail -8; done
 if command -v cam >/dev/null; then
   echo "--- libcamera"; cam -l 2>&1 | head -8
   if [ $capture = 1 ]; then
