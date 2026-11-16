@@ -42,7 +42,7 @@ out=$(cap power 2); rc=$?
 out=$(cap gestures 2); rc=$?
 [[ $rc -eq 0 && $out == *"max simultaneous 2"* && $out == *"values seen: [2]"* && $out == *"max touch major 900"* && $out == *"BTN_LEFT click x1"* ]] && ok "gestures: contacts, tool type, size, click" || { bad "gestures (rc=$rc)"; echo "$out"; }
 
-LV=suspend out=$(LV=suspend cap status); rc=$?
+out=$(LV=suspend cap status); rc=$?
 [[ $rc -eq 1 && $out == *"POWER-KEY POLICY: FAIL"* ]] && ok "policy fails when logind would suspend" || { bad "suspend policy (rc=$rc)"; echo "$out"; }
 
 : >"$t/ld/50-aurora-sep.conf"
@@ -52,5 +52,16 @@ rm "$t/ld/50-aurora-sep.conf"
 
 rm "$t/dev/event2"; : >"$t/dev/event2"
 out=$(cap power 1); [[ $out == *"MISSING  KEY_POWER"* ]] && ok "power: no press is MISSING" || bad "no-press case"
+
+out=$(cap keys 1); [[ $out == *"the moon key"* && $out != *"Do NOT press the moon"* ]] && ok "keys prompt names the moon key by default" || bad "default keys prompt"
+out=$(K114S_NO_MOON=1 cap keys 1); [[ $out == *"Do NOT press the moon key"* && $out != *"Ctrl+brightness down/up, the moon key"* ]] && ok "K114S_NO_MOON omits the moon key from the prompt" || { bad "no-moon prompt"; echo "$out"; }
+out=$(K114S_SUSPEND_VALUE=ignore K114S_SUSPEND_LP_VALUE=ignore cap keypolicy); rc=$?
+[[ $rc -eq 0 && $out == *"KEY POLICY: ok"* ]] && ok "keypolicy ok when all are ignore" || { bad "keypolicy ok (rc=$rc)"; echo "$out"; }
+out=$(K114S_SUSPEND_VALUE=suspend K114S_SUSPEND_LP_VALUE=ignore cap keypolicy); rc=$?
+[[ $rc -eq 1 && $out == *"KEY POLICY: FAIL"* ]] && ok "keypolicy fails on HandleSuspendKey=suspend" || { bad "keypolicy suspend (rc=$rc)"; echo "$out"; }
+out=$(K114S_SUSPEND_VALUE=ignore K114S_SUSPEND_LP_VALUE=hibernate cap keypolicy); rc=$?
+[[ $rc -eq 1 ]] && ok "keypolicy fails on a long-press hibernate" || bad "keypolicy long press (rc=$rc)"
+out=$(K114S_SUSPEND_VALUE=ignore K114S_SUSPEND_LP_VALUE=ignore LV=poweroff cap keypolicy); rc=$?
+[[ $rc -eq 1 ]] && ok "keypolicy fails on HandlePowerKey=poweroff" || bad "keypolicy power key (rc=$rc)"
 
 exit $fail

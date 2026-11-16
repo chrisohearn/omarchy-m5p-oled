@@ -6,6 +6,9 @@
 #
 #   k114s-input-capture.sh status               no root: LEDs, pwm period, input devices, binds,
 #                                               power-key policy. Exit 1 if the policy is wrong.
+#   k114s-input-capture.sh keypolicy            no root: exit 1 unless logind ignores HandleSuspendKey,
+#                                               HandleSuspendKeyLongPress and HandlePowerKey (the moon
+#                                               key must never suspend the Mac).
 #   k114s-input-capture.sh keys [SECONDS]       sudo for /dev/input. Press every top-row key, Fn,
 #                                               Ctrl+brightness, the moon key. Default 60 s.
 #   k114s-input-capture.sh power [SECONDS]      sudo. One SHORT press of the power button. Never
@@ -15,7 +18,9 @@
 #
 # The output holds no serial numbers, addresses or network names. Needs python3 (stdlib only).
 # Test hooks (tests/hardware/test-input-capture.sh only): K114S_PROC_INPUT, K114S_DEV_DIR,
-# K114S_BINDS_JSON, K114S_LOGIND_VALUE, K114S_LOGIND_DIRS, K114S_LEDS, K114S_PWM_DT, K114S_NO_SUDO.
+# K114S_BINDS_JSON, K114S_LOGIND_VALUE, K114S_LOGIND_DIRS, K114S_LEDS, K114S_PWM_DT, K114S_NO_SUDO, K114S_SUSPEND_VALUE, K114S_SUSPEND_LP_VALUE.
+# K114S_NO_MOON=1 makes the keys prompt leave out the moon key (the owner session sets it when it did not
+# verify that logind ignores the suspend key).
 set -u
 proc=${K114S_PROC_INPUT:-/proc/bus/input/devices}
 leds=${K114S_LEDS:-/sys/class/leds}
@@ -44,6 +49,18 @@ power_policy() { # prints the verdict, returns 1 on a problem
   [ "$val" = ignore ] || bad=1
   if [ $bad = 0 ]; then echo "POWER-KEY POLICY: ok (Hyprland gets XF86PowerOff, logind ignores it)"
   else echo "POWER-KEY POLICY: FAIL (a short press would be handled by logind, not by the Omarchy power menu)"; fi
+  return $bad
+}
+
+key_policy() { # prints each setting, returns 1 unless all are ignore
+  local bad=0 p v
+  for p in HandleSuspendKey HandleSuspendKeyLongPress HandlePowerKey; do
+    case $p in HandleSuspendKey) v=${K114S_SUSPEND_VALUE:-} ;; HandleSuspendKeyLongPress) v=${K114S_SUSPEND_LP_VALUE:-} ;; *) v=${K114S_LOGIND_VALUE:-} ;; esac
+    [ -n "$v" ] || v=$(busctl get-property org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager "$p" 2>/dev/null | sed -n 's/^s "\(.*\)"$/\1/p')
+    echo "logind $p: ${v:-unknown}"
+    [ "$v" = ignore ] || bad=1
+  done
+  [ $bad = 0 ] && echo "KEY POLICY: ok (no key press can suspend)" || echo "KEY POLICY: FAIL (a key press could suspend the Mac)"
   return $bad
 }
 
@@ -117,8 +134,13 @@ capture() { # MODE SECONDS
   [ "$mode" = keys ] && { binds_report; echo; }
   [ "$mode" = power ] && { power_policy; echo; }
   case $mode in
-    keys) echo "Press now, for $secs s: mute, vol down, vol up, previous, play/pause, next, brightness down/up,"
-          echo "Ctrl+brightness down/up, the moon key, Fn, mic-mute if there is one. Do not hold anything.";;
+    keys) if [ -n "${K114S_NO_MOON:-}" ]; then
+            echo "Press now, for $secs s: mute, vol down, vol up, previous, play/pause, next, brightness down/up,"
+            echo "Ctrl+brightness down/up, Fn, mic-mute if there is one. Do NOT press the moon key. Do not hold anything."
+          else
+            echo "Press now, for $secs s: mute, vol down, vol up, previous, play/pause, next, brightness down/up,"
+            echo "Ctrl+brightness down/up, the moon key, Fn, mic-mute if there is one. Do not hold anything."
+          fi;;
     power) echo "Press the power button ONCE, briefly, within $secs s. Then say what appeared (power menu, lock, nothing). Do not hold it.";;
     gestures) echo "For $secs s: rest a palm on the pad while typing a sentence; then 2-, 3- and 4-finger swipes, a pinch, one click.";;
   esac
@@ -186,6 +208,7 @@ else:
 
 case ${1:-status} in
   status) status ;;
+  keypolicy) key_policy ;;
   keys|power|gestures) capture "$1" "${2:-$([ "$1" = power ] && echo 30 || echo 60)}" ;;
   *) sed -n '2,16p' "$0"; exit 2 ;;
 esac
