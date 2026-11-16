@@ -192,6 +192,12 @@ for bad in 's#omarchy_linux-aurora-k114s.efi#omarchy_linux-k114s.efi#' '/cmdline
   mkesp aurora; rm "$B/promotion/repair-block.conf"; sed -i "$bad" "$E/k114s-repair/promotion/repair-block.conf"; before=$(sum "$E")
   out=$($R restore-repair --esp-dir "$E" 2>&1); has "a saved block changed by '$bad' stops" "$out" "STOPPED"; ok "and writes nothing ('$bad')" "$(sum "$E")" "$before"
 done
+# a menu with_repair_block refuses (two default_entry lines) is found before any write, even when room must be made first
+for mode in "" "--check"; do
+  mkesp aurora; sed -i '1i default_entry: 2' "$E/limine.conf"; before=$(sum "$E")
+  out=$(RF 1000000 restore-repair $mode --esp-dir "$E" 2>&1); has "a refused menu stops ($mode)" "$out" "2 default_entry lines"
+  ok "and writes nothing, the linux-aurora image stays ($mode)" "$(sum "$E")" "$before"
+done
 mkesp aurora; rm "$E/k114s-repair/r2c/repair-uki.txt"; out=$($R restore-repair --esp-dir "$E" 2>&1)
 has "no record of the repair image on the ESP: stops" "$out" "cannot be checked"
 
