@@ -1,0 +1,34 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled): install, or remove, the mkinitcpio drop-in that keeps appledrm out of every initramfs.
+#
+#     sudo bash initramfs-no-appledrm-k114s            install /etc/mkinitcpio.conf.d/99-k114s-no-appledrm.conf (idempotent)
+#     sudo bash initramfs-no-appledrm-k114s --undo     remove it (only the file this script installs)
+#
+# It writes one file under /etc and builds nothing, touches no image, no /boot and no ESP. The next
+# build (an update, limine-mkinitcpio, mkinitcpio -P) is the first to use it. See docs/r3-display-d5-d9.md, F16 and G6b.
+set -Eeuo pipefail
+ROOT=${K114S_ROOT:-}
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+NAME=99-k114s-no-appledrm.conf
+SRC=$HERE/$NAME
+DEST=$ROOT/etc/mkinitcpio.conf.d/$NAME
+die() { echo "initramfs-no-appledrm-k114s: $*" >&2; exit 1; }
+[[ $(id -u) == 0 || -n ${K114S_ROOT:-} ]] || die "run with sudo"
+case ${1:-install} in
+  install)
+    [[ -f $SRC ]] || die "$SRC is missing"
+    bash -n "$SRC" || die "$SRC does not parse"
+    mkdir -p "$(dirname "$DEST")"
+    if [[ -e $DEST ]] && ! cmp -s "$SRC" "$DEST"; then echo "initramfs-no-appledrm-k114s: replacing a different $NAME"; fi
+    install -m 0644 "$SRC" "$DEST"
+    echo "initramfs-no-appledrm-k114s: installed $DEST"
+    ;;
+  --undo)
+    if [[ ! -e $DEST ]]; then echo "initramfs-no-appledrm-k114s: nothing to undo"; exit 0; fi
+    grep -q -x '# K114s (omarchy-m5p-oled): keep the display driver out of every initramfs built on this Mac.' "$DEST" ||
+      die "$DEST is not the file this script installs: not removed"
+    rm -f "$DEST"
+    echo "initramfs-no-appledrm-k114s: removed $DEST"
+    ;;
+  *) die "unknown argument $1" ;;
+esac

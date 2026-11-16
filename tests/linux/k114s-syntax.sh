@@ -4,7 +4,7 @@
 set -u
 . "$(dirname "$0")/r3-lib.sh" "${1:-}"
 for f in esp-trim k114s-lib.sh k114s-guard k114s-holds k114s-repackage k114s-recovery-set k114s-release-check k114s-release k114s-boot-success \
-    k114s-modules-cleanup k114s-tooling-install hooks/pre-refresh-pacman-k114s-holds hooks/post-update-k114s-release-check; do
+    k114s-modules-cleanup k114s-tooling-install initramfs-no-appledrm-k114s hooks/pre-refresh-pacman-k114s-holds hooks/post-update-k114s-release-check; do
   ok "bash parses $f" "$(bash -n "$L/$f" 2>&1)" ""
 done
 for f in update-boot-ctxr-k114s k114s-booted-esp r3a-trial/k114s-boot-once r3a-trial/70-k114s-gpu-desktop; do ok "sh parses $f" "$(sh -n "$L/$f" 2>&1)" ""; done

@@ -37,7 +37,7 @@ bounded by `apple,min-brightness` (10 nits).
 | Boot | What runs | Tests | Falls back to, if it hangs |
 | --- | --- | --- | --- |
 | (none) session 0, a default boot of r3a on P | block P, D9p (stage the macOS tool and the fallback tree on the ESP), then M9 (the macOS excursion; its return boot is this session's boot), W0, W1, I1b (`linux-k114s-r3b 7.3.0.r3b.b1-1` beside r3a), S5 (the D5 Stage 2 onto the ESP), the gates record | I1b: G3 and G6 | nothing booted |
-| **1. T3 = D5 + D7 + D8** | one-shot `Omarchy/linux-k114s-r3b` + `aura-try` `m1n1/boot-ctxr-disp-bl.bin` (pin loader `beceb683...` + brightness tree `5b6b83c8...`), VRR masked | the hand-off as T2, then D5 (the stepped writes), D7 (DPMS off and on three times, the OLED idle profile), D8 (night light), G6b (no `appledrm` in a build from this boot) | before Limine: r3b.b1 on P (the one-shot is still pending: D5a, measured for free). After Limine: r3a on P |
+| **1. T3 = D5 + D7 + D8** | one-shot `Omarchy/linux-k114s-r3b` + `aura-try` `m1n1/boot-ctxr-disp-bl.bin` (pin loader `beceb683...` + brightness tree `5b6b83c8...`), VRR masked | the hand-off as T2, then D5 (the stepped writes), D7 (DPMS off and on three times, the OLED idle profile), D8 (night light), G6a (the no-`appledrm` drop-in) and G6b (no `appledrm` in a build from this boot) | before Limine: r3b.b1 on P (the one-shot is still pending: D5a, measured for free). After Limine: r3a on P |
 | **2. T4 = D6** (and D9c at the end of its session) | the same one-shot + `aura-try`, the mask `fw27_panel_vrr=0` dropped for this boot | the boot checks again with `--vrr on` (the second clean brightness-tree boot), the D5 ladder again, `vrr_capable`, a Hyprland VRR test; then D9c writes the promotion | as boot 1 |
 | **3. D9, first boot** | the new default: `Omarchy/linux-k114s-r3b` on the configured display Stage 2 (no trial, no one-shot) | block F, block C9 | none cheap: section 5 |
 | **4. D9, second boot** | the same, nothing armed | block F, block C9, D9x (the close), D9y, P9, the first update | as boot 3 |
@@ -203,8 +203,18 @@ only because it ran from P, a boot with no display subsystem. After D9 every boo
 r3a image) can put `appledrm` into an image that is then started unchecked, with the display driver probing before the root filesystem
 is mounted. So: **G6b** (boot 1, after D8) builds a throw-away initramfs from the display-tree boot into a temporary folder and
 lists it; D9a needs `G6b-passed`; and block P9 dumps and lists the `.initrd` of every image on the ESP in every check (before and
-after every update, in every default boot). A failed G6b blocks D9: the remedy (for example an `/etc/mkinitcpio.conf.d` drop-in)
-is not guessed here, it is designed from the listing the block prints and proved by the same block.
+after every update, in every default boot). A failed G6b blocks D9.
+
+The remedy is a mkinitcpio drop-in, `linux/99-k114s-no-appledrm.conf`, installed as `/etc/mkinitcpio.conf.d/99-k114s-no-appledrm.conf` by
+`linux/initramfs-no-appledrm-k114s` (block **G6a**; `--undo` removes it). The mechanism: mkinitcpio's `add_module` returns at once for a module
+already counted in its `_addedmodules` table, so the drop-in counts `appledrm` and `dcp_fabric_core` (the display's fabric power-domain driver,
+whose only user is `appledrm`) as added, and neither lands in an image, whichever hook asks for it (`kms` adds everything under
+`drivers/gpu/drm/`, `autodetect` lists every loaded module). It is one `/etc` file and no replaced hook: the hook arrays, `simpledrm` (built
+in), the GPU, Plymouth, the vconsole and `sd-encrypt` paths are not touched, and a module a MODULES entry names (`apple_pmp` in
+`92-omarchy-mac-pmp.conf`) is still added. What it does take out with the pair is what only they pulled in as dependencies (measured in a
+`kms`-only throw-away build on this boot: the display crossbar mux and the DP alt-mode driver). It is read only when mkinitcpio is run without
+`-c` (the way `limine-mkinitcpio`, `mkinitcpio -P` and block G6b run it; `-c` switches `/etc/mkinitcpio.conf.d` off). G6b requires the file
+to be installed and to be the repository's, so a pass proves a build with it; D9a and P9 check it is still there.
 
 ## 3. Rules and variables
 
@@ -654,12 +664,27 @@ crashes the DCP** (the bar indicator, the menu and `omarchy-toggle-nightlight` s
 puts the same line into the owner's look file and the post-D9 report to Jarvis, and lists it in section 8. Guarding the toggle itself
 (an override of the Omarchy script) is a follow-up, not part of this change. Undo: `omarchy-toggle-nightlight`.
 
-**G6b. No `appledrm` in an initramfs built from a display-tree boot (as the user; writes only a temporary folder; about a minute).**
-This is the prevention for F16: the build is what a rebuild in the promoted layout would do.
+**G6a. Install the no-`appledrm` drop-in (as the user, with sudo; writes `/etc/mkinitcpio.conf.d/99-k114s-no-appledrm.conf` and nothing else).**
+The prevention for F16 (the mechanism is described there). It builds nothing and touches no image, `/boot` or ESP; the next build is the first to
+use it. Run it before G6b; it is safe in any boot.
 
     (
-    : "${D:?STOP: set K, REPO, D, R5, RT and DO first (section 3)}"
+    : "${REPO:?STOP: set K, REPO, D, R5, RT and DO first (section 3)}"
     stop() { echo "STOP: $*"; exit 1; }
+    sudo bash "$REPO/linux/initramfs-no-appledrm-k114s" || stop "the installer failed; nothing else was changed"
+    cmp -s "$REPO/linux/99-k114s-no-appledrm.conf" /etc/mkinitcpio.conf.d/99-k114s-no-appledrm.conf || stop "the installed drop-in is not the repository's file"
+    echo "G6a: /etc/mkinitcpio.conf.d/99-k114s-no-appledrm.conf is installed; every initramfs built from now on leaves appledrm out"
+    )
+
+Expected: the last line. Undo: `sudo bash "$REPO/linux/initramfs-no-appledrm-k114s" --undo` (D9a, P9 and G6b then stop until it is installed again).
+
+**G6b. No `appledrm` in an initramfs built from a display-tree boot, with the G6a drop-in installed (as the user; writes only a temporary folder; about a minute).**
+This is the check for F16: the build is what a rebuild in the promoted layout would do, and the drop-in is what must keep `appledrm` out of it.
+
+    (
+    : "${REPO:?STOP: set K, REPO, D, R5, RT and DO first (section 3)}" "${D:?STOP: set D first}"
+    stop() { echo "STOP: $*"; exit 1; }
+    cmp -s "$REPO/linux/99-k114s-no-appledrm.conf" /etc/mkinitcpio.conf.d/99-k114s-no-appledrm.conf || stop "the no-appledrm drop-in is not installed (or is not the repository's file): run G6a first (F16); nothing was changed"
     REL=7.3.0-17.v272-11-k114s-r3b-ARCH
     sudo test -s "$D/T3-booted" && [ "$(uname -r)" = $REL ] || stop "run G6b in the T3 boot, after T3b; nothing was changed"
     ls /sys/class/drm | grep -q -- '-eDP-' || stop "no eDP connector: this boot has no display subsystem, so a build here proves nothing about the promoted boots"
@@ -669,16 +694,18 @@ This is the prevention for F16: the build is what a rebuild in the promoted layo
     sudo sh -c 'lsinitcpio "$1/test.img" > "$1/list" 2>/dev/null' _ "$t"; [ "$(sudo grep -c '\.ko' "$t/list")" -ge 20 ] || stop "lsinitcpio lists no modules: cannot read the test image"
     if [ "$(sudo grep -c appledrm "$t/list")" != 0 ]; then
       echo "G6b-failed $(date -Is): a display-tree build puts appledrm in the initramfs" | sudo tee "$D/G6b-failed" >/dev/null
-      stop "appledrm is in an initramfs built from this boot (F16): D9 stays blocked until a drop-in keeps it out and this block passes; the lead reads $t/build.log's hooks and the module names (sudo grep appledrm $t/list; never copy the image) before deciding"
+      stop "appledrm is in an initramfs built from this boot even with the G6a drop-in (F16): D9 stays blocked until this block passes; the lead reads $t/build.log's hooks and the module names (sudo grep appledrm $t/list; never copy the image) before deciding"
     fi
-    echo "G6b $(date -Is): $(sudo grep -c '\.ko' "$t/list") modules, no appledrm" | sudo tee "$D/G6b-passed" >/dev/null
+    sudo rm -f "$D/G6b-failed"
+    echo "G6b $(date -Is): $(sudo grep -c '\.ko' "$t/list") modules, no appledrm (with the G6a drop-in)" | sudo tee "$D/G6b-passed" >/dev/null
     echo "G6b: a build from a display-tree boot has no appledrm in its initramfs (the ESP and /boot were not touched)"
     )
 
 Expected: the last line. It writes a temporary image of about 30 MB into `/var/tmp` and removes it; no hook runs (`-g` builds a
-plain image, not a UKI, and does not call limine). A `STOP` about `appledrm` is a blocker for D9, not for D5 to D8. Undo: nothing.
+plain image, not a UKI, and does not call limine). A `STOP` about `appledrm` or about the drop-in is a blocker for D9, not for D5 to D8
+(run G6a, then G6b again). Undo: nothing.
 
-Record `T3 PASSED` (D5, D7, D8, G6b) in the recovery log with the start level. Then T4a.
+Record `T3 PASSED` (D5, D7, D8, G6a, G6b) in the recovery log with the start level. Then T4a.
 
 ### T4 = D6 (boot 2)
 
@@ -814,6 +841,7 @@ block P.
     sudo grep -q "$tool" "$D/M9-passed" || stop "M9-passed does not name the tool now staged on the ESP ($tool): the macOS agent ran another one; repeat M9"
     [ "$(h "$D/k114s.dtb.bright")" = $BT ] && [ "$(h "$D/m1n1-pin.bin")" = $PINL ] && [ "$(h "$D/boot-ctxr-disp-bl.bin")" = $B5 ] || stop "an input in $D is not the expected file (S5)"
     [ "$(h /boot/efi/m1n1/boot-ctxr-r3-gpu.bin)" = $GPU ] || stop "m1n1/boot-ctxr-r3-gpu.bin (the Linux-side fallback and M9's source) is not P's file"
+    cmp -s "$REPO/linux/99-k114s-no-appledrm.conf" /etc/mkinitcpio.conf.d/99-k114s-no-appledrm.conf || stop "the no-appledrm drop-in is not installed (G6a): a rebuild after D9 would put appledrm in the initramfs (F16)"
     # the proof (P1b's method): in a throw-away root, the Stage 2 hook, with the pin loader as m1n1-ctxr.bin and the brightness
     # tree pinned, writes the D9 file byte for byte; with no m1n1-ctxr.bin it would write the installed loader's file
     t=$(mktemp -d) || exit 1; trap 'sudo rm -rf "$t"' EXIT
@@ -971,7 +999,8 @@ Expected: the check with `default_entry is Omarchy/linux-k114s (entry 3, ...)` a
     sudo test -s /boot/efi/k114s-repair/promotion/repair-block.conf && sudo test -s /boot/efi/k114s-repair/promotion/k114s_repair.py && sudo test -s /boot/efi/k114s-repair/r2c/repair-uki.txt || stop "a file restore-repair needs is gone from the ESP"
     [ "$(h /boot/efi/EFI/Linux/omarchy_linux-k114s.efi)" = $R3A ] || stop "the r3a image is not a15fa01a..."
     [ "$(sudo ls /boot/efi/EFI/Linux | LC_ALL=C sort | tr '\n' ' ')" = "omarchy_linux-k114s-r3b.efi omarchy_linux-k114s.efi " ] || stop "EFI/Linux is not exactly the r3b and r3a images (a third image? a rebuild brought linux-aurora's back: section 4, U1): $(sudo ls /boot/efi/EFI/Linux | tr '\n' ' ')"
-    # G6 on every image, every time (F16): a rebuild from a display-tree boot can put appledrm into the initramfs
+    # G6 on every image, every time (F16): a rebuild from a display-tree boot can put appledrm into the initramfs; the drop-in is what prevents it
+    grep -q -x '  _addedmodules\[appledrm\]=1' /etc/mkinitcpio.conf.d/99-k114s-no-appledrm.conf 2>/dev/null || stop "the no-appledrm drop-in is not installed (G6a): the next rebuild would put appledrm in the initramfs (F16)"
     g=$(sudo mktemp -d /var/tmp/k114s-p9.XXXXXX) || exit 1; trap 'sudo rm -rf "$g"' EXIT
     for i in /boot/efi/EFI/Linux/*.efi; do
       sudo objcopy --dump-section .initrd="$g/initrd" "$i" /dev/null 2>/dev/null; sudo test -s "$g/initrd" || stop "no .initrd section dumped from $i"
@@ -1336,7 +1365,9 @@ direct or helper call of `limine-mkinitcpio`. **Owner option, not taken:**
   and re-verifies r3a's image too. A rebuild that damages r3a's image (the macOS `default k114s` target) before U1 runs is the worst
   case.
 - **G6 is no longer held by the boot (F16).** After D9 every boot has the display subsystem, so a rebuild can put `appledrm` into
-  an image. G6b proves a build from a display-tree boot before D9; P9 lists both images in every check. An image with `appledrm`
+  an image. The `/etc/mkinitcpio.conf.d/99-k114s-no-appledrm.conf` drop-in (G6a) keeps it out of every build; G6b proves a build from a display-tree
+  boot with it before D9; D9a and P9 check it is installed and P9 lists both images in every check. A package update that replaces `/etc` files
+  or a build run with `-c` would bypass the drop-in, and the image listing in P9 is the net. An image with `appledrm`
   has never been booted and could hang before the root filesystem.
 - **Unattended trial boots can hang hard.** Boots 1 to 3 have no software watchdog on this Mac. Boots 1 and 2 fall back by a power-button
   hold; boot 3 by macOS. The deadline lives with Jarvis (N) because a hung Mac cannot report itself; if the notice is not
@@ -1377,7 +1408,9 @@ worktree and the scratch folders:
 | Test | Result | Label |
 | --- | --- | --- |
 | `bash tests/linux/run-r3.sh` | `r3 update tooling: 1389 passed, 0 failed, 0 test file(s) skipped` | emulator/replica |
-| `tests/linux/test-display-d5-d9-runbook.sh` (new; it is in `run-r3.sh`) | `display d5-d9 runbook tests: 182 passed, 0 failed` (the third round added: U0 stops on every migration that would run until it is recorded as read, with helper, package-drop and unmarked-installed cases; D9x removes the notices' acknowledgements and reports stay-awake to Jarvis; D9c's printed line says STOP. The second repair round added: root-only scratch folders for G6b and P9 (the fake sudo closes a `sudo mktemp -d` folder to the plain user, with a test that the old form fails and a lint); U0's migration reading and its recorded-gate release, and its trigger regex built from replica hook files (an /etc override, a second hook, a remove-only hook); N's `N-acked-<boot>` refusal in T3a and T4a and D9c's printed line; the stay-awake mode already on (idle-before true) kept by T3a and D9x. The first repair round added: a D5 ladder whose read-back differs and a D5 write that fails each stop D5 and write no `D5-passed`; the locked-session stops of D5, D7, D8 and D6; T3a's stay-awake mode and its refusal; G6b's pass, its `appledrm` failure and its no-eDP stop; D9a's refusal without `G6b-passed`; P9's G6 on every image; D9x's idle restore; U0's pending-package stops; U1's r3a-image lines). Cuts the blocks D9p, I1b, S5, T3a, T3b, D5, D7, D7b, D8, G6b, T4a, T4b, D6, D9a, D9c, the undo of D9c, P9, C9, D9x, D9y, U0, U1, C1b and C2b out of this file, and the first runbook's P, W0, W1, X, F, C, C4 and C5 out of that one, and runs them against the fake Mac of `display-fake-lib.sh` with this window's record folder. Covered: the first window's folder is never written; I1b installs version `7.3.0.r3b.b1-1` with G3 and G6 and refuses the older package, a wrong hash, a full rebuild and `appledrm` in the initramfs; S5 and both arms (the one-shot, `aura-try`, the mask, the reboot scheduled with `systemd-run` and never `systemctl reboot`); every STOP of the arms (no gates, no mask, no drop-in, restore turned on, a wrong trial file, a missing `eDP-2` rule); T3b and T4b after block F with `--floor` and `--vrr on`, and refused before F, on the wrong kernel, with a `BAD`, with no trial; D5 (the ladder `500 250 100 50 20 10 20 50 100 250 500`, the Omarchy steps `500 450 400 450 500`, no write below 10 nits, none of 0 or 1000, the start level back; no floor line, an unmoving step, another scale, a `BAD` stop it), D7 (three cycles; a panel that does not wake, a DCP crash line), D7b (the profile, the copy, bad JSON), D8, D6 (the failed-marker, the watchdog counted, VRR off again); D9a with the real Stage 2 hook run in a throw-away root against fake loaders and trees, which must write the D9 file byte for byte (and, without the pin loader, must not); D9c (the Stage 2, the pins, the loader file, `default_entry`, the holds, the chain text, the mask by D6's outcome, the records), its undo, and its refusals (no D9a, an unexpected kernel, the sync running, a `limine.conf` that is not I1b's, a half-run); P9 (a third image, a missing `m1n1-ctxr.bin`, a missing hold, a wrong Stage 2); C9 and D9x after one and two clean boots, D9y, U0 and U1 (a returned `linux-aurora` image, a stray temporary file, a rebuilt image); the abandon path to `no boot file changed`; every block parses with `bash -n`, no block writes 0 to the backlight, no block prints a `limine.conf` line that could hold the command line. about 45 seconds in a quiet run (the fake `sleep` makes the blocks' waits instant) | emulator/replica |
+| `tests/linux/test-display-d5-d9-runbook.sh` (new; it is in `run-r3.sh`) | `display d5-d9 runbook tests: 189 passed, 0 failed` (the G6 repair added: G6a installs the drop-in through the installer and is idempotent; G6b stops before any build without the drop-in or with one that is not the repository's file, and a pass removes an earlier `G6b-failed`; D9a and P9 stop without the drop-in. The third round added: U0 stops on every migration that would run until it is recorded as read, with helper, package-drop and unmarked-installed cases; D9x removes the notices' acknowledgements and reports stay-awake to Jarvis; D9c's printed line says STOP. The second repair round added: root-only scratch folders for G6b and P9 (the fake sudo closes a `sudo mktemp -d` folder to the plain user, with a test that the old form fails and a lint); U0's migration reading and its recorded-gate release, and its trigger regex built from replica hook files (an /etc override, a second hook, a remove-only hook); N's `N-acked-<boot>` refusal in T3a and T4a and D9c's printed line; the stay-awake mode already on (idle-before true) kept by T3a and D9x. The first repair round added: a D5 ladder whose read-back differs and a D5 write that fails each stop D5 and write no `D5-passed`; the locked-session stops of D5, D7, D8 and D6; T3a's stay-awake mode and its refusal; G6b's pass, its `appledrm` failure and its no-eDP stop; D9a's refusal without `G6b-passed`; P9's G6 on every image; D9x's idle restore; U0's pending-package stops; U1's r3a-image lines). Cuts the blocks D9p, I1b, S5, T3a, T3b, D5, D7, D7b, D8, G6a, G6b, T4a, T4b, D6, D9a, D9c, the undo of D9c, P9, C9, D9x, D9y, U0, U1, C1b and C2b out of this file, and the first runbook's P, W0, W1, X, F, C, C4 and C5 out of that one, and runs them against the fake Mac of `display-fake-lib.sh` with this window's record folder. Covered: the first window's folder is never written; I1b installs version `7.3.0.r3b.b1-1` with G3 and G6 and refuses the older package, a wrong hash, a full rebuild and `appledrm` in the initramfs; S5 and both arms (the one-shot, `aura-try`, the mask, the reboot scheduled with `systemd-run` and never `systemctl reboot`); every STOP of the arms (no gates, no mask, no drop-in, restore turned on, a wrong trial file, a missing `eDP-2` rule); T3b and T4b after block F with `--floor` and `--vrr on`, and refused before F, on the wrong kernel, with a `BAD`, with no trial; D5 (the ladder `500 250 100 50 20 10 20 50 100 250 500`, the Omarchy steps `500 450 400 450 500`, no write below 10 nits, none of 0 or 1000, the start level back; no floor line, an unmoving step, another scale, a `BAD` stop it), D7 (three cycles; a panel that does not wake, a DCP crash line), D7b (the profile, the copy, bad JSON), D8, D6 (the failed-marker, the watchdog counted, VRR off again); D9a with the real Stage 2 hook run in a throw-away root against fake loaders and trees, which must write the D9 file byte for byte (and, without the pin loader, must not); D9c (the Stage 2, the pins, the loader file, `default_entry`, the holds, the chain text, the mask by D6's outcome, the records), its undo, and its refusals (no D9a, an unexpected kernel, the sync running, a `limine.conf` that is not I1b's, a half-run); P9 (a third image, a missing `m1n1-ctxr.bin`, a missing hold, a wrong Stage 2); C9 and D9x after one and two clean boots, D9y, U0 and U1 (a returned `linux-aurora` image, a stray temporary file, a rebuilt image); the abandon path to `no boot file changed`; every block parses with `bash -n`, no block writes 0 to the backlight, no block prints a `limine.conf` line that could hold the command line. about 45 seconds in a quiet run (the fake `sleep` makes the blocks' waits instant) | emulator/replica |
+| `tests/linux/test-initramfs-no-appledrm.sh` (new; it is in `run-r3.sh`) | `initramfs no-appledrm tests: 20 passed, 0 failed` (the installer's install, second run, replacing a different file, `--undo`, a foreign file kept, an unknown argument, no root; the drop-in against a fake `add_module` with the same early return as mkinitcpio's: `appledrm` and `dcp_fabric_core` out, the rest and a MODULES entry in; sourced without the associative table under `set -u` it does nothing; and two reads of this host's mkinitcpio that the mechanism still holds) | emulator/replica |
+| a real throw-away `mkinitcpio -g` build, kms hook only, with and without the drop-in, in a scratch folder (as a normal user, `MKINITCPIO_CONF` instead of `-c`) | 159 modules and `appledrm.ko` plus `dcp-fabric-core.ko` without it; 154 and neither with it (also gone: `mux-apple-display-crossbar`, `atc-t6050-dp` and, in that kms-only config, `apple-pmp`, which the real configuration's MODULES entry adds back); exit 0 both times | seen on hardware (board) |
 | `tests/linux/test-display-trials-runbook.sh` (now sharing `display-fake-lib.sh`) | `display trials runbook tests: 108 passed, 0 failed` (unchanged by the split) | emulator/replica |
 | `tests/hardware/test-display-check.sh` | `display-check test: 33 passed, 0 failed` (10 new: `--floor` on the brightness build, on the D4 build and tree, a dropped floor and callback 590; `--vrr on` on an unmasked boot, on a masked one, with Hyprland's vrr true; an unknown `--vrr`) | emulator/replica |
 | `tests/brightness/test-backlight-check.sh` | `# backlight-check replica: 0 failed` (30 `ok` lines; 8 new for `--auto`: the ladder from 500 and from 40 nits, the start level back, a read-back that differs stops and puts 500 back, a failing write never tries the maximum, nothing above the start or below 10, a reported level below the floor starts at the floor, a TERM mid-ladder puts the start level back) | emulator/replica |
