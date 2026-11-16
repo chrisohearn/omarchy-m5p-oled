@@ -13,15 +13,19 @@ fail=0
 pass() { echo "PASS $1"; }
 bad() { echo "FAIL $1"; fail=1; }
 have() { command -v "$1" >/dev/null 2>&1; }
-env_txt=${K114S_VK_ENV:-$(systemctl --user show-environment 2>/dev/null)}
+if [[ -v K114S_VK_ENV ]]; then env_txt=$K114S_VK_ENV; else env_txt=$(systemctl --user show-environment 2>/dev/null); fi
 
 echo "== session environment (what apps started from the desktop inherit)"
+if [[ -z $env_txt ]]; then
+  bad "cannot read the user manager environment (no user bus, e.g. over ssh): run this from a terminal in the desktop session"
+else
 grep -qx 'ASAHI_M5_BRINGUP=1' <<<"$env_txt" && pass "ASAHI_M5_BRINGUP=1" || bad "ASAHI_M5_BRINGUP is not 1: Mesa refuses the M5 device (this is what blacked out the first zink try)"
 grep -qE '^(LIBGL_ALWAYS_SOFTWARE|GBM_ALWAYS_SOFTWARE)=1' <<<"$env_txt" && bad "software rendering is forced" || pass "no software rendering forced"
 if [[ $zink -eq 1 ]]; then
-  grep -qx 'MESA_LOADER_DRIVER_OVERRIDE=zink' <<<"$env_txt" && pass "desktop runs through zink" || bad "MESA_LOADER_DRIVER_OVERRIDE=zink missing: the opt-in file does not say zink, or the user manager was not restarted"
+  grep -qx 'MESA_LOADER_DRIVER_OVERRIDE=zink' <<<"$env_txt" && pass "desktop runs through zink" || bad "MESA_LOADER_DRIVER_OVERRIDE=zink missing: the opt-in file does not say zink, the per-kernel opt-in ~/.config/k114s-gpu-desktop-r3a (or -r3b) is missing (r3 guard version 3), or the user manager was not restarted"
 else
   grep -qx 'MESA_LOADER_DRIVER_OVERRIDE=zink' <<<"$env_txt" && echo "INFO desktop is on zink" || echo "INFO desktop is on the native driver"
+fi
 fi
 
 echo "== Vulkan device"

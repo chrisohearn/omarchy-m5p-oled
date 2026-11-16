@@ -22,7 +22,8 @@ list should carry `vulkan-tools` (an image decision for the owner; this PR chang
 - `tests/hardware/k114s-vulkan-check.sh`: session environment, device and queue families without a
   window. `--vkcube` adds a 10 s vkcube run to watch. `--after-zink` expects the desktop on zink.
   Tested without hardware by `tests/hardware/test-vulkan-check.sh`.
-- `tests/hardware/media-smoke.sh --vkcube` covers the same ground within the wider media smoke test.
+- `tests/hardware/media-smoke.sh --vkcube` repeats the vkcube step within the wider media smoke test
+  (a ten-line duplicate, left as is: the two scripts have different inputs and exit rules).
 
 ## Owner step 1: vkcube on the native desktop (no restart)
 
@@ -39,23 +40,36 @@ window, copy the output and `journalctl --user -b | tail -50` into the issue.
 The first attempt failed because the session still had `ASAHI_M5_BRINGUP=0` (the generator and uwsm
 points in docs/r3-gpu-result.md, both fixed since). Today the opt-in file is empty (native driver) and
 `ASAHI_M5_BRINGUP=1` comes from `/usr/lib/environment.d/90-omarchy-j714s-gpu.conf`; the generator
-adds only `MESA_LOADER_DRIVER_OVERRIDE=zink` for a `zink` opt-in. Steps, with the owner at the Mac
-and the keyboard free in case the screen goes black:
+adds only `MESA_LOADER_DRIVER_OVERRIDE=zink` for a `zink` opt-in. On an r3 kernel the installed
+guard is version 3 (`linux/r3a-trial/70-k114s-gpu-desktop`): it honours the base opt-in only when the
+per-kernel opt-in `~/.config/k114s-gpu-desktop-r3a` (or `-r3b`) also exists. Do not run this retry
+while a display-plan window (docs/r3-display-plan.md, D1 on) is open: a zink session would muddy
+that evidence. Steps, with the owner at the Mac and the keyboard free in case the screen goes black.
+The restart ends every process of the user, so save work first and start it from outside the
+session, as docs/r3-gpu-result.md does:
 
 ```
 echo zink > ~/.config/k114s-gpu-desktop
-sudo linux/gpu-desktop/gpu-desktop-restart      # ends the desktop session; save work first
-# after logging in again:
+touch ~/.config/k114s-gpu-desktop-r3a            # or -r3b, matching the booted kernel
+# timed fallback: empties the opt-in and restarts the desktop unless cancelled after a good login
+sudo systemd-run --unit=k114s-zink-revert --on-active=230 sh -c ": > $HOME/.config/k114s-gpu-desktop; /usr/local/lib/omarchy-k114s/gpu-desktop-restart"
+sudo systemd-run --no-block /usr/local/lib/omarchy-k114s/gpu-desktop-restart
+# after logging in again, if the desktop is up, cancel the fallback:
+sudo systemctl stop k114s-zink-revert.timer
 bash tests/hardware/k114s-vulkan-check.sh --after-zink --vkcube
 ```
 
-Rollback (also from a text console with Ctrl+Alt+F3 if the desktop is black):
-`: > ~/.config/k114s-gpu-desktop` then `sudo linux/gpu-desktop/gpu-desktop-restart`. If no console
-answers, hold the power button and boot normally; the default entry is unchanged by this trial.
+Rollback by hand: from a text console (Ctrl+Option+Fn+F2), log in, `: > ~/.config/k114s-gpu-desktop`,
+then `sudo systemd-run --no-block /usr/local/lib/omarchy-k114s/gpu-desktop-restart`. If no console
+answers, hold the power button and boot normally; the default entry is unchanged by this trial. After
+a power cycle the opt-in still says `zink`: clear it (`: >`), and re-arm the GPU Stage 2 trial before
+any display-plan step, because stage2-rearm skips a boot that was forced off.
 Pass: the check ends "no FAIL", the desktop stays up for a few minutes and the cube spins. Zink
 sits on Borealis, so a Mesa-side fault is for betizzel/mesa-aurora, not this repo.
 
 ## What is left
 
-Owner steps 1 and 2 only. The upstream K116s comparison needs aurora-silicon's report text, which is
+Owner steps 1 and 2, plus offline items still open for #26: a headless vkcube in a nested or
+headless wlroots session, a compute-only Vulkan run (the script only checks that a graphics+compute
+queue family exists), and `vulkan-tools` in the image list (owner decision). The upstream K116s comparison needs aurora-silicon's report text, which is
 not in this repo. The issue stays open until a client has drawn.

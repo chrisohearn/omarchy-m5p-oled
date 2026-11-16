@@ -24,4 +24,11 @@ out=$(run $'ASAHI_M5_BRINGUP=1' --after-zink); rc=$?
 out=$(run $'ASAHI_M5_BRINGUP=1\nMESA_LOADER_DRIVER_OVERRIDE=zink' --after-zink --vkcube); rc=$?
 [[ $rc -eq 0 && $out == *"desktop runs through zink"* && $out == *"vkcube ran"* ]] && ok "zink desktop plus vkcube passes" || bad "zink rc=$rc"
 out=$(run $'ASAHI_M5_BRINGUP=1\nLIBGL_ALWAYS_SOFTWARE=1'); [[ $out == *"FAIL software rendering"* ]] && ok "forced software fails" || bad "software not caught"
+out=$(run ''); [[ $out == *"FAIL cannot read the user manager"* ]] && ok "empty environment gets its own FAIL" || bad "empty env not caught"
+rm "$t/bin/vulkaninfo" "$t/bin/vkcube"
+out=$(run $'ASAHI_M5_BRINGUP=1' --vkcube); rc=$?
+[[ $rc -eq 0 && $out == *"SKIP vulkaninfo"* && $out == *"SKIP vkcube"* ]] && ok "missing tools SKIP" || bad "missing tools rc=$rc"
+printf '#!/bin/sh\nexit 139\n' >"$t/bin/vkcube"; chmod +x "$t/bin/vkcube"
+out=$(run $'ASAHI_M5_BRINGUP=1' --vkcube); rc=$?
+[[ $rc -eq 1 && $out == *"FAIL vkcube crashed, exit 139"* ]] && ok "vkcube crash fails" || bad "vkcube crash rc=$rc"
 [[ $fail -eq 0 ]] && echo "all ok"; exit $fail
