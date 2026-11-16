@@ -11,6 +11,7 @@
 # 3. the sensor, controller, power, interrupt, SEP and pin values are the ones in the file header
 # 4. pin 112 stays reserved in every variant, pin 138 is exposed, no variant exposes more than documented
 # 5. a tree with a wrong sensor pin is told apart (the value checks are not vacuous)
+# 6. the ADT fact checker itself passes a replica and fails on a wrong ADT or tree pin (test-adt-touchid-facts.py)
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 K=${1:?usage: test-touchid-dtb.sh KTREE}
@@ -46,7 +47,7 @@ echo "ok   compiles with K114S_R3_TOUCHID (default, WITH_SD, WITH_SOUND)"
 
 d=$(dump on)
 has() { grep -Eq "$1" <<<"$d" || fail "tree lacks: $2"; echo "ok   $2"; }
-has 'sep = &?"?/.*sep@502600000|sep = "/soc.*sep@502600000"' "sep alias resolves to sep@502600000" || true
+has 'sep = &?"?/.*sep@502600000|sep = "/soc.*sep@502600000"' "sep alias resolves to sep@502600000"
 has 'fingerprint@0 \{' "fingerprint@0 node"
 has 'compatible = "apple,mesa-fingerprint"' "compatible apple,mesa-fingerprint"
 has 'spi-max-frequency = <0x7a1200>' "8 MHz (0x7a1200)"
@@ -91,4 +92,5 @@ echo "ok   pins exposed: 80+138 | +81 with the SD reader | 80,81,134,138,139 wit
 build neg "$(inc '#define K114S_R3_TOUCHID' '&mesa { enable-gpios = <&nub_gpio0 22 GPIO_ACTIVE_HIGH>; };')"
 if "$DTC" -I dtb -O dts "$W/neg.dtb" 2>/dev/null | grep -Eq 'enable-gpios = <0x[0-9a-f]+ 0x15 0x00>'; then fail "wrong pin not detected"; fi
 echo "ok   a wrong power pin is detected"
+python3 -I "$here/tests/test-adt-touchid-facts.py" || exit 1
 echo "test-touchid-dtb: all passed"

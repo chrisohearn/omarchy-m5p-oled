@@ -203,6 +203,14 @@ EXPECT_REG = {
     "/arm-io/atc-phy1": {0x2ab000000: "phy@2ab000000 core"},
     "/arm-io/atc-phy2": {0x383000000: "phy@383000000 core"},
 }
+# The left-back port's values in dts/t6050-k114s-usb.dtsi (section K114S_R3_USB_ATC0). Reported
+# apart and never part of the verdict: the shipped trees do not describe this port.
+EXPECT_REG_ATC0 = {
+    "/arm-io/usb-drd0": {0x2a2280000: "usb@2a2280000 dwc3-core"},
+    "/arm-io/atc-phy0": {0x2a3000000: "phy@2a3000000 core"},
+    "/arm-io/acio-phy-cpu0": {0x2a3148000: "mailbox@2a3148000"},
+    "/arm-io/dart-usb0": {0x2a2f00000: "iommu@2a2f00000"},
+}
 # port controller: (bus, SPMI address, role in the Linux tree)
 EXPECT_HPM = {
     "hpm0": ("nub-spmi-a0", 0x0c, "left-back port, the debug port: not described"),
@@ -289,6 +297,15 @@ def probe_adt(path, names=None):
             rc = 1
         else:
             print("  ok       %s on %s at 0x%02x  (%s)" % (name, bus, addr, what))
+    for path_, expect in EXPECT_REG_ATC0.items():
+        t = trail(root, path_)
+        if not t:
+            print("ATC0 draft: %s is not in the ADT" % path_)
+            continue
+        have = regs(t)
+        for addr, what in expect.items():
+            idx = [i for i, (a, _s) in enumerate(have) if a == addr]
+            print("ATC0 draft: %s 0x%x %s  (%s)" % (path_, addr, "is reg[%d]" % idx[0] if idx else "is NOT a reg entry", what))
     present = [p.rsplit("/", 1)[1] for p in PRESENCE if trail(root, p)]
     print("present in the ADT: %s" % " ".join(present))
     print("adt: %s" % ("every USB-C value of the K114s tree matches this machine" if rc == 0 else

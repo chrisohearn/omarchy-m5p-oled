@@ -20,8 +20,8 @@
  *   - the apple_sep driver does not admit a K114s. Its T6050 profile matches apple,j714s and
  *     apple,k116s only (drivers/soc/apple/profile.rs, aurora-silicon/linux #1649 added the K116s),
  *     so on this Mac the driver refuses to attach. A one-line driver patch is needed first.
- *   - /aliases/sep is not in the booted tree. m1n1 resolves the SEP by that alias (the K116s tree
- *     has `sep = &sep;`), so the alias is added here.
+ *   - /aliases/sep is not in the booted tree. The K116s tree has `sep = &sep;`, so the alias is added
+ *     here; whether our m1n1 acts on it is unverified (phase 3 trial boot).
  *   - omarchy-mac's touchid-eligibility lists no T6050 board and answers "unsupported:board".
  *   - the calibration and sensor root key names below are the J714s pattern; the setup tool
  *     (aurora-touchid-setup) carves them from this Mac's own iBoot System Container. Not run.
@@ -33,6 +33,9 @@
  * file replaces gpio-reserved-ranges, so it carries the pins of the other fragments through two
  * switches: K114S_TOUCHID_WITH_SD (80, 81, 138 exposed) and K114S_TOUCHID_WITH_SOUND (80, 81,
  * 134, 138, 139 exposed; covers the SD reader too). With neither: 80 and 138.
+ *
+ * Include order: this file replaces gpio-reserved-ranges, so include it after t6050-k114s-sd.dtsi
+ * and t6050-k114s-sound.dtsi (the later one wins).
  *
  * Define K114S_R3_TOUCHID to turn it on. Without it this file changes nothing.
  */

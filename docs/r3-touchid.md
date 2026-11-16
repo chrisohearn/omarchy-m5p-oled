@@ -39,7 +39,7 @@ Booted tree (`/proc/device-tree`, no root needed unless noted):
 
 ADT (root, from the `adt` partition, only addresses, interrupts, pins and the sensor generation id
 printed; no calibration, key or serial read), compared by `tests/k114s-adt-touchid-facts.py` with the
-compiled tree: **18 facts, all hold.**
+compiled tree: **19 facts, all hold.** Two are ADT-only checks of a constant (spi2 clock-ids 451, sensor id 0x3356); chip select 0 is read from the tree only. `tests/test-adt-touchid-facts.py` proves the checker fails when an ADT or tree pin differs.
 
 | Item | ADT |
 | --- | --- |
@@ -116,13 +116,14 @@ for upstream (phase 1) and for the owner's go for phase 5.
 ## Upstream
 
 - Driver profile for the K114s: aurora-silicon/linux, or betizzel/omarchy-m5 (the shared T6050 lane), as a
-  follow-up to #1649. Draft in the issue return text; not posted.
+  follow-up to #1649. Not posted. Draft: add `apple,k114s` next to `apple,k116s` in the T6050 profile
+  match list of `drivers/soc/apple/profile.rs`, with the ADT facts of this document as evidence.
 - omacom/omarchy-mac `lib/touchid-eligibility`: no T6050 board. aurora-sep's README already notes it.
   Needs a decision there on whether Touch ID on T6050 goes through omarchy-mac or aurora-sep.
 
 ## Index rows proposed (not edited here)
 
 - `docs/matrix.md` Touch ID / Secure Enclave row: evidence column "ADT sensor and SEP facts all equal
-  the J714s of #1587 (18 facts, agent-run); draft fragment `dts/t6050-k114s-touchid.dtsi`; installed
+  the J714s of #1587 (19 facts, agent-run); draft fragment `dts/t6050-k114s-touchid.dtsi`; installed
   `apple_sep` does not admit `apple,k114s`; omarchy-mac says `unsupported:board`"; state stays
   `evaluated`; next: upstream K114s profile line (docs/r3-touchid.md).

@@ -13,7 +13,11 @@ Checks, for the left-front (ATC1) and right (ATC2) ports of every tree given:
   - the port-controller buses and controllers carry no interrupt (the generation 4 SPMI driver
     refuses one; the controllers are polled) and at most two register windows;
   - the loader's aliases atcphy1/atcphy2 point at the two PHYs;
-  - the left-back port (ATC0, the loader's debug port) is not described.
+  - the left-back port (ATC0, the loader's debug port) is not described. With --atc0 the trees
+    must describe it instead: it is then checked like the other two (index 0, hpm0 at 0x0c on
+    nub-spmi-a0). With --atc0-reference J716C.dtb its dwc3, PHY, mailbox and DART nodes are
+    also compared with the J716c's ATC0 nodes (aurora-silicon/linux t6050-j716c-left-usb4.dtsi),
+    property by property, except status, power-domain wiring and the graph port.
 With --reference it also compares every one of those nodes, property by property, with the same
 node of the reference tree (phandles resolved to node paths). Built from aurora-silicon/linux,
 t6050-k116s.dtb is the tree whose USB-C ports Jens Axboe booted on a K116s.
@@ -32,6 +36,12 @@ PORTS = [
      SOC + "/mailbox@383148000", (SOC + "/iommu@382f00000", SOC + "/iommu@382f80000"), 2),
 ]
 DEBUG_PORT = [SOC + "/spmi@28a188000/usb-pd@c", SOC + "/usb@2a2280000", SOC + "/phy@2a3000000"]
+# The K114s tree takes usb-drd0 and its DARTs from the disabled inventory of t6050-peripherals.dtsi,
+# which sits under /soc; the J716c's tree has them under the die node.
+ATC0 = ("left-back", SOC + "/spmi@28a188000", "usb-pd@c", "/soc/usb@2a2280000", SOC + "/phy@2a3000000",
+        SOC + "/mailbox@2a3148000", ("/soc/iommu@2a2f00000", "/soc/iommu@2a2f80000"), 0)
+ATC0_JREF = {"/soc/usb@2a2280000": SOC + "/usb@2a2280000", "/soc/iommu@2a2f00000": SOC + "/iommu@2a2f00000",
+             "/soc/iommu@2a2f80000": SOC + "/iommu@2a2f80000"}
 CELLS = {"power-domains": "#power-domain-cells", "phys": "#phy-cells", "iommus": "#iommu-cells",
          "mboxes": "#mbox-cells", "resets": "#reset-cells", "remote-endpoint": None}
 
@@ -105,7 +115,7 @@ def closure(tree, start):
     return seen
 
 
-def lint(path, tree, ref):
+def lint(path, tree, ref, atc0=False, atc0_ref=None):
     bad = []
 
     def need(cond, msg):
@@ -115,7 +125,7 @@ def lint(path, tree, ref):
     compat = tree.get("/", {}).get("compatible", b"").split(b"\0")[0].decode()
     need(compat == "apple,k114s", "root compatible is %s" % compat)
     compared = 0
-    for name, bus, ctl, usb, phy, mbox, darts, index in PORTS:
+    for name, bus, ctl, usb, phy, mbox, darts, index in PORTS + ([ATC0] if atc0 else []):
         pd = bus + "/" + ctl
         con = pd + "/connector"
         before = len(bad)
@@ -169,20 +179,52 @@ def lint(path, tree, ref):
                     if tree[n].get(k) != ref[n].get(k):
                         bad.append("%s: %s %s differs from the reference tree" % (name, n, k))
                 compared += 1
-    for n in DEBUG_PORT:
+    if atc0 and atc0_ref is not None:
+        # Same values, other place: the J716c names its die node, this tree the SoC's /soc for the
+        # inventory nodes. The J716c PHY also carries the DisplayPort and USB4 banks (an extra
+        # last register window and tunables), which a USB-only port leaves out: its first 11
+        # register windows are compared, and no tunable (the loader fills those from the ADT).
+        def norm(v):
+            if isinstance(v, list):
+                return [(t.replace(SOC + "/iommu", "/soc/iommu"), a) for t, a in v]
+            return v
+        _n, _b, _c, usb0, phy0, mbox0, darts0, _i = ATC0
+        skip = {"status", "power-domains", "power-domain-names", "remote-endpoint", "phandle"}
+        for n, rn in ((usb0, ATC0_JREF[usb0]), (phy0, phy0), (mbox0, mbox0),
+                      (darts0[0], ATC0_JREF[darts0[0]]), (darts0[1], ATC0_JREF[darts0[1]])):
+            if n not in tree or rn not in atc0_ref:
+                bad.append("left-back: %s is not in both trees" % n)
+                continue
+            for k in sorted((set(tree[n]) | set(atc0_ref[rn])) - skip):
+                a, b = tree[n].get(k), atc0_ref[rn].get(k)
+                if n == phy0 and k in ("reg", "reg-names"):
+                    a, b = a[:176] if k == "reg" else a, b[:176] if k == "reg" else b[:100]
+                if n == phy0 and k.startswith("apple,tunable-"):
+                    continue    # the loader fills tunables from the ADT; the J716c has its own in the file
+                if norm(a) != norm(b):
+                    bad.append("left-back: %s %s differs from the J716c tree" % (n, k))
+            compared += 1
+    for n in [] if atc0 else DEBUG_PORT:
         # the controller node must not exist; the SoC's dwc3 and PHY nodes may, disabled
         described = n in tree and (n.rsplit("/", 1)[-1].startswith("usb-pd@") or enabled(tree, n))
         need(not described, "left-back port is described (%s): it is the loader's debug port" % n)
     for b in bad:
         print("FAIL %s: %s" % (path, b))
     if not bad:
-        print("  %s: both ports complete%s" % (path.rsplit("/", 1)[-1],
+        print("  %s: %s complete%s" % (path.rsplit("/", 1)[-1], "all three ports" if atc0 else "both ports",
                                              ", %d nodes equal to the reference" % compared if ref is not None else ""))
     return len(bad)
 
 
 def main(argv):
-    args, ref = argv[1:], None
+    args, ref, atc0, atc0_ref = argv[1:], None, False, None
+    if "--atc0" in args:
+        atc0 = True
+        args.remove("--atc0")
+    if "--atc0-reference" in args:
+        i = args.index("--atc0-reference")
+        atc0_ref = resolve(load(args[i + 1]))
+        del args[i:i + 2]
     if "--reference" in args:
         i = args.index("--reference")
         ref = resolve(load(args[i + 1]))
@@ -190,7 +232,7 @@ def main(argv):
     if not args:
         print(__doc__)
         return 64
-    bad = sum(lint(a, resolve(load(a)), ref) for a in args)
+    bad = sum(lint(a, resolve(load(a)), ref, atc0, atc0_ref) for a in args)
     print("usb dtb lint:", "FAILED" if bad else "passed", "(%d trees)" % len(args))
     return 1 if bad else 0
 
