@@ -147,6 +147,15 @@ def check_display(t):
                 t.fail("panel %s missing or out of range (the kernel treats a panel without a width as absent)" % name)
         if t.prop(panel, "apple,max-brightness") is not None:
             t.notes.append("display: panel carries apple,max-brightness, so the loader keeps it instead of the ADT's")
+        floor = t.prop(panel, "apple,min-brightness")
+        if floor is not None:
+            # D5 (dts/t6050-k114s-brightness.dtsi, patches/linux/brightness 0006). The kernel ignores a floor
+            # that is not below apple,max-brightness; the K114s ADT gives 1000 (user-accessible-max-nits).
+            value = cells(floor) if len(floor) % 4 == 0 else []
+            if len(value) != 1 or not 0 < value[0] < 1000:
+                t.fail("panel apple,min-brightness is not one cell between 1 and 999 nits: %r" % floor)
+            else:
+                t.notes.append("display: panel brightness floor %d nits (apple,min-brightness)" % value[0])
     for node, what in ((dcp, "dcp"), (disp, "disp0")):
         if not t.disabled(node):
             t.fail("%s is not status \"disabled\"" % what)
@@ -257,6 +266,7 @@ EXPECTED = {
     ("/soc/dcp@48ae00000/panel", "compatible"): "this board's panel name",
     ("/soc/dcp@48ae00000/panel", "width-mm"): "the 14-inch panel",
     ("/soc/dcp@48ae00000/panel", "height-mm"): "the 14-inch panel",
+    ("/soc/dcp@48ae00000/panel", "apple,min-brightness"): "ours, the D5 brightness floor (t6050-k114s-brightness.dtsi)",
     ("/soc/dcp@48ae00000", "apple,clock-ids"): "left to the loader, which writes it from the ADT either way",
     ("/soc/gpu@2300000000", "power-domains"): "ps_gfx directly: r3 does not run the PMP",
 }

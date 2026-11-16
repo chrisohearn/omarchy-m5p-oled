@@ -110,5 +110,36 @@ check "floor dropped after probe: says NOT APPLIED, not yes" "grep -q 'NOT APPLI
 conf=$here/../../linux/brightness/systemd/k114s-first-boot.conf
 check "drop-in: unit conditional on the marker file" "grep -qx 'ConditionPathExists=/var/lib/k114s-backlight/restore-enabled' '$conf'"
 
+# 13. --auto (the agent's check): no questions, down to the floor and back up, never above the start, never 0.
+s=$(fake auto 1000 500)
+run "$s" --auto </dev/null >"$tmp/auto.out"
+check "--auto: the ladder, down to 10 and back to the start" "[[ \"\$(writes $s)\" == '500 250 100 50 20 10 20 50 100 250 500 ' ]]"
+check "--auto: ends at the start level and says done" "[[ \$(<$s/apple-panel-bl/brightness) == 500 ]] && grep -q 'agent ladder done' '$tmp/auto.out'"
+check "--auto: nothing above the start or below 10, no 0" "! tr ' ' '\n' <<<\"\$(writes $s)\" | grep -q -x -e 0 -e 1000 -e '[1-9]'"
+s=$(fake autolow 1000 40)
+run "$s" --auto </dev/null >"$tmp/autolow.out"
+check "--auto from a start of 40 nits: 25 % and 10 % are above it and skipped" "[[ \"\$(writes $s)\" == '40 20 10 20 40 ' ]]"
+# a write that reads back another level stops the ladder and puts the start level back (a copy of the tool whose
+# actual_brightness reads 77 after a write of 100)
+s=$(fake autobad 1000 500)
+sed 's#echo "$1" >"$p/actual_brightness"#echo "$(( $1 == 100 ? 77 : $1 ))" >"$p/actual_brightness"#' "$tool" > "$tmp/tool-bad"
+rc=0; K114S_BL_SYSFS=$s K114S_BL_SETTLE=0 XDG_STATE_HOME=$tmp/state bash "$tmp/tool-bad" --auto </dev/null >"$tmp/autobad.out" 2>&1 || rc=$?
+check "--auto: an actual_brightness that differs from the write stops the ladder at 100 and puts 500 back" "(( rc == 1 )) && [[ \"\$(writes $s)\" == '500 250 100 500 ' ]] && grep -q 'agent ladder stopped at 100' '$tmp/autobad.out'"
+# a failing write in --auto restores the start level, not the maximum
+s=$(fake autoro 1000 500)
+chmod a-w "$s/apple-panel-bl/brightness"
+rc=0; run "$s" --auto </dev/null >"$tmp/autoro.out" 2>&1 || rc=$?
+check "--auto: a failing write exits 1 and never tries the maximum" "(( rc == 1 )) && grep -q 'WRITE FAILED' '$tmp/autoro.out' && ! grep -q 'restored 1000' '$tmp/autoro.out' && [[ ! -s $s/apple-panel-bl/writes.log ]]"
+
+# a device that reports less than the floor: --auto starts at the floor (10), not at half the maximum, and stays within 10..start
+s=$(fake autobelow 1000 5)
+run "$s" --auto </dev/null >"$tmp/autobelow.out"
+check "--auto: a reported level below the floor starts at the floor, never at max/2" "[[ \"\$(writes $s)\" == '10 ' ]] && grep -q 'agent ladder done' '$tmp/autobelow.out'"
+# a TERM in the middle of the ladder puts the start level back, not the last level written (a copy that sends itself TERM after the write of 50)
+s=$(fake autoterm 1000 500)
+sed 's#&& echo "$1" >>"$p/writes.log"#\&\& echo "$1" >>"$p/writes.log"; [[ $1 != 50 ]] || kill -TERM $$#' "$tool" > "$tmp/tool-term"
+rc=0; K114S_BL_SYSFS=$s K114S_BL_SETTLE=0 XDG_STATE_HOME=$tmp/state bash "$tmp/tool-term" --auto </dev/null >"$tmp/autoterm.out" 2>&1 || rc=$?
+check "--auto: a TERM mid-ladder puts the start level (500) back" "(( rc == 130 )) && [[ \"\$(writes $s)\" == '500 250 100 50 500 ' ]]"
+
 echo "# backlight-check replica: $fails failed"
 exit $(( fails > 0 ))

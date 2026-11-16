@@ -13,6 +13,8 @@ sum() { (cd "$1" && find . -type f -exec sha256sum {} + | sort -k2 | sha256sum |
 B=$W/bundle; E=$W/esp
 mkesp() { # $1: before (repair entry still first, default the path) | after (promoted: no repair) | aurora (after, plus the hook's linux-aurora entry in front)
   #         | window (the display window of docs/r3-display-plan.md 4.4: after, plus the r3b image and its entry behind r3a's)
+  #         | display (the layout after docs/r3-display-d5-d9.md D9: window, plus default_entry the r3b entry, the display Stage 2
+  #           (pin loader, brightness tree) configured, and the fallback Stage 2 and tree in promotion/ on the ESP and in the bundle)
   rm -rf "$B" "$E"; mkdir -p "$B/tools" "$B/payload" "$E/EFI/Linux" "$E/m1n1" "$E/vendorfw" "$E/k114s-repair/backup-before-r1/m1n1"
   cp "$H"/../../macos/tools/k114s_repair.py "$H"/../../macos/tools/k114s_esp_tool.py "$B/tools/"; cp -r "$H"/../../macos/tools/asahi_firmware "$B/tools/"
   python3 -I - "$B" "$E" "$1" <<'PY'
@@ -34,15 +36,24 @@ payload = {n: h(open(B + "/payload/" + n, "rb").read()) for n in os.listdir(B + 
 json.dump({"stage2_sha256": {"r1": h(r1), "trial1": h(t1), "image-combined": h(comb)}, "payload": payload,
            "original_kernel_sha256": "x", "aura_prefix_bytes": 4, "aura_prefix_sha256": h(prefix), "uboot_trailer_sha256": h(trailer)}, open(B + "/manifest.json", "w"))
 w(E + "/m1n1/boot-ctxr.bin", gpu); w(E + "/m1n1/boot.bin", comb); w(E + "/k114s-repair/k114s.dtb", dg)
+# the display Stage 2 of D9: another loader (so another prefix length), the brightness tree, the same U-Boot tail
+pinp, db = b"PINLDR", fdt(b"bright"); disp = pinp + db + trailer
+consts = {"pin_bytes": len(pinp), "pin_sha": h(pinp), "gpu_sha": h(gpu), "gputree_sha": h(dg), "disp_sha": h(disp)}
+json.dump(consts, open(os.path.dirname(B) + "/consts.json", "w"))
+os.makedirs(B + "/promotion", exist_ok=True); os.makedirs(E + "/k114s-repair/promotion", exist_ok=True)
+w(B + "/promotion/boot-ctxr-gpu.bin", gpu); w(B + "/promotion/k114s.dtb.gpu", dg)
+if layout == "display":
+    w(E + "/m1n1/boot-ctxr.bin", disp); w(E + "/k114s-repair/k114s.dtb", db)
+    w(E + "/k114s-repair/promotion/boot-ctxr-gpu.bin", gpu); w(E + "/k114s-repair/promotion/k114s.dtb.gpu", dg)
 k = b"the r3a image stand-in"; w(E + "/EFI/Linux/omarchy_linux-k114s.efi", k); kh = hashlib.blake2b(k).hexdigest()
 tf = io.BytesIO(); t = tarfile.open(fileobj=tf, mode="w"); i = tarfile.TarInfo("apple/tpmtfw-k114s.bin"); i.size = 3; t.addfile(i, io.BytesIO(b"abc")); t.close()
 w(E + "/vendorfw/firmware.tar", tf.getvalue()); w(E + "/vendorfw/firmware.cpio", b"cpio"); w(E + "/vendorfw/manifest.txt", b"m")
-head = "timeout: 5\nquiet: no\ndefault_entry: Omarchy/linux-k114s\nhash_mismatch_panic: no\n"
+head = "timeout: 5\nquiet: no\ndefault_entry: Omarchy/linux-k114s%s\nhash_mismatch_panic: no\n" % ("-r3b" if layout == "display" else "")
 repair = ("### K114s repair (added from macOS; remove this block to undo)\n/Omarchy K114s repair r1 (trackpad fix B)\n  protocol: efi\n"
           "  path: boot():/EFI/Linux/omarchy_linux-aurora-k114s.efi\n  cmdline: root=UUID=00000000-0000-0000-0000-000000000000 rw\n\n")
 # the static fallback kept off the ESP (P4b) and the block kept on it (P0e), and apply's record of the repair image
 ri = b"not a PE: the repair image stand-in"
-os.makedirs(E + "/k114s-repair/r2c"); os.makedirs(E + "/k114s-repair/promotion"); os.makedirs(B + "/promotion")
+os.makedirs(E + "/k114s-repair/r2c"); os.makedirs(E + "/k114s-repair/promotion", exist_ok=True); os.makedirs(B + "/promotion", exist_ok=True)
 w(E + "/k114s-repair/r2c/repair-uki.txt", ("# record\nvariant r1\nuki EFI/Linux/omarchy_linux-aurora-k114s.efi %d %s\n" % (len(ri), h(ri))).encode())
 w(E + "/k114s-repair/promotion/repair-block.conf", repair.encode()); w(B + "/promotion/repair-block.conf", repair.encode())
 w(B + "/promotion/omarchy_linux-aurora-k114s.efi", ri)
@@ -51,7 +62,7 @@ if layout == "aurora":
     a = b"the hook-built linux-aurora image stand-in"; w(E + "/EFI/Linux/omarchy_linux-aurora.efi", a)
     aur = "  //linux-aurora\n  protocol: efi\n  path: boot():/EFI/Linux/omarchy_linux-aurora.efi#%s\n" % hashlib.blake2b(a).hexdigest()
 r3b = ""
-if layout == "window":
+if layout in ("window", "display"):
     b = b"the r3b image stand-in"; w(E + "/EFI/Linux/omarchy_linux-k114s-r3b.efi", b)
     r3b = "  //linux-k114s-r3b\n  protocol: efi\n  path: boot():/EFI/Linux/omarchy_linux-k114s-r3b.efi#%s\n" % hashlib.blake2b(b).hexdigest()
 folder = "/+Omarchy\ncomment: Omarchy\n" + aur + "  //linux-k114s\n  protocol: efi\n  path: boot():/EFI/Linux/omarchy_linux-k114s.efi#%s\n" % kh + r3b
@@ -115,6 +126,15 @@ r.Esp.free = lambda self, f=int(sys.argv[2]): f
 try: sys.exit(r.main(["k114s-repair"] + sys.argv[3:]))
 except r.Stop as stop: print("k114s-repair: STOPPED: %s" % stop); sys.exit(1)' "$B/tools" "$f" "$@"; }
 rimg=$B/promotion/omarchy_linux-aurora-k114s.efi
+# RP runs the tool with the constants of this synthetic world: the pin loader's prefix, the r3-gpu file and tree it restores,
+# and the display file's name (the real hashes belong to the real files and have a case of their own below)
+RP() { python3 -I -c '
+import json, sys; sys.path.insert(0, sys.argv[1]); import k114s_repair as r
+c = json.load(open(sys.argv[2]))
+r.PIN_LOADER = (c["pin_bytes"], c["pin_sha"]); r.LOCAL_STAGE2[c["disp_sha"]] = "r3-display (test)"
+r.PROMOTED_STAGE2["r3-gpu"] = ("boot-ctxr-gpu.bin", "k114s.dtb.gpu", c["gpu_sha"], c["gputree_sha"], "installed")
+try: sys.exit(r.main(["k114s-repair"] + sys.argv[3:]))
+except r.Stop as stop: print("k114s-repair: STOPPED: %s" % stop); sys.exit(1)' "$B/tools" "$W/consts.json" "$@"; }
 mkesp before; cp "$E/limine.conf" "$W/conf.p2"; before=$(sum "$E")
 out=$($R restore-repair --check --esp-dir "$E" 2>&1)
 has "before P5: restore-repair --check passes" "$out" "restore-repair check passed"
@@ -211,6 +231,65 @@ ok "the menu gains the saved block and default_entry 1; the dangling r3b entry s
 out=$($R status --esp-dir "$E" 2>&1)
 has "window, after restore-repair: status reads entry 1, the repair entry (as after P4b's restore)" "$out" "Limine default entry:  1 -> Omarchy K114s repair r1 (trackpad fix B) (entry 1)"
 has "window, after restore-repair: the repair entry is back" "$out" "Limine repair entry: yes"
+
+
+# --- after D9 (docs/r3-display-d5-d9.md): the display Stage 2 configured, r3b.b1 the default, r3a and the fallbacks kept --------
+mkesp display; before=$(sum "$E"); gpuf=$B/promotion/boot-ctxr-gpu.bin
+out=$(RP status --esp-dir "$E" 2>&1)
+has "D9: status names the display Stage 2 (a loader this tool knows)" "$out" "Stage 2 (boot-ctxr):   r3-display (test)"
+has "D9: status reads the r3b default as entry 3" "$out" "Omarchy/linux-k114s-r3b -> linux-k114s-r3b (entry 3)"
+ok "D9: status wrote nothing" "$(sum "$E")" "$before"
+out=$($R status --esp-dir "$E" 2>&1); has "D9: without the test constants the real tool does not know the synthetic loader" "$out" "Stage 2 (boot-ctxr):   unknown"
+out=$(RP stage2 r3-gpu --esp-dir "$E" 2>&1); has "D9: stage2 r3-gpu rolls the display Stage 2 back" "$out" "Stage 2 is now: r3-gpu"
+ok "D9: it wrote the bundle's file over the loader bytes and the tree beside it, byte for byte" \
+  "$(cmp -s "$E/m1n1/boot-ctxr.bin" "$gpuf"; echo $?) $(cmp -s "$E/k114s-repair/k114s.dtb" "$B/promotion/k114s.dtb.gpu"; echo $?)" "0 0"
+rest() { (cd "$E" && find . -type f ! -name boot-ctxr.bin ! -name k114s.dtb -exec sha256sum {} + | sort -k2 | sha256sum | cut -c1-16); }
+a=$(rest); mkesp display; ok "D9: it touched nothing else (limine.conf, the images, promotion/ on the ESP)" "$a" "$(rest)"
+RP stage2 r3-gpu --esp-dir "$E" >/dev/null 2>&1; out=$(RP status --esp-dir "$E" 2>&1)
+has "D9: after the rollback status reads the installed loader's Stage 2 (the synthetic file is not the real P file)" "$out" "same-loader-other-trees(1)"
+out=$(RP stage2 r3-gpu --esp-dir "$E" 2>&1); has "D9: r3-gpu on r3-gpu is a no-op write (the proof run in M9 on the real ESP)" "$out" "Stage 2 is now: r3-gpu"
+mkesp display; before=$(sum "$E"); out=$($R stage2 r3-gpu --esp-dir "$E" 2>&1)
+has "D9: the real hashes do not accept a synthetic promotion file" "$out" "are not the r3-gpu Stage 2 and tree this tool knows (sha256 9825a103"
+ok "D9: and that wrote nothing" "$(sum "$E")" "$before"
+mkesp display; echo x >> "$B/promotion/boot-ctxr-gpu.bin"; before=$(sum "$E"); out=$(RP stage2 r3-gpu --esp-dir "$E" 2>&1)
+has "D9: a promotion file that changed one byte stops" "$out" "are not the r3-gpu Stage 2"; ok "D9: and wrote nothing (changed file)" "$(sum "$E")" "$before"
+mkesp display; echo x >> "$B/promotion/k114s.dtb.gpu"; before=$(sum "$E"); out=$(RP stage2 r3-gpu --esp-dir "$E" 2>&1)
+has "D9: a promotion tree that changed one byte stops" "$out" "are not the r3-gpu Stage 2"; ok "D9: and wrote nothing (changed tree)" "$(sum "$E")" "$before"
+mkesp display; rm "$B/promotion/boot-ctxr-gpu.bin"; before=$(sum "$E"); out=$(RP stage2 r3-gpu --esp-dir "$E" 2>&1)
+has "D9: no promotion file: stops and says what to copy" "$out" "has no boot-ctxr-gpu.bin"; has "D9: it names the step" "$out" "docs/r3-display-d5-d9.md M9"
+ok "D9: and wrote nothing (no file)" "$(sum "$E")" "$before"
+mkesp display; printf 'neither loader nor tree' > "$E/m1n1/boot-ctxr.bin"; before=$(sum "$E"); out=$(RP stage2 r3-gpu --esp-dir "$E" 2>&1)
+has "D9: a live Stage 2 with no known loader is not replaced" "$out" "the live Stage 2 is not one this bundle knows"; ok "D9: and wrote nothing (unknown live file)" "$(sum "$E")" "$before"
+# a rebuilt display file: the pin loader and its U-Boot tail, but another tree
+mkesp display; python3 -I -c '
+import sys; f = sys.argv[1] + "/m1n1/boot-ctxr.bin"; d = open(f, "rb").read(); i = d.index(b"\xd0\x0d\xfe\xed")
+open(f, "wb").write(d[:i] + d[i:].replace(b"bright", b"brighT"))' "$E"
+out=$(RP status --esp-dir "$E" 2>&1); has "D9: a rebuilt display file on the pin loader reads as the pin loader with another tree" "$out" "pin-loader-other-trees(1)"
+out=$(RP stage2 r3-gpu --esp-dir "$E" 2>&1); has "D9: and can be rolled back too" "$out" "Stage 2 is now: r3-gpu"
+mkesp display; out=$(RP stage2 r1 --esp-dir "$E" 2>&1); has "D9: stage2 r1 also rolls the loader back" "$out" "Stage 2 is now: r1"
+ok "D9: r1's file replaced the pin loader's" "$(cmp -s "$E/m1n1/boot-ctxr.bin" "$B/payload/boot-ctxr-k114s-r1.bin"; echo $?)" 0
+mkesp display; out=$($R default k114s --esp-dir "$E" 2>&1); has "D9: default k114s puts r3a back as the default from macOS" "$out" "Default boot entry changed"; ok "D9: the path is written" "$(def)" "Omarchy/linux-k114s"
+mkesp display; before=$(sum "$E"); out=$($R default aurora --esp-dir "$E" 2>&1); has "D9: default aurora stops (its image is off the ESP)" "$out" "has no entry Omarchy/linux-aurora"
+ok "D9: and wrote nothing (default aurora)" "$(sum "$E")" "$before"
+out=$(RF $WINDOW_FREE restore-repair --check --esp-dir "$E" 2>&1); has "D9: restore-repair --check is short of space with nothing to remove (as in the window)" "$out" "NOT ENOUGH, and no omarchy_linux-aurora.efi to remove"
+ok "D9: --check wrote nothing" "$(sum "$E")" "$before"
+mkesp display; rm "$E/EFI/Linux/omarchy_linux-k114s-r3b.efi"; out=$(RF 181000000 restore-repair --esp-dir "$E" 2>&1)
+has "D9: with the r3b image removed by hand first, restore-repair works" "$out" "Restored the repair entry as entry 1"
+ok "D9: restore-repair leaves the display Stage 2 alone (the way back names stage2 r3-gpu first)" "$(RP status --esp-dir "$E" 2>&1 | grep -c 'Stage 2 (boot-ctxr):   r3-display (test)')" 1
+# the tool's own constants, and the real files when the build area is here
+ok "the tool's r3-gpu hashes are the promoted GPU Stage 2 and tree (docs/r3a-promotion.md P1), and it names the D9 file" "$(cd "$B/tools" && python3 -I -c 'import sys; sys.path.insert(0, "."); import k114s_repair as r
+print(r.PROMOTED_STAGE2["r3-gpu"][2][:8], r.PROMOTED_STAGE2["r3-gpu"][3][:8], r.PIN_LOADER[0], r.PIN_LOADER[1][:8], sorted(k[:8] for k in r.LOCAL_STAGE2))')" \
+  "9825a103 2c870ba9 4063232 beceb683 ['5164bb1e', '90b35137', '9825a103']"
+BR=${K114S_BUILD_ROOT:-$HOME/k114s-build}/integrate; PIN=$BR/release-display-trials/aura-pin/m1n1.bin; D5S2=$BR/release-display-d5/stage2/boot-ctxr-disp-bl.bin
+if [ -s "$PIN" ]; then ok "the pin loader's length and hash are those of the built loader file" "$(wc -c < "$PIN" | tr -d ' ') $(sha256sum "$PIN" | cut -c1-64)" \
+  "$(cd "$B/tools" && python3 -I -c 'import sys; sys.path.insert(0, "."); import k114s_repair as r; print(r.PIN_LOADER[0], r.PIN_LOADER[1])')"
+else echo "SKIP the pin loader file is not in this build area"; fi
+if [ -s "$D5S2" ] && [ -s "$PIN" ]; then
+  ok "the real D9 Stage 2 splits at the pin loader's length, one tree, and its tail is the one the manifest's installed loader files carry" "$(cd "$B/tools" && python3 -I -c 'import sys; sys.path.insert(0, "."); import k114s_repair as r
+d = open(sys.argv[1], "rb").read(); m = r.json.load(open(sys.argv[2]))
+hit = r.split_known(d, m); print(hit[0], len(hit[2]), r.sha(hit[2][0])[:8], r.sha(hit[3])[:8], r.stage2_state(d, m))' "$D5S2" "$H/../../manifests/payload-r1.json")" \
+    "pin 1 5b6b83c8 9d8dc11e r3-display (pin loader + brightness tree, not in this bundle)"
+else echo "SKIP the real D9 Stage 2 is not in this build area"; fi
 
 # --- the tool the Mac has before this change (911d43e9, commit 364598e) does not find the promoted ESP ----------------
 if O=$(git -C "$H" show 364598e:macos/tools/k114s_repair.py 2>/dev/null); then

@@ -279,6 +279,11 @@ instead of replacing it. The same build, repackaged: `linux-k114s-r3b-7.3.0.r3b-
 `438c4efe03d5271ffb5beae0125199e4d5cdba2bc97e5fdc2a05455eeb93f905`. The shared-name package above is kept for the
 record only and now fails `check-package.sh`.
 
+The brightness build (docs/r3-display-plan.md, D5a and section 5.2) is a later version of that package, not another one:
+`K114S_CAND=r3b-b1` builds `linux-k114s-r3b 7.3.0.r3b.b1-1` from `src/r3b-b1` and `build/r3b-b1`
+(`patches/linux/r3b-b1.series`: this series plus brightness 0001-0003, 0005, 0006). Same release, same `pkgbase`, same
+config; `uname -v` reads `K114S-R3B-B1`. Installed, it upgrades the r3b package and its UKI in place.
+
 Not verified: anything on the hardware; the Image against an installed one; the trackpad stack booted; the GPU
 mailbox interrupts on a K114s; the KUnit cases; the sound checker.
 

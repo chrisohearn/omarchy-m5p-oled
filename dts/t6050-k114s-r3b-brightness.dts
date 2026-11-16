@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s brightness tree for the r3 display trials (docs/r3-display-plan.md, D5 to D8): the D4
+ * display tree (t6050-k114s-r3b-display.dts, unchanged) plus the panel's brightness floor
+ * (t6050-k114s-brightness.dtsi: apple,min-brightness = <10>). Not booted on a K114s.
+ *
+ * Built against the same includes as the display tree (P's, docs/r3-display-plan.md 3.2), it
+ * differs from the D4 tree by that one property alone, so D5 differs from D4 by the brightness
+ * kernel (D5a) and this line. A kernel without patches/linux/brightness 0005 and 0006 ignores it.
+ *
+ * apple,max-brightness is still not here: the loader writes it from this Mac's ADT at every boot.
+ */
+#include "t6050-k114s-r3b-display.dts"
+#ifndef K114S_R3_DISPLAY
+#error "the brightness tree needs the display section (K114S_R3_DISPLAY); do not build it with K114S_D0_DISPLAY_OFF"
+#endif
+#include "t6050-k114s-brightness.dtsi"
