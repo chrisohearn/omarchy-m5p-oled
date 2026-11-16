@@ -25,11 +25,11 @@ upstream-reported). Upstream describes this very port on the J716c
 | Path | What |
 | --- | --- |
 | `dts/t6050-k114s-usb.dtsi`, section `K114S_R3_USB_ATC0` | hpm0 (`usb-pd@c` on nub-spmi-a0), connector graph, ATC0 PHY and mailbox, dwc3 `usb-drd0` and its two DARTs, the five power domains. Off unless defined; with it off every tree is byte-identical to before |
-| `dts/t6050-k114s-r3-usb-atc0.dts` | r1 plus that section and nothing else. Flagged draft, not a boot candidate yet |
+| `dts/t6050-k114s-r3-usb-atc0.dts` | r1 plus that section and nothing else. Flagged draft, **lint-only, not a boot candidate**: it has no GPU node, so booting it would also drop the GPU desktop (see "What has to change first") |
 | `tests/lint-usb-dtb.py --atc0 [--atc0-reference J716C.dtb]` | The third port checked like the other two; optional comparison with the J716c's ATC0 nodes. Without `--atc0` the lint still demands an undescribed left-back port |
 | `tests/test-usb-dtb.sh KTREE [K116S [J716C]]` | Builds the new tree, checks both lint directions, and with a J716c tree compares |
 | `tests/k114s-usb-root-probe.py adt` | Now also reports usb-drd0, atc-phy0, acio-phy-cpu0 and dart-usb0 against the draft's addresses (informational, not part of the verdict) |
-| `patches/aura/atc0/0001-...patch` | Draft loader change: skip port 0 only while `aura-debug` is on. Applies to aura `85c7dc55`, passes a syntax check, **not built into a Stage 2** |
+| `patches/aura/atc0/0001-...patch` | Draft loader change: skip port 0 only while `aura-debug` is on or in a `USE_DEBUG_USB` build. Applies to aura `85c7dc55`, passes a syntax check, **not built into a Stage 2** |
 | `tests/hardware/k114s-atc0-plug-test.sh` | Owner test after a trial boot |
 
 ## Evidence (all agent-run)
@@ -72,8 +72,18 @@ upstream-reported). Upstream describes this very port on the J716c
    `patches/aura/atc0/0001` (or an equivalent) into aurora-silicon/aura, then take the pinned
    aura that has it; (b) carry it locally in our Stage 2 build, which is a change of the boot
    chain and needs the owner's decision. The upstream comment is drafted in the issue.
-2. A trial build of Stage 2 and of the r3a tree with the ATC0 section, by the proven way back
-   (docs/r3a-promotion.md style: one boot, owner at the Mac, default entry restored).
+2. **Trial tree.** The trial tree is P, the configured Stage 2 tree `t6050-k114s-r3-gpu.dts`
+   (docs/r3-display-plan.md), plus `K114S_R3_USB_ATC0`, so the GPU desktop stays and the ATC0
+   section is the only variable. `t6050-k114s-r3-usb-atc0.dts` is r1-based and only for the lint
+   and compile checks; it is not that trial tree, and the P-based file is still to be written.
+3. **Loader, in the display plan's sequence.** The display plan's r3 loader (`patches/aura/0001-0003`,
+   build `bdf42d19`, stage D3) is also a new Stage 2 loader prefix, and its G2 ESP budget allows at
+   most two trial Stage 2 files at once. The ATC0 patch applies cleanly to aura `85c7dc55` and to
+   `bdf42d19`, so build the ATC0 loader change together with (or after) the display r3 loader in one
+   prefix, and give the trial a slot in that plan's trial sequence and G2 budget. Keep
+   `patches/aura/atc0/` out of the `git am patches/aura/*.patch` set: the subdirectory already does.
+4. A trial build of Stage 2 with that prefix and the P-based ATC0 tree (docs/r3a-promotion.md
+   style: one boot, owner at the Mac, default entry restored).
 
 ## Owner steps (after step 1 and 2 are done; not before)
 

@@ -35,13 +35,15 @@ drv=$(basename "$(readlink /sys/class/bluetooth/hci0/device/driver 2>/dev/null)"
 [ "$drv" = btcentauri_t6050 ] && ok "hci0 is bound to btcentauri_t6050" || bad "hci0 driver is ${drv:-none}, expected btcentauri_t6050"
 rfkill list bluetooth 2>/dev/null | grep -q 'blocked: yes' && bad "Bluetooth is blocked in rfkill" || ok "Bluetooth is not blocked in rfkill"
 grep -q "^rfcomm " /proc/modules && ok "module rfcomm loaded" || bad "module rfcomm not loaded (bluetoothd loads it at start; hands-free needs it)"
-if have bluetoothctl; then
-  show=$(bluetoothctl show 2>/dev/null)
+bt() { timeout 5 bluetoothctl "$@"; }  # bounded: bluetoothctl waits forever when bluetoothd is down
+if have bluetoothctl && ! systemctl is-active --quiet bluetooth 2>/dev/null; then bad "bluetoothd not running (systemctl is-active bluetooth)"
+elif have bluetoothctl; then
+  show=$(bt show 2>/dev/null)
   grep -q 'Powered: yes' <<<"$show" && ok "controller powered" || bad "controller not powered"
   for pair in "0000110b:A2DP sink" "0000110a:A2DP source" "0000111e:Hands-Free (HFP)" "0000111f:Hands-Free gateway (HFP AG)" "0000110e:AVRCP"; do
     grep -qi "UUID:.*(${pair%%:*}" <<<"$show" && ok "bluez advertises ${pair#*:}" || bad "bluez does not advertise ${pair#*:}"
   done
-  info "paired devices: $(bluetoothctl devices Paired 2>/dev/null | wc -l)"
+  info "paired devices: $(bt devices Paired 2>/dev/null | wc -l)"
 else unk "bluetoothctl not installed"; fi
 if journalctl -b -u bluetooth --no-pager -n 1 >/dev/null 2>&1; then
   journalctl -b -u bluetooth --no-pager 2>/dev/null | grep -qiE 'RFCOMM server failed|Protocol not supported' \
@@ -56,7 +58,7 @@ iw=$(have iw && iw dev 2>/dev/null | awk '/Interface/ {print $2; exit}')
 
 if [ $listen = 1 ]; then
   echo "== attended (owner-observed)"
-  [ "$(bluetoothctl devices Paired 2>/dev/null | wc -l)" = 0 ] && \
+  [ "$(bt devices Paired 2>/dev/null | wc -l)" = 0 ] && \
     pause "No device is paired. Put the headset in pairing mode; in another terminal: bluetoothctl, then scan on, pair <address>, trust <address>, connect <address>. This script never pairs."
   cards
   ask "Play music over Bluetooth (A2DP) for 60 s. Any dropouts, stutter or crackle?"

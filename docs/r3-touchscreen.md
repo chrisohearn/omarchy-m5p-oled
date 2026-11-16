@@ -81,9 +81,11 @@ separate trial tree (`t6050-k114s-r3-touch.dts`, same pattern as the sound and U
 3. Owner, macOS side, no boot risk: extract the two `.im4p` members from the 27.2 restore image on the Mac and run the
    firmware tool; report only the size and sha256 it prints. The agent compares the sha256 with the tool's published
    value for the 27.3 blob to learn whether the 27.2 member differs.
-4. Kernel: add #2004, #1737 (resolved against #1830) and #1605 to a trial kernel (r3b line) as a module, default off;
-   build and check the dtb with `tests/lint-dtb.py`.
-5. Owner, trial: one-shot boot of `r3-touch` with the recovery entry available (the proven way back). Then:
+4. Kernel: add #2004, #1737 (resolved against #1830) and #1605 to a separate touch trial kernel as a module, default off. It never changes the reviewed r3b build and hashes the display
+   plan pins (`docs/r3-display-plan.md` gates G2, G3, G7): it is a later build made after the display window closes, or its own
+   package name. Build and check the dtb with `tests/lint-dtb.py`.
+5. Owner, trial, only after the display window (`docs/r3-display-plan.md` 4.4) is closed, because the window forbids package
+   transactions, mkinitcpio and new limine entries (4.1 rule 4): one-shot boot of `r3-touch` with the recovery entry available (the proven way back). Then:
    `sudo dmesg | grep -i kiwi` (expect `Kiwi interface ready with status:0`), then
    `sudo libinput debug-events --show-keycodes` while touching the screen. A hang needs a forced power-off; the recovery
    path is the normal boot-chain one, with no macOS or Stage 1 change.

@@ -11,8 +11,10 @@
 set -u
 sys=${K114S_SYSFS:-/sys}
 interval=${1:-2}; samples=${2:-0}
+[[ $interval =~ ^[0-9]+$ && $samples =~ ^[0-9]+$ ]] || { echo "usage: $0 [SECONDS [SAMPLES]] (whole numbers)" >&2; exit 2; }
 
 rd() { cat "$1" 2>/dev/null || echo "?"; }
+mhz() { [[ $1 =~ ^[0-9]+$ ]] && echo $(($1 / 1000)) || echo "?"; }
 profile() { powerprofilesctl get 2>/dev/null || echo "?"; }
 onbat() {
   case $(busctl get-property org.freedesktop.UPower /org/freedesktop/UPower org.freedesktop.UPower OnBattery 2>/dev/null) in
@@ -25,7 +27,7 @@ mapfile -t policies < <(printf "%s\n" "$sys"/devices/system/cpu/cpufreq/policy* 
 
 echo "# $(uname -r); driver $(rd "${policies[0]}/scaling_driver")"
 for p in "${policies[@]}"; do
-  echo "# $(basename "$p"): cpus $(rd "$p/related_cpus") range $(( $(rd "$p/cpuinfo_min_freq") / 1000 ))-$(( $(rd "$p/cpuinfo_max_freq") / 1000 )) MHz governors: $(rd "$p/scaling_available_governors")"
+  echo "# $(basename "$p"): cpus $(rd "$p/related_cpus") range $(mhz "$(rd "$p/cpuinfo_min_freq")")-$(mhz "$(rd "$p/cpuinfo_max_freq")") MHz governors: $(rd "$p/scaling_available_governors")"
 done
 echo "# time source ppd_profile platform_profile | per policy: governor cur_MHz (scaling_max_MHz)"
 n=0

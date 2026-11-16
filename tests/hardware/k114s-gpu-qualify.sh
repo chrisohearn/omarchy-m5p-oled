@@ -14,11 +14,16 @@
 # It writes nothing. To load the GPU, start your own load in another terminal while this runs
 # (a WebGL page, scrolling Hyprland workspaces, or vkmark/glmark2 once installed; neither is in the
 # default install, and ffmpeg software encoding does not load the GPU).
+# K114S_KLOG=FILE reads that file instead of the kernel log (tests); K114S_GPU_DEV overrides the GPU device path.
 # Needs root only to read agx_stats and the kernel log: sudo k114s-gpu-qualify.sh 5 24 | tee gpu.log
 set -u
 sys=${K114S_SYSFS:-/sys}
 proc=${K114S_PROC:-/proc}
-dev=${K114S_GPU_DEV:-$sys/class/drm/card1/device}
+dev=${K114S_GPU_DEV:-}
+if [[ -z $dev ]]; then  # card numbering varies (an apple-drm card may come first), so find the GPU by agx_stats
+  for c in "$sys"/class/drm/card*/device; do [[ -e $c/agx_stats ]] && { dev=$c; break; }; done
+  dev=${dev:-$sys/class/drm/card1/device}
+fi
 interval=${1:-5}; samples=${2:-12}
 rd() { cat "$1" 2>/dev/null || echo "?"; }
 stat() { awk -v k="$1" '$1 == k { print $2 }' "$dev/agx_stats" 2>/dev/null; }
@@ -28,7 +33,8 @@ hw=""
 for h in "$sys"/class/hwmon/hwmon*; do [[ $(rd "$h/name") == macsmc_hwmon ]] && hw=$h; done
 
 irq() { awk '/2302600000\.mailbox-recv/ { s = 0; for (i = 2; i <= NF && $i ~ /^[0-9]+$/; i++) s += $i; print s }' "$proc/interrupts"; }
-faults() { { journalctl -k -b --no-pager 2>/dev/null || dmesg 2>/dev/null; } | grep -c -i -E 'aurora.*(fault|timeout|hang|error)'; }
+klog() { if [[ -n ${K114S_KLOG:-} ]]; then cat "$K114S_KLOG"; else journalctl -k -b --no-pager 2>/dev/null || dmesg 2>/dev/null; fi; }
+faults() { klog | grep -c -i -E 'aurora.*(fault|timeout|hang|error)'; }
 hottest() { [[ -n $hw ]] || { echo "?"; return; }
   for f in "$hw"/temp*_input; do rd "$f"; done | awk '$1 ~ /^-?[0-9]+$/ && $1 > -100000 && $1 != 0 && $1 > m { m = $1 } END { if (m) printf "%.1f", m / 1000; else print "?" }'; }
 fan() { [[ -n $hw ]] || { echo "?"; return; }; local o="" f; for f in "$hw"/fan*_input; do [[ -e $f ]] && o+="$(rd "$f") "; done; echo "${o:-?}"; }
@@ -38,6 +44,7 @@ power() { [[ -n $hw ]] || return 0
 echo "# $(uname -r)"
 echo "# unsupported GPU telemetry: $(awk '$2 == "unsupported" || $2 == "unavailable" { printf "%s ", $1 }' "$dev/agx_stats"); runtime_status=$(rd "$dev/power/runtime_status"); idle_off_delay_ms=$(rd "$dev/idle_off_delay_ms")"
 echo "# time util_dev% util_rend% busy_ms_delta mbox_irq/s hottest_C fans_rpm | total_W aurora_faults"
+klog >/dev/null 2>&1 || echo "# kernel log unreadable (journalctl and dmesg): fault count is 0 by default, run as root" >&2
 i0=$(irq); [[ -n $i0 ]] || { echo "no 2302600000.mailbox-recv in $proc/interrupts: GPU mailbox not interrupt-driven here" >&2; exit 1; }
 f0=$(faults); b0=$(stat busy_ns); t0=$(date +%s.%N)
 n=0; bad=0; irqmoved=0; ip=$i0; bp=$b0; tp=$t0
@@ -49,10 +56,10 @@ while [[ $n -lt $samples ]]; do
   rate=$(awk -v a="$ip" -v b="$ic" -v t0="$tp" -v t1="$tc" 'BEGIN { printf "%.0f", (b - a) / (t1 - t0) }')
   bms=$(awk -v a="${bp:-0}" -v b="${bc:-0}" 'BEGIN { printf "%.0f", (b - a) / 1e6 }')
   [[ $ic -gt $ip ]] && irqmoved=1
-  fc=$(( $(faults) - f0 ))
+  fc=$(( $(faults) - f0 )); [[ $fc -lt 0 ]] && fc=0  # journal rotated or dmesg ring wrapped
   echo "$(date +%T) ${ud:-?} ${ur:-?} $bms $rate $(hottest) $(fan)| $(power)W $fc"
   ip=$ic; bp=$bc; tp=$tc; n=$((n + 1))
 done
-fc=$(( $(faults) - f0 ))
+fc=$(( $(faults) - f0 )); [[ $fc -lt 0 ]] && fc=0
 if [[ $fc -eq 0 && $irqmoved -eq 1 && $bad -eq 0 ]]; then echo "RESULT: PASS (no aurora fault line, mailbox interrupt arrived, agx_stats readable)"
 else echo "RESULT: FAIL (fault lines $fc, mailbox interrupt moved $irqmoved, unreadable stats $bad)"; exit 1; fi

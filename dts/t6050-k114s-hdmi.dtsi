@@ -30,6 +30,8 @@
  *    only in betizzel's v272 series (kernel v272-11 and later; r3b is on v272-11, r3a is not).
  *  - The loader must fill the ATC tunables of a dp-phy node (aura patch 0011 of betizzel's
  *    set). The K114s ADT has them: atc-phy3 carries 21 tunable properties (agent-run).
+ *  - The reg windows are J714s values; the ADT's atc-phy3 lists the same six addresses (agent-run). The labels
+ *    usb_drd3, ps_atc3_usb_aon, ps_atc3_common and ps_atc3_phymxwrap are J714s names, unchecked until compile.
  *  - dcpext3 is taken away from the USB-C routes (it was dcpext2's pair for modes that need
  *    two pipelines).
  * Also needed, outside this file: patches 0018 (HDMI flips complete locally while the output

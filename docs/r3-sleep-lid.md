@@ -41,7 +41,7 @@ Read on the running system: kernel `7.3.0-17.v272-4-ARCH` (K114S-R1), device tre
 | Hibernation | `PM: hibernation: disabled on this platform: coprocessor firmware state is not restored from an image` | agent-run |
 | PCIe | `pcie-apple 1cb0000000.pcie: adopted port 0, endpoint 01:00`: the loader trained the N1 link | agent-run |
 | N1 functions | `01:00.0` (`apple_centauri_t6050`), `01:00.1` (no driver of its own), `01:00.2` (`btcentauri_t6050`), root port `00:00.0` (`pcieport`); all in D0 | agent-run |
-| Suspend check | `apple_pcie_check_adopted_s2idle()` returns `-EBUSY` unless the machine is `apple,j716c` or `apple,k114c`. This one is `apple,k114s` | source-read |
+| Suspend check | `apple_pcie_check_adopted_s2idle()` returns `-EBUSY` unless the machine is `apple,j716c` or `apple,k114c`. This one is `apple,k114s` (r1 kernel; see Status 2026-11-15) | source-read |
 | Lid switch | input device `Apple SMC power/lid events` reports `SW_LID`; `macsmc-input` is a wakeup source | agent-run |
 | Other wakeup sources | the SMC, the keyboard and trackpad transport (`294b30000.input`), battery, charger, both USB controllers | agent-run |
 | RTC alarm | no `wakealarm` on `rtc0`: `rtcwake` cannot be used to end a test sleep | agent-run |
@@ -75,7 +75,7 @@ and the session comes back after about a second.
 | 0004 | simpledrm: an `eDP` connector for a framebuffer node with `apple,internal-panel` (#1688, `1006491a`, ed) | open draft. J714c (author's kernel): "the panel is card0-eDP-1 ... closing the lid locks the Omarchy session". Not booted in the #1688 form | **now**, while the panel is the boot framebuffer | built |
 | 0005 | The property on the shared K114/K116 framebuffer node (#1688, `76c5ea39`, Joshua Warren) | open draft, compile check only | with 0004 | built |
 | 0006 | Binding for the property (#1688, `67e63a57`) | open draft | documentation only | applied |
-| 0007 | Battery: an unreadable manufacture date returns `-ENODATA`, which the power-supply core skips (#1615, `089b082f`, Joshua Warren) | open draft. "Not yet booted on the M5" | **now**; not a sleep fix | built |
+| 0007 | Battery: an unreadable manufacture date returns `-ENODATA`, which the power-supply core skips (#1615, `089b082f`, Joshua Warren) | open draft. "Not yet booted on the M5" | **now**; not a sleep fix | built; booted on r3a, agent-run: -95 gone (`r3-power.md`, #52) |
 | 0008 | Device tree: the three PMP power domains always on (#1789, `f61eb455`, Jens Axboe) | open. K116s: PMP crashed at wake "in 3 of the 4 suspends" without it; with it "19 s2idle cycles in total" over 26 boots and "no PMP crash or RTKit crash line after any resume", one of them an hour long | once the PMP nodes are enabled (sound) | dtb built |
 | 0009, 0010 | Mailbox: the T6050 GPU mailboxes receive by interrupt, pollers removed (#1844, `41c359da`, `788441e0`, Erik Bourget, Diljit Singh) | merged. K116s, lid open, GPU active: before, "never wakes, 2 of 2" (panic in the noirq phase, #1843); with it "18.1 s asleep, woken by a key, `suspend_stats` success 1" | once the GPU nodes are enabled | built |
 
@@ -302,17 +302,19 @@ Agent-run, read-only, on the promoted r3a kernel on the GPU Stage 2:
 | Kernel | `7.3.0-17.v272-4-k114s-r3a-ARCH`: it carries `0001`-`0003` (K114s admitted to s2idle), so the "r3a never booted" blocker is gone |
 | `/sys/power/mem_sleep`, `pm_test` | `[s2idle]`; `pm_test` offers `none core processors platform devices freezer` (so `CONFIG_PM_DEBUG` is live) |
 | `suspend_stats` | success 0, fail 0: nothing has been tried |
-| `hibernate`, `hybrid-sleep`, `suspend-then-hibernate` targets | masked |
+| `suspend`, `hibernate`, `hybrid-sleep`, `suspend-then-hibernate` targets | all four masked; `sleep.target` is `static` |
 | `ps_pms`, `ps_pmp`, `ps_pms_sram` in `/proc/device-tree` | not present in the running tree: `0008` and `apple,always-on` have nothing to act on yet |
 | `2302600000.mailbox-recv` interrupt count | rising (about 400/s in the promotion log): the GPU mailbox receive interrupt reaches the AIC on this Mac, the gate for `0010` |
-| Boot log | `pcie-apple ...: adopted port 0, endpoint 01:00`, the line the suspend check keys on |
+| Boot log | `pcie-apple ...: adopted port 0, endpoint 01:00`, evidence of the adopted link that the suspend check requires |
 
 What is still open before a real suspend:
 
 1. **`0010`** (receive by interrupt only) is not in r3a. The interrupt evidence above is the K114s proof the earlier gate asked for; `0010` belongs to the shared T6050 kernel lane (betizzel/omarchy-m5, r3b). Suspend on the GPU tree stays forbidden until a kernel with `0010` boots (#1843 panicked in noirq without it).
 2. **PMP nodes** are not in the running tree, so `0008` cannot help yet. Upstream reports PMP crashes at wake without always-on domains.
-3. **Masked targets** (`suspend.target` and `sleep.target` kept `masked`/`static` on purpose) stay until 1 and 2 are done. The lid and the menu therefore do nothing, by design.
+3. **Masked targets** (the four above) stay until 1 and 2 are done, together with the trial's other two suspend blocks (the `sleep.conf.d` drop-in and the logind lid action `lock`; see `docs/r3-integration.md` step C). The lid and the menu therefore do nothing, by design.
 
 `tests/linux/test-sleep-gates.sh` (in `run-r3.sh`) guards the static pieces: `0003` admits only `apple,k114s`, the series order, the sleep fragment in the r3a tree and the masked-target check in `k114s-boot-once`.
 
 The only attended step that is safe now is the freezer level (tasks frozen for about 5 s, no device is suspended, no GPU or PCIe callback runs): `sudo tests/hardware/k114s-sleep-check.sh pm-test freezer`. Levels `devices` and `platform` wait for 1 and 2.
+
+`pm_test` runs raise `suspend_stats` success, so issue #50's done-check needs an owner-observed `cycle` result, not the counter alone. Run the freezer step outside any D-step window of `docs/r3-display-plan.md` (suspend stays blocked there).

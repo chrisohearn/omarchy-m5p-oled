@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0+ OR MIT
 /*
  * K114s r1 plus the left-back USB-C port (ATC0), and nothing else. A flagged draft for issue
- * #72: it compiles and lints, and has NOT been booted. Do not install it before
+ * #72, for compile and lint only: it has no GPU node, and the trial tree will be the r3-gpu tree
+ * plus K114S_R3_USB_ATC0. It has NOT been booted. Do not install it before
  * docs/r3-usb-atc0.md "What has to change first" is done.
  */
 #define K114S_R1_N1

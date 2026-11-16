@@ -124,7 +124,7 @@ def lint(path, tree, ref, atc0=False, atc0_ref=None):
 
     compat = tree.get("/", {}).get("compatible", b"").split(b"\0")[0].decode()
     need(compat == "apple,k114s", "root compatible is %s" % compat)
-    compared = 0
+    compared = jcompared = 0
     for name, bus, ctl, usb, phy, mbox, darts, index in PORTS + ([ATC0] if atc0 else []):
         pd = bus + "/" + ctl
         con = pd + "/connector"
@@ -198,12 +198,15 @@ def lint(path, tree, ref, atc0=False, atc0_ref=None):
             for k in sorted((set(tree[n]) | set(atc0_ref[rn])) - skip):
                 a, b = tree[n].get(k), atc0_ref[rn].get(k)
                 if n == phy0 and k in ("reg", "reg-names"):
+                    if a is None or b is None:
+                        bad.append("left-back: %s has no %s" % (n, k))
+                        continue
                     a, b = a[:176] if k == "reg" else a, b[:176] if k == "reg" else b[:100]
                 if n == phy0 and k.startswith("apple,tunable-"):
                     continue    # the loader fills tunables from the ADT; the J716c has its own in the file
                 if norm(a) != norm(b):
                     bad.append("left-back: %s %s differs from the J716c tree" % (n, k))
-            compared += 1
+            jcompared += 1
     for n in [] if atc0 else DEBUG_PORT:
         # the controller node must not exist; the SoC's dwc3 and PHY nodes may, disabled
         described = n in tree and (n.rsplit("/", 1)[-1].startswith("usb-pd@") or enabled(tree, n))
@@ -212,7 +215,8 @@ def lint(path, tree, ref, atc0=False, atc0_ref=None):
         print("FAIL %s: %s" % (path, b))
     if not bad:
         print("  %s: %s complete%s" % (path.rsplit("/", 1)[-1], "all three ports" if atc0 else "both ports",
-                                             ", %d nodes equal to the reference" % compared if ref is not None else ""))
+                                             (", %d nodes equal to the reference" % compared if ref is not None else "")
+                                             + (", %d nodes equal to the J716c" % jcompared if atc0_ref is not None else "")))
     return len(bad)
 
 
