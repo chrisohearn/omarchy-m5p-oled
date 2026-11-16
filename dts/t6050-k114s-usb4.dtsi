@@ -12,14 +12,16 @@
  * so this file includes those and adds only what the K114s side must say. tests/k114s-adt-usb4-facts.py
  * checks that equality against this Mac's own ADT.
  *
- * Needs a kernel tree that has both files (aurora-silicon/linux at or after 1841 and 1791), and
- * T6050_K114S in the guard of t6050-max.dtsi that creates the router nodes (the K114c's
- * #1841 added T6050_K114C there). The guard is read before t6050-k114s-common.dtsi runs, so the
- * top-level dts defines T6050_K114S first (build/k114s-usb4-dts.sh shows the form).
+ * Needs a kernel tree that has both files (aurora-silicon/linux at or after 1841 and 1791) and
+ * patches/linux/usb4/0001, whose guards in t6050-max.dtsi and t6050-peripherals.dtsi key on
+ * T6050_K114S_USB4. The top-level dts (t6050-k114s-r3-usb4.dts) defines it before its includes.
  *
- * The host DROM (apple,thunderbolt-drom on &acio1_nhi and &acio2_nhi) carries this Mac's router
- * UUID. It is not in this repository. The boot loader replaces it; if a build wants it anyway,
- * K114S_USB4_DROM names a generated file that sets it from the ADT, as the PMP tunables file is.
+ * Everything the kernel gets comes from this compiled tree: the router, NHI, DART, tunnel and PHY
+ * tunables, and the host DROM of the left router. tests/k114s-adt-usb4-facts.py checks each against
+ * this Mac's ADT. The tree has no usb4_N_rc, usb4-N-acio or usb4_N_nhi aliases, which is how
+ * Aura's dt_set_acio_tunables() finds the nodes, so the boot loader replaces none of it. The right
+ * router has no host DROM here (the DROM is not in the repository): K114S_USB4_DROM below can name
+ * a generated file that sets it from the ADT, as the PMP tunables file is.
  *
  * Copyright The Asahi Linux Contributors
  */
@@ -28,11 +30,12 @@
 #error "t6050-k114s-usb4.dtsi extends the K114S_R1_USB section of t6050-k114s-common.dtsi"
 #endif
 
-/* ATC1 (left-front): router, mailbox, DART, NHI, PCIe tunnel, supplier domains; hpm1 port@3 */
-#include "t6050-j714s-left-usb4.dtsi"
-
-/* ATC2 (right): router, as the K114c has it */
+/* ATC2 (right): router, as the K114c has it. First: it sets the AOP pin reservation to expose only pin 81. */
 #include "t6050-max-atc2-router.dtsi"
+
+/* ATC1 (left-front): router, mailbox, DART, NHI, PCIe tunnel, supplier domains; hpm1 port@3.
+ * Last of the two: its gpio-reserved-ranges exposes both LSTX pins (79 and 81), as on the J714s. */
+#include "t6050-j714s-left-usb4.dtsi"
 
 /* The right router's suppliers, disabled in the inventory (as in the K114c's tree) */
 &ps_atc2_cio {

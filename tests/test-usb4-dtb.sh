@@ -15,7 +15,10 @@ done
 (cd "$out/k" && patch -p1 -s < "$here/patches/linux/usb4/0001-t6050-k114s-router-guards.patch" 2>/dev/null || patch -p1 -s < <(sed '1,/^---$/d' "$here/patches/linux/usb4/0001-t6050-k114s-router-guards.patch"))
 "$here/build/build-r3a-dtb.sh" "$out/k" t6050-k114s-r3-usb4 "$out/o" | sed 's/^/built /'
 python3 -I "$here/tests/lint-dtb.py" "$out/o/t6050-k114s-r3-usb4.dtb" || { echo "FAIL lint"; exit 1; }
+# The patch must not break K114s trees that lack the router files: the r3a tree and upstream's own.
+"$here/build/build-r3a-dtb.sh" "$out/k" t6050-k114s-r3a "$out/o" | sed 's/^/built /'
+"$here/build/build-dtb.sh" "$out/k" t6050-k114s "$out/o" && echo "built upstream t6050-k114s (patched tree)"
 if [ "$(id -u)" = 0 ] || sudo -n true 2>/dev/null; then
   sudo python3 -I "$here/tests/k114s-adt-usb4-facts.py" "$out/o/t6050-k114s-r3-usb4.dtb"
-else echo "skip ADT facts (needs root)"; fi
-echo "ok   usb4 tree builds, lints and matches the ADT"
+  echo "ok   usb4 tree builds, lints and matches the ADT; r3a and upstream k114s still build"
+else echo "ok   usb4 tree builds and lints; r3a and upstream k114s still build (ADT facts SKIPPED: needs root)"; fi

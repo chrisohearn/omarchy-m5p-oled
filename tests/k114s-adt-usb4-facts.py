@@ -8,9 +8,11 @@ The tree is dts/t6050-k114s-r3-usb4.dts compiled against a kernel tree that has 
 left-front router (aurora-silicon/linux #1791) and the right-port router (#1841). For both
 routers (ATC1 = /arm-io/acio1, ATC2 = /arm-io/acio2) every address, interrupt and pin of the
 compiled nodes is read back and compared with the ADT, which is read from the "adt" MTD
-partition (root only) or from --adt FILE. Only addresses, interrupt numbers, pin numbers and
-the K114s' board-level facts are printed: tunables, the host DROM (router UUID) and firmware are
-never read or printed.
+partition (root only) or from --adt FILE. Also compared: the router, PCIe adapter, firmware, NHI,
+DART, PHY RX_TOP CIO and PCIe tunnel tunables, the host DROM of a router that has one, and that
+both LSTX pins are outside the AOP pin controller's reserved ranges. Only addresses, interrupt
+numbers and pin numbers are printed; tunables and the DROM (router UUID) are compared and reported
+as yes/no, never printed.
 
 Exit 0: every fact holds. Exit 1: at least one does not. Exit 2: ADT or tree unreadable.
 """
@@ -33,12 +35,23 @@ sf = _load("soundfacts", "k114s-adt-sound-facts.py")
 pf = _load("parityfacts", "k114s-adt-parity-facts.py")
 
 AIC_IRQ = 0
-# (name, ADT router node, ADT cpu node, ADT dart node, AOP GPIO pin of the LSTX line)
-ROUTERS = [("ATC1 left-front", "acio1", "acio-cpu1", "dart-acio1", 79),
-           ("ATC2 right", "acio2", "acio-cpu2", "dart-acio2", 81)]
+# (name, ADT router node, ADT cpu node, ADT dart node, ADT PHY node, ADT PCIe tunnel controller node)
+ROUTERS = [("ATC1 left-front", "acio1", "acio-cpu1", "dart-acio1", "atc-phy1", "apciec1"),
+           ("ATC2 right", "acio2", "acio-cpu2", "dart-acio2", "atc-phy2", "apciec2")]
 
 
-def router_facts(adt, t, name, acio, cpu, dart, lstx):
+def adt_tun(adt, path, name, base=0):
+    """An ADT tunables property as (offset + base, mask, value) triples: 6 words each, offset, size, 64-bit mask and value."""
+    v = sf.u32s(adt.prop(path, name)) or []
+    return [((v[i] + base) & 0xffffffff, v[i + 2], v[i + 4]) for i in range(0, len(v) - 5, 6)]
+
+
+def fdt_tun(t, node, name):
+    c = t.cells(t.nodes[node].get(name, b""))
+    return [tuple(c[i:i + 3]) for i in range(0, len(c) - 2, 3)]
+
+
+def router_facts(adt, t, name, acio, cpu, dart, phy, apciec):
     A = "arm-io/"
     out = []
     fact = lambda what, dtb, a: out.append((what, dtb, a))
@@ -71,6 +84,49 @@ def router_facts(adt, t, name, acio, cpu, dart, lstx):
     fact("%s: DART interrupt" % name, t.irqs(d)[0] if d else None, sf.u32s(adt.prop(A + dart, "interrupts"))[0])
     fact("%s: five power domains" % name, len(t.cells(t.prop(node, "power-domains"))), 5)
     fact("%s: router enabled" % name, t.enabled(node), True)
+    # Tunables: compared as sorted (offset, mask, value) sets; only yes/no is printed, never a value.
+    # The ADT groups the router's blocks at these base offsets inside the rc and the NHI.
+    P = A + acio
+    same = lambda what, tree, adtv: fact("%s: %s equal the ADT's" % (name, what), sorted(tree) == sorted(adtv) and bool(adtv), True)
+    same("router rc tunables", fdt_tun(t, node, "apple,tunable-rc"),
+         adt_tun(adt, P, "top_tunables") + adt_tun(adt, P, "hbw_fabric_tunables", 0x4000) +
+         adt_tun(adt, P, "lbw_fabric_tunables", 0x8000))
+    same("PCIe adapter tunables", fdt_tun(t, node, "apple,tunable-pcie-adapter"), adt_tun(adt, P, "pcie_adapter_regs_tunables"))
+    same("router AP firmware tunables", fdt_tun(t, node, "apple,tunable-router-ap-fw"), adt_tun(adt, P, "pcie_router_ap_fw"))
+    if nhi:
+        same("NHI tunables", fdt_tun(t, nhi, "apple,tunable-nhi"),
+             adt_tun(adt, P, "fw_int_ctl_management_tunables", 0x4000) +
+             adt_tun(adt, P, "hi_up_merge_fabric_tunables", 0xf8000) + adt_tun(adt, P, "hi_dn_merge_fabric_tunables", 0xfc000))
+        drom = t.nodes[nhi].get("apple,thunderbolt-drom")
+        if drom is None:
+            out.append(("%s: host DROM (none in the tree, not checked)" % name, True, True))
+        else:
+            fact("%s: host DROM equals the ADT's" % name, drom == adt.prop(P, "thunderbolt-drom"), True)
+    same("DART tunables", fdt_tun(t, d, "apple,tunable") if d else [], adt_tun(adt, A + dart, "dart-tunables-instance-0"))
+    # the PHY's CIO RX_TOP tunables; the ADT offset word carries a register index in its top bits
+    ph = next((n for n, p in t.nodes.items() if "apple,tunable-lane0-rx-top-cio" in p
+               and t.regs(n)[0][0] == adt.addr(A + phy, 2)), None)
+    for lane in (0, 1):
+        v = sf.u32s(adt.prop(A + phy, "tunable_LN%d_RX_TOP_CIO_DFLT" % lane)) or []
+        fact("%s: PHY lane %d RX_TOP CIO tunable equals the ADT's" % (name, lane),
+             ph is not None and fdt_tun(t, ph, "apple,tunable-lane%d-rx-top-cio" % lane) == [(v[0] & 0xffffff, v[1], v[2])] if len(v) == 3 else False, True)
+    # the PCIe tunnel behind the router
+    tun = t.ph.get((t.cells(t.prop(node, "apple,pcie-tunnel") or b"") or [None])[0])
+    pcie = next((n for n in t.nodes if tun and n.startswith(tun + "/pcie@") and n.count("/") == 2), None)
+    port = next((n for n in t.nodes if pcie and n.startswith(pcie + "/pci@")), None)
+    for what, n, prop, aprop in (("debug", pcie, "apple,tunable-debug", "atc-apcie-debug-tunables"),
+                                 ("rc", pcie, "apple,tunable-rc", "atc-apcie-rc-tunables"),
+                                 ("fabric", pcie, "apple,tunable-fabric", "atc-apcie-fabric-tunables"),
+                                 ("config", port, "apple,tunable", "apcie-config-tunables")):
+        same("tunnel %s tunables" % what, fdt_tun(t, n, prop) if n else [], adt_tun(adt, A + apciec, aprop))
+    td = next((n for n in t.nodes if tun and n.startswith(tun + "/iommu@")), None)
+    same("tunnel DART tunables", fdt_tun(t, td, "apple,tunable") if td else [], adt_tun(adt, A + "dart-" + apciec, "dart-tunables-instance-0"))
+    # both routers' LSTX pins must stay out of the AOP pin controller's reserved ranges
+    gc, _ = t.target(node, "lstx-gpios", stride=2)
+    rr = t.cells(t.prop(gc, "gpio-reserved-ranges") or b"") if gc else []
+    pin = sf.u32s(adt.prop(P, "gpio-lstx"))[0]
+    fact("%s: LSTX pin %d is not in the pin controller's reserved ranges" % (name, pin),
+         gc is not None and not any(rr[i] <= pin < rr[i] + rr[i + 1] for i in range(0, len(rr) - 1, 2)), True)
     return out
 
 
@@ -99,8 +155,8 @@ def main(argv):
         print("k114s-adt-usb4-facts: %s: %s" % (type(e).__name__, e), file=sys.stderr)
         return 2
     bad = 0
-    for name, acio, cpu, dart, lstx in ROUTERS:
-        for what, dtbv, found in router_facts(adt, t, name, acio, cpu, dart, lstx):
+    for r in ROUTERS:
+        for what, dtbv, found in router_facts(adt, t, *r):
             if dtbv == found:
                 print("  ok    %s: %s" % (what, pf.hexs(dtbv)))
             else:

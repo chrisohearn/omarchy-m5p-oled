@@ -4,9 +4,9 @@
 #   bash tests/hardware/k114s-usb4-check.sh
 set -u
 echo "== kernel";                 uname -r
-echo "== routers bound";          ls /sys/bus/platform/drivers/thunderbolt-apple-acio/ 2>&1 | grep -E 'acio|bind' || echo "none bound"
+echo "== routers bound";          ls /sys/bus/platform/drivers/thunderbolt-apple-acio/ 2>&1 | grep -E '\.acio$' || echo "none bound"
 echo "== NHI bound (appears only after a USB4 link is negotiated)"
-ls /sys/bus/platform/drivers/thunderbolt-apple-nhi/ 2>&1 | grep -E 'nhi' || echo "no NHI yet"
+ls /sys/bus/platform/drivers/thunderbolt-apple-nhi/ 2>&1 | grep -E '\.nhi$' || echo "no NHI yet"
 echo "== thunderbolt devices";    ls /sys/bus/thunderbolt/devices/ 2>&1
 for d in /sys/bus/thunderbolt/devices/*; do
   [ -d "$d" ] || continue
