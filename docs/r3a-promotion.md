@@ -58,7 +58,8 @@ rebuild. What proves the path form:
   nothing ("Default entry is not valid, booting to menu"). The installed `/usr/share/doc/limine/CONFIG.md` documents both.
   The source also shows that Limine keeps a value's trailing blanks, so every write below is checked with `grep -x`.
 - Agent-run: the entry lines on the Mac are exactly `/+Omarchy` and `  //linux-k114s`, with no trailing blank (`cat -A`).
-- `limine-entry-tool` (a compiled binary) was observed to leave the header of `limine.conf`, `default_entry: 1` included,
+- `limine-entry-tool` (a compiled binary) and `limine-snapper-sync` are observed, not proven, to keep a path default; the
+  P6d check is what covers both. `limine-entry-tool` was observed to leave the header of `limine.conf`, `default_entry: 1` included,
   unchanged across `--remove-uki`, the r3a install and the 2026-11-14 rebuild. It writes `default_entry` only when it
   generates a new file. Its own template carries `#default_entry: <OS name>/<kernel name>`, which is the path form
   (`strings` of `/usr/lib/limine/limine-entry-tool`). That this holds for a path value is **not proven by source**. Step P5b
@@ -137,8 +138,8 @@ the owner decided to resume. A migration that runs `limine-mkinitcpio` rebuilds 
 space guard does not run; the P6d after-block is what catches a bad result before a reboot, and `restore-repair` (D11)
 is the way back if it is missed.
 
-**D8. `update-m1n1` stays off while `linux-k114s` is installed** (`M1N1_UPDATE_DISABLED=1`, as `docs/r3b-kernel.md`
-asks). Its trees sort above `linux-aurora`'s, so a run would rebuild `m1n1/boot.bin` from the r3a package's preliminary
+**D8. `update-m1n1` is turned off while `linux-k114s` is installed** (`M1N1_UPDATE_DISABLED=1`, as `docs/r3b-kernel.md`
+asks). It has been on since trial step D4 of `docs/r3-integration.md` restored it, and P6c turns it off. Its trees sort above `linux-aurora`'s, so a run would rebuild `m1n1/boot.bin` from the r3a package's preliminary
 trees (and add about 10 MB). The Stage 2 hook reads only the U-Boot tail of that file, and every package that ships
 `dtbs/` or `asahi-boot/` is held, so this is a precaution, not a fix.
 
@@ -775,7 +776,7 @@ full rebuild anyway.
     sudo $L/apply-holds || stop "apply-holds failed: put the P0c copies back (sudo cp -p $P/holds.list $L/; sudo cp -p $P/pacman.conf /etc/)"
     held=$(grep -m1 '^IgnorePkg = ' /etc/pacman.conf)
     for p in linux-k114s limine-mkinitcpio-hook limine-snapper-sync linux-aurora m1n1-aurora uboot-aurora; do echo " $held " | grep -q " $p " || stop "$p is not in the first IgnorePkg line"; done
-    # 2. update-m1n1 stays off while linux-k114s is installed (D8)
+    # 2. update-m1n1 is turned off while linux-k114s is installed (D8)
     grep -q -x 'export M1N1_UPDATE_DISABLED=1' /etc/default/update-m1n1 || echo 'export M1N1_UPDATE_DISABLED=1' | sudo tee -a /etc/default/update-m1n1 >/dev/null
     grep -q -x 'export M1N1_UPDATE_DISABLED=1' /etc/default/update-m1n1 || stop "update-m1n1 is not off"
     # 3. the dormant trial-default unit can never fire (D9): its plain unit file goes to the backup folder, then the mask
@@ -947,15 +948,20 @@ Each step's undo is next to it. When Linux does not come up, hold the power butt
   that one line. To put the static image back by hand (the same as `restore-repair`), in the bundle folder:
 
       E=/Volumes/EFI
-      sudo rm $E/EFI/Linux/omarchy_linux-aurora.efi                           # makes room; its entry stays, unused
-      sudo cp promotion/omarchy_linux-aurora-k114s.efi $E/EFI/Linux/
+      # r3b window only: first sudo rm $E/EFI/Linux/omarchy_linux-k114s-r3b.efi (the free-space check below stops without it)
+      [ -f $E/EFI/Linux/omarchy_linux-aurora.efi ] && sudo rm $E/EFI/Linux/omarchy_linux-aurora.efi   # makes room; its entry stays, unused
+      df -k $E | awk 'NR==2 && $4 < 120000 {print "STOP: under 120 MB free (remove the r3b image first if present); not copying"; exit 1}' &&
+        sudo cp promotion/omarchy_linux-aurora-k114s.efi $E/EFI/Linux/
       shasum -a 256 $E/EFI/Linux/omarchy_linux-aurora-k114s.efi               # 51148ff7005d2986...
       sudo cat $E/limine.conf | awk -v b=promotion/repair-block.conf '!d && /^\// { while ((getline l < b) > 0) print l; d = 1 } { print }' |
         sed 's#^default_entry: .*#default_entry: 1#' > promotion/limine.conf.new
       grep -c '' promotion/limine.conf.new; grep -n -e '^default_entry' -e '^/' promotion/limine.conf.new   # the repair title is the first '/' line
-      sudo cp promotion/limine.conf.new $E/limine.conf && sync && diskutil unmount $E
+      shasum -a 256 $E/EFI/Linux/omarchy_linux-aurora-k114s.efi | grep -q '^51148ff7005d2986' &&   # no limine.conf write unless the image is whole
+        sudo cp promotion/limine.conf.new $E/limine.conf && sync && diskutil unmount $E
 
-  The `awk` puts the saved block before the first top-level entry, which is where P5a cut it from. Check the `grep`
+  In the r3b window the r3b image (`omarchy_linux-k114s-r3b.efi`) must come off first (the commented line before the
+  `df` line), or the free-space check stops the copy, and the `limine.conf` write is skipped unless the image's `shasum`
+  matches. The `awk` puts the saved block before the first top-level entry, which is where P5a cut it from. Check the `grep`
   output before the `cp`: one `default_entry: 1` line, and `/Omarchy K114s repair r1 (trackpad fix B)` as the first entry.
 - **Never from macOS:** `rollback all` (it now stops once the repair entry is gone; before that it would restore the
   pre-repair menu), `rollback stage2` (it restores trial1, not r1), `kernel`, `apply`, `default original`.
@@ -967,8 +973,9 @@ Each step's undo is next to it. When Linux does not come up, hold the power butt
   now on macOS (D11): the repair image in the bundle's `promotion/` folder, its block on the ESP and in the bundle, and
   `restore-repair`, which was run on synthetic ESPs only. On the Mac only its `--check` runs (P4b). Keep the bundle folder;
   if it is lost, the copy on the Linux disk cannot be reached from macOS.
-- **The path default rests on Limine's source and has its first boot in P3.** `limine-entry-tool` keeping a path value
-  is observed (P5b), not read from its source, which is not installed. Every boot-touching update is followed by the
+- **The path default rests on Limine's source and has its first boot in P3.** `limine-entry-tool` and `limine-snapper-sync`
+  keeping a path value is observed (P5b, and P6d for `limine-snapper-sync`), not read from their source, which is not
+  installed. Every boot-touching update is followed by the
   `default_entry` check.
 - **`update-verify` checks `linux-aurora`, not the r3a default.** Its "verified" or warning text says nothing about the
   kernel that boots.
@@ -1003,7 +1010,7 @@ Agent-run on 2026-11-15, as a normal user, nothing installed:
 | `restore-repair`'s checks and menu rebuild on copies of today's `limine.conf` and `k114s-repair/r2c/repair-uki.txt` (in memory, nothing printed but the results) | the live block passes `check_repair_block`; the record names 111,821,824 bytes, `51148ff7005d2986...`, the repair image's sha256; putting the cut block back into the promoted menu gives today's `limine.conf` byte for byte | agent-run |
 | Limine `v12.9.6` `common/menu.c`, `common/lib/config.c` | path resolution, the folder `+`, the verbatim value, "booting to menu" for a folder or no match | read from source |
 
-Not verified: anything that boots; `limine-entry-tool` with a path default (P5b observes it); the macOS tool on the real
+Not verified: anything that boots; `limine-entry-tool` with a path default (P5b observes it) and `limine-snapper-sync` with a path default (P6d observes it); the macOS tool on the real
 ESP after the change (P4b runs `status` and `restore-repair --check`; `restore-repair` itself has run on synthetic ESPs
 only); the full `tests/macos/test-macos-tool.sh` and `tests/macos/test-r2c-fat.sh` (they need the assembled bundle and
 macOS); `limine-snapper-sync` on a 79 % full ESP; the packages pending in the channel on the day of P6d.
