@@ -1,6 +1,6 @@
 # K114s internal microphones: trial plan and upstream report template (issue #38)
 
-Status: offline work done; the recording trial needs the owner at the Mac on a boot with the sound tree
+Status: offline work done, except a PipeWire replica of the trial with a synthetic 3-channel RawMics source (still open); the recording trial needs the owner at the Mac on a boot with the sound tree
 (card `AppleK114HPAI`). The running kernel today has no sound card (`/proc/asound/cards`: no soundcards).
 
 ## Offline evidence (agent-run, read-only)
@@ -22,7 +22,7 @@ Upstream's J714s array commit (linux #1557) uses the same single 3-channel captu
     bash tests/hardware/k114s-mic-trial.sh
 
 It records five short takes (quiet, talk, clap left, clap right, mono source), prints per-channel peak,
-RMS, silence and clipping, and the correlation between channels. It plays nothing. Then play the mono take
+RMS, silence and clipping, and the correlation between channels. It plays nothing. Raw takes use `node.dont-fallback` (a missing `RawMics` fails instead of recording the mono source) and `--channel-map AUX0,AUX1,AUX2` (as in `mic.json`); three identical channels are reported BAD. Then play the mono take
 through headphones only. Done when three channels carry signal, the mono take is intelligible, and the
 owner confirms by ear (owner-observed).
 

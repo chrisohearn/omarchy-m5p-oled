@@ -79,6 +79,7 @@ def analyze(path, expect=None, silent=-70.0):
             print("ok      %s" % line)
     if ch > 1:
         r0, x0, m0 = stats[0]
+        same = True
         for i in range(1, ch):
             ri, xi, mi = stats[i]
             v0 = sum((a - m0) ** 2 for a in x0) / n
@@ -86,7 +87,12 @@ def analyze(path, expect=None, silent=-70.0):
             if v0 <= 0 or vi <= 0:
                 continue
             c = sum((a - m0) * (b - mi) for a, b in zip(x0, xi)) / n
-            print("info    corr(ch0,ch%d) = %+.2f   level difference %+.1f dB" % (i, c / math.sqrt(v0 * vi), db(ri) - db(r0)))
+            corr = c / math.sqrt(v0 * vi)
+            print("info    corr(ch0,ch%d) = %+.2f   level difference %+.1f dB" % (i, corr, db(ri) - db(r0)))
+            same = same and abs(corr) >= 0.999 and abs(db(ri) - db(r0)) < 0.1
+        if same:
+            print("BAD     channels identical: upmixed or fallback source, not separate microphones")
+            bad = 1
         rm = [r for r, _, _ in stats]
         if min(rm) > 0 and db(max(rm)) - db(min(rm)) > 12:
             print("info    channels differ by more than 12 dB: a blocked port or a gain error; report which one")
@@ -126,6 +132,10 @@ def self_test():
     chk("three live channels pass", r == 0 and "corr(ch0,ch1) = +1.00" in o)
     r, o = run(p, expect=1)
     chk("a wrong channel count is BAD", r == 1)
+    p5 = os.path.join(d, "same.wav")
+    write_wav(p5, [tone, tone, tone])
+    r, o = run(p5, expect=3)
+    chk("identical channels (upmixed mono) are BAD", r == 1 and "channels identical" in o)
     p2 = os.path.join(d, "silent.wav")
     write_wav(p2, [tone, [0.0] * n, noise])
     r, o = run(p2, expect=3)

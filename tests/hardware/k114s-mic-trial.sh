@@ -1,10 +1,11 @@
 #!/bin/bash
 # OWNER-RUN, ATTENDED. After a boot with the sound tree (card AppleK114HPAI), records the three raw
-# microphones and the mono source in four short takes and analyses every channel (issue #38).
+# microphones and the mono source in five short takes and analyses every channel (issue #38).
 # Records only: no playback, no setting is changed, no root needed. Nothing goes to any speaker.
 #
 #   bash tests/hardware/k114s-mic-trial.sh [--secs N] [--dir DIR]
-# Takes: 1 quiet room, 2 talk (counting aloud), 3 clap near the left edge, 4 clap near the right edge.
+# Takes: 1 quiet room, 2 talk (counting aloud), 3 clap near the left edge, 4 clap near the right edge,
+# 5 count aloud again on the mono source.
 # Reads: which raw channel is loudest for each clap (a hint for the array layout), per-channel level,
 # silence, clipping, correlation. Prints a block to paste into the issue; no names or addresses in it.
 secs=5; dir=
@@ -20,7 +21,10 @@ raw=alsa_input.platform-sound.RawMics; mono=effect_output.k114-mic
 wpctl status 2>/dev/null | grep -q -E 'MacBook Microphone|k114' && echo "info    mono source present" || echo "info    mono source not listed in wpctl status (the raw takes still work)"
 take() { # name target channels prompt [silent-dbfs]
   printf '\n>>> %s\n    Recording %ss starts when you press Enter.\n' "$4" "$secs" >/dev/tty; read -r _ </dev/tty
-  timeout "$secs" pw-record --target "$2" --rate 48000 --channels "$3" --format f32 "$dir/$1.wav" 2>"$dir/$1.err"
+  # dont-fallback: a missing target must fail, not fall back to the mono default source (3 identical channels).
+  # AUX0..2 matches mic.json's capture.props, so channels map one to one onto the raw microphones.
+  local map=(); [ "$3" = 3 ] && map=(--channel-map AUX0,AUX1,AUX2)
+  timeout "$secs" pw-record --target "$2" -P '{ node.dont-fallback = true }' --rate 48000 --channels "$3" "${map[@]}" --format f32 "$dir/$1.wav" 2>"$dir/$1.err"
   [ -s "$dir/$1.wav" ] || { echo "BAD     $1: nothing recorded (target $2): $(head -c 200 "$dir/$1.err")"; return 1; }
   echo "== $1 ($2, $3 ch)"; python3 -I "$A" "$dir/$1.wav" --expect-channels "$3" --silent-dbfs "${5:--70}"
 }
