@@ -78,7 +78,8 @@ only the runtime toggle crashed. So install and arm, then reboot once:
    sudo cp -p $m "$c" && sudo cmp -s $m "$c" || stop "no verified copy of the mask in $c; nothing changed"
    printf '%s\n' '# K114s VRR test (docs/r3-vrr.md V1): one boot, the owner watching' 'options appledrm fw27_panel_vrr=1 fw27_panel_vrr_min=48' | sudo tee $m >/dev/null
    [ "$(modprobe -c | grep -c -E '^options appledrm fw27_panel_vrr=1 fw27_panel_vrr_min=48$')" = 1 ] && [ "$(modprobe -c | grep -c -E '^options appledrm fw27_panel_vrr=0')" = 0 ] ||
-     { sudo cp -p "$c" $m; stop "modprobe does not read the test options: the mask is back"; }
+     { sudo cp -p "$c" $m && sudo cmp -s "$c" $m && stop "modprobe does not read the test options: the mask is back";
+       stop "modprobe does not read the test options AND the mask could not be put back: do not reboot; run V3 by hand and read $m"; }
    echo "V1 armed: the next boot offers VRR with a 48 Hz minimum; the way back is V3"
    )
    ```

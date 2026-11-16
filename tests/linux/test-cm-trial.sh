@@ -14,7 +14,7 @@ case $1 in
             [ -e "$FAKE/no-edp" ] || { echo "Monitor eDP-1 (ID 0):"; echo "	colorManagementPreset: $(cat "$FAKE/preset")"; } ;;
   getoption) echo "bool: $(cat "$FAKE/cm")" ;;
   eval) case $2 in *"cm_enabled = false"*) echo false > "$FAKE/cm" ;; *"cm_enabled = true"*) [ -e "$FAKE/cm-stuck" ] || echo true > "$FAKE/cm" ;; esac
-        p=$(printf '%s' "$2" | grep -o 'cm = "[a-z0-9]*"' | head -1 | cut -d'"' -f2); [ -z "$p" ] || echo "$p" > "$FAKE/preset" ;;
+        p=$(printf '%s' "$2" | grep -o 'cm = "[a-z0-9]*"' | head -1 | cut -d'"' -f2); [ -z "$p" ] || { [ -e "$FAKE/preset-stuck" ] && [ "$p" != srgb ]; } || echo "$p" > "$FAKE/preset" ;;
 esac
 SH
 cat > "$F/systemd-run" <<'SH'
@@ -29,7 +29,8 @@ exit 0
 SH
 chmod +x "$F/hyprctl" "$F/systemd-run"
 export K114S_HYPRCTL=$F/hyprctl K114S_SYSTEMD_RUN=$F/systemd-run HYPRLAND_INSTANCE_SIGNATURE=test XDG_RUNTIME_DIR=$BASE
-reset() { rm -f "$F/calls" "$F/no-edp" "$F/srun-fails" "$F/ext" "$F/cm-stuck"; echo false > "$F/cm"; echo srgb > "$F/preset"; }
+export K114S_CM_TRIAL_POLL=0
+reset() { rm -f "$F/calls" "$F/no-edp" "$F/srun-fails" "$F/ext" "$F/cm-stuck" "$F/preset-stuck"; echo false > "$F/cm"; echo srgb > "$F/preset"; }
 bash -n "$S"; ok "the script parses" $? 0
 for bad in "" "hdr10" "dp3 3" "dp3 121" "dp3 2x"; do
   reset; bash "$S" $bad >/dev/null 2>&1; ok "refuses '$bad' and calls nothing" "$? $(test -e "$F/calls"; echo $?)" "1 1"
@@ -57,4 +58,7 @@ for p in hdr hdredid; do
   reset; out=$(FAKE_DELAY=1 K114S_CM_TRIAL_WAIT=3 bash "$S" $p 20 2>&1); rc=$?
   ok "$p: accepted, set with cm on, and reverted to srgb" "$rc $(grep -c -F "cm = \"$p\" }); hl.config({ render = { cm_enabled = true } })" "$F/calls") $(echo "$out" | grep -c 'reverted:')" "0 1 1"
 done
+# a preset Hyprland does not take (an HDR request downgraded to sRGB): the revert still runs, but the trial fails (#164)
+reset; touch "$F/preset-stuck"; out=$(FAKE_DELAY=1 K114S_CM_TRIAL_WAIT=3 bash "$S" hdr 20 2>&1); rc=$?
+ok "a preset that never took effect: exit 1, said so, and the revert is still verified" "$rc $(echo "$out" | grep -c 'DID NOT TAKE EFFECT') $(echo "$out" | grep -c 'reverted:')" "1 1 1"
 finish "colour-management trial tests"
