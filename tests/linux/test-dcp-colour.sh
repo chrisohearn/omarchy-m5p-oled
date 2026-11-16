@@ -19,7 +19,13 @@ sed -i '/hl.monitor/s/cm = "dp3"/cm = "edid"/' "$M"; bash "$S" --check >/dev/nul
 bash "$S" >/dev/null 2>&1; ok "install puts the dp3 rule back, one copy" "$(grep -c 'hl.monitor.*cm = "dp3"' "$M") $(grep -c 'hl.monitor.*cm = "edid"' "$M")" "1 0"
 bash "$S" --undo >/dev/null 2>&1; ok "undo restores the original bytes" "$(sum "$M")" "$orig"
 out=$(bash "$S" --undo 2>&1); ok "undo twice is a no-op" "$? $(sum "$M")" "0 $orig"
-rm "$M"; bash "$S" >/dev/null 2>&1; ok "no monitors.lua: refuses, creates nothing" "$? $(ls "$H" | wc -l)" "1 1"
+printf -- '-- rules\n-- k114s-dcp-colour begin (half-deleted)\nkeep = 1\n' > "$M"; d=$(sum "$M")
+out=$(bash "$S" 2>&1); r1=$?; out2=$(bash "$S" --undo 2>&1); r2=$?
+ok "a begin line with no end line: install and undo refuse and the lines below it stay (#158)" "$r1 $r2 $(sum "$M") $(grep -c 'keep = 1' "$M")" "1 1 $d 1"
+T=$BASE/dotfiles; mkdir -p "$T"; printf -- '-- rules\n' > "$T/monitors.lua"; rm -f "$M" "$M.k114s-dcp-colour.bak"; ln -s "$T/monitors.lua" "$M"
+out=$(bash "$S" 2>&1); ok "a symlinked monitors.lua stays a link and its target gets the block (#158)" "$? $(test -L "$M"; echo $?) $(grep -c 'k114s-dcp-colour begin' "$T/monitors.lua")" "0 0 1"
+bash "$S" --undo >/dev/null 2>&1; ok "undo through the link too" "$(test -L "$M"; echo $?) $(grep -c 'k114s-dcp-colour begin' "$T/monitors.lua")" "0 0"
+rm "$M"; bash "$S" >/dev/null 2>&1; ok "no monitors.lua: refuses, creates nothing" "$? $(test -e "$M"; echo $?)" "1 1"
 bash "$S" --bogus >/dev/null 2>&1; ok "an unknown option fails" $? 1
 if command -v lua >/dev/null; then
   for v in "" 0 1; do

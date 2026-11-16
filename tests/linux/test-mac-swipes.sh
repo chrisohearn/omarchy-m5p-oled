@@ -20,6 +20,8 @@ printf 'hl.gesture({ fingers = 3, direction = "left", action = function() end })
 out=$(bash "$S" 2>&1); ok "install refuses a hand-written 3-finger left gesture and changes nothing" "$? $(sum "$M") $(echo "$out" | grep -c 'outside the marked block')" "1 $d 1"
 printf -- '-- input\n' > "$M"; printf 'hl.gesture({ direction = "right", fingers = 4, action = "fullscreen" })\n' >> "$M"; d=$(sum "$M")
 out=$(bash "$S" 2>&1); ok "install refuses a clashing gesture written with direction before fingers" "$? $(sum "$M")" "1 $d"
+printf -- "-- input\nhl.gesture({ fingers = 3, direction = 'left', action = 'workspace' })\n" > "$M"; d=$(sum "$M")
+out=$(bash "$S" 2>&1); ok "install refuses a clashing gesture with a single-quoted direction (#160)" "$? $(sum "$M")" "1 $d"
 printf -- '-- input\nhl.gesture({\n  fingers = 3,\n  direction = "horizontal",\n  action = "workspace",\n})\n' > "$M"; d=$(sum "$M")
 out=$(bash "$S" 2>&1); ok "install refuses a clashing gesture spread over several lines (horizontal)" "$? $(sum "$M")" "1 $d"
 printf -- '-- input\nhl.gesture({ fingers = 2, direction = "left", action = "workspace" })\nhl.gesture({ fingers = 3, direction = "up", action = "special" })\n' > "$M"

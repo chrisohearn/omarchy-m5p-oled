@@ -9,7 +9,10 @@
 # written by hand in the same file (an earlier manual fix) stay, so replace those with --install rather than adding to them.
 set -u
 here=$(cd "$(dirname "$0")" && pwd); snip=$here/dcp-colour.lua
-f=${K114S_HYPR_DIR:-$HOME/.config/hypr}/monitors.lua; bak=$f.k114s-dcp-colour.bak
+f=${K114S_HYPR_DIR:-$HOME/.config/hypr}/monitors.lua
+# a dotfile manager may link monitors.lua: edit the file it points at, so the link stays a link (#158)
+[ -L "$f" ] && { f=$(readlink -f -- "$f") || exit 1; }
+bak=$f.k114s-dcp-colour.bak
 B='-- k114s-dcp-colour begin'; E='-- k114s-dcp-colour end'
 die() { echo "k114s-dcp-colour: $*" >&2; exit 1; }
 [ -s "$snip" ] || die "no $snip"
@@ -17,7 +20,14 @@ die() { echo "k114s-dcp-colour: $*" >&2; exit 1; }
 block() { awk -v b="$B" -v e="$E" 'index($0, b) == 1 { p = 1 } p { print } p && index($0, e) == 1 { p = 0 }' "$1"; }
 strip() { awk -v b="$B" -v e="$E" 'index($0, b) == 1 { p = 1 } !p { print } p && index($0, e) == 1 { p = 0 }' "$1"; }
 installed() { [ -n "$(block "$f")" ] && [ "$(block "$f")" = "$(cat "$snip")" ]; }
+# zero or one complete block, begin before end; anything else (a half-deleted block) is left alone (#158)
+balanced() {
+  awk -v b="$B" -v e="$E" 'index($0, b) == 1 { if (p) bad = 1; p = 1; n++ } index($0, e) == 1 { if (!p) bad = 1; p = 0 }
+    END { exit (bad || p || n > 1) }' "$1"
+}
 put() { t=$(mktemp "$f.XXXXXX") || exit 1; cat > "$t" && chmod --reference="$f" "$t" && mv "$t" "$f" || { rm -f "$t"; die "cannot write $f"; }; }
+case ${1:---install} in --check | --install | --undo) balanced "$f" ||
+  die "$f has an unmatched or repeated '$B' / '$E' line: fix it by hand (nothing was changed)" ;; esac
 case ${1:---install} in
   --check) installed && echo "k114s-dcp-colour: installed in $f" || die "not installed in $f" ;;
   --install)

@@ -29,7 +29,7 @@ balanced() {
 # an active gesture outside the block on 3 or 4 fingers, left, right or horizontal, in any field order or over several lines
 clash() {
   strip "$1" | sed 's/--.*$//' | tr '\n' ' ' | sed 's/hl\.gesture(/\n&/g' | grep '^hl\.gesture(' | sed 's/}).*$//' |
-    grep -E 'fingers *= *[34]([^0-9]|$)' | grep -q -E 'direction *= *"(left|right|horizontal)"'
+    grep -E 'fingers *= *[34]([^0-9]|$)' | grep -q -E "direction *= *[\"'](left|right|horizontal)[\"']"
 }
 put() { t=$(mktemp "$f.XXXXXX") || exit 1; cat > "$t" && chmod --reference="$f" "$t" && mv "$t" "$f" || { rm -f "$t"; die "cannot write $f"; }; }
 case ${1:---install} in --check | --install | --undo) balanced "$f" ||
