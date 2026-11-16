@@ -25,7 +25,7 @@ out=$(env -u K114S_ROOT bash "$TOOL" 2>&1); ok "without root and without K114S_R
 
 # --- the drop-in, against a fake mkinitcpio: add_module returns at once for a module already counted as added (as the real one does) ---
 # The module list is what autodetect and kms would offer on a display-tree boot, the two MODULES entries of 92-omarchy-mac-*.conf and the display-only pair.
-MODS="drm_dma_helper appledrm dcp_fabric_core apple_pmp snd_pcm typec simpledrm_helper"
+MODS="drm_dma_helper appledrm dcp_fabric_core snd_pcm typec simpledrm_helper"   # apple_pmp is not here: only the MODULES entry below may add it
 fake() { # fake WITH_DROPIN: prints the modules the fake build adds
   (
     declare -A _addedmodules; added=()
@@ -38,7 +38,7 @@ fake() { # fake WITH_DROPIN: prints the modules the fake build adds
   )
 }
 ok "without the drop-in the fake build adds appledrm and dcp_fabric_core (the test sees the problem)" "$(fake no | grep -c -E 'appledrm.*dcp_fabric_core|dcp_fabric_core.*appledrm')" 1
-ok "with the drop-in: appledrm and dcp_fabric_core are out, the rest is added in order, apple_pmp stays through its MODULES entry" "$(fake yes)" "drm_dma_helper apple_pmp snd_pcm typec simpledrm_helper"
+ok "with the drop-in: appledrm and dcp_fabric_core are out, the rest is added in order, apple_pmp stays through its MODULES entry" "$(fake yes)" "drm_dma_helper snd_pcm typec simpledrm_helper apple_pmp"
 ok "with the drop-in, the key add_module looks up (the name without .ko and with underscores) is set for both" "$(
   declare -A _addedmodules; . "$DROP"; t=appledrm.ko; t=${t%.ko*}; echo "${_addedmodules[$t]} ${_addedmodules[dcp_fabric_core]}")" "1 1"
 ok "sourced with no associative _addedmodules (a hook reading the configuration), under set -u: no error, no array made" "$(bash -c 'set -u; . "$1"; declare -p _addedmodules 2>&1 | grep -c "not found"' _ "$DROP")" 1
@@ -48,5 +48,6 @@ ok "the drop-in names simpledrm nowhere (it is built in and stays)" "$(grep -v '
 if [ -r /usr/lib/initcpio/functions ]; then
   ok "this host's add_module still returns early for a module counted as added" "$(grep -c '(( _addedmodules\["\$target"\] == 1 )) && return' /usr/lib/initcpio/functions)" 1
   ok "this host's mkinitcpio declares _addedmodules associative before it reads the configuration" "$(grep -n -m1 -E '^declare -A .*_addedmodules' /usr/bin/mkinitcpio | cut -d: -f1 | awk '{ print ($1 > 0 && $1 < 100) }')" 1
+  ok "this host's mkinitcpio never resets _addedmodules between the configuration and the hooks (the drop-in would stop working)" "$(grep -c -E '(^|[^[:alnum:]_])(unset _addedmodules|_addedmodules=\()' /usr/bin/mkinitcpio /usr/lib/initcpio/functions | awk -F: '{ n += $2 } END { print n + 0 }')" 0
 fi
 finish "initramfs no-appledrm tests"

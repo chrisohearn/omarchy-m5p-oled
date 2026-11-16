@@ -76,7 +76,8 @@ if [ "$1" = --status ]; then [ -e "$s/night" ] && echo '{"enabled":true,"tempera
 [ -e "$s/night" ] && rm -f "$s/night" || : > "$s/night"
 exit 0
 SH
-printf '#!/bin/sh\necho "  23 CTM:"\necho "  25 GAMMA_LUT:"\n' > "$BIN/modetest"
+# modetest -M apple -c: the KMS connector properties; vrr_capable's value comes from $FAKE_W/vrrcap (the sysfs file does not exist on this kernel)
+printf '#!/bin/sh\necho "  23 CTM:"\necho "  25 GAMMA_LUT:"\n[ -e "$FAKE_W/vrrcap" ] && printf "  50 vrr_capable:\\n\\t\\tflags: immutable range\\n\\t\\tvalues: 0 1\\n\\t\\tvalue: %%s\\n" "$(cat "$FAKE_W/vrrcap")"\nexit 0\n' > "$BIN/modetest"
 printf '#!/bin/sh\nexit 0\n' > "$BIN/mpv"
 # the idle guard, the lock, the pending-update list and a test initramfs build (state in $FAKE_W/state)
 printf '#!/bin/sh\n[ "$1 $2" = "lock isLocked" ] && { [ -e "$FAKE_W/state/locked" ] && echo true || echo false; }\nexit 0\n' > "$BIN/omarchy-shell"
@@ -136,8 +137,10 @@ fresh2() { # the Mac as window 1 left it (I0's files in place), the build area, 
   mkdir -p "$W/systemd/systemd-backlight@backlight:apple-panel-bl.service.d"; cp "$REPO_DIR/linux/brightness/systemd/k114s-first-boot.conf" "$W/systemd/systemd-backlight@backlight:apple-panel-bl.service.d/"
   printf 'hl.monitor({ output = "eDP-2", mode = "preferred", position = "auto", scale = 2 })\n' >> "$W/home/.config/hypr/monitors.lua"
   HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" >/dev/null   # the DCP colour fix (section 4a), as the root installs it before boot 1
+  rm -rf "$W/sddm"; mkdir -p "$W/sddm/usr/share/sddm" "$W/sddm/etc/sddm.conf.d"; printf -- '-- stock greeter\n' > "$W/sddm/usr/share/sddm/hyprland.lua"
+  cp "$REPO_DIR/linux/gpu-desktop/70-k114s-greeter-software.conf" "$W/sddm/etc/sddm.conf.d/"; K114S_SDDM_ROOT=$W/sddm bash "$REPO_DIR/linux/display/k114s-greeter-colour" >/dev/null   # the greeter's guard, as the root installs it
   echo 500 > "$BLD/brightness"; echo 500 > "$BLD/actual_brightness"; echo 1000 > "$BLD/max_brightness"; echo platform > "$BLD/type"; echo linear > "$BLD/scale"; : > "$BLD/writes.log"
-  echo 1 > "$W/sys/class/drm/card2-eDP-1/vrr_capable"; echo Y > "$W/sys/module/appledrm/parameters/fw27_panel_vrr"
+  echo 1 > "$W/vrrcap"; echo Y > "$W/sys/module/appledrm/parameters/fw27_panel_vrr"
   echo '[    5.1] apple-drm display-subsystem: brightness requests below 10 nits are raised to 10 nits' > "$W/klog"
   echo '{"idle":{"lock":300,"screensaver":150}}' > "$W/home/.config/omarchy/shell.json"; rm -rf "$W/state"; mkdir -p "$W/state"
   printf '[0.1] FDT: GPU: firmware 26B8125\n' > "$DOLD/boot-20261115-191015-disp-pinldr/loader.log"; : > "$W/klog.empty"
@@ -156,6 +159,9 @@ boot() { # boot RELEASE TRIAL ENTRY UNAME_V: what a reboot leaves; the snapshot 
   if [ -n "$2" ]; then printf '%s\0' "$2" > "$W/chosen/aurora,trial"; sed -i 1s/.*/spent/ "$W/esp/aura-try"; else rm -f "$W/chosen/aurora,trial"; fi
   echo "boot-$RANDOM$RANDOM" > "$W/boot_id"; }
 FR=$W/repo
+# a root-only folder, as on the Mac: closed (mode 000) to the plain user, opened by the fake sudo for the commands it runs (the fake sudo opens the folders listed in rootdirs)
+closed() { local d; for d in "$@"; do echo "$d" >> "$W/rootdirs"; chmod 000 "$d"; done; }
+reopen() { local d; for d in "$@"; do chmod 700 "$d"; grep -v -x -F -- "$d" "$W/rootdirs" > "$W/rootdirs.n"; mv "$W/rootdirs.n" "$W/rootdirs"; done; }
 
 # --- D9p: the macOS tool and the fallback tree onto the ESP ---------------------------------------------------------------------
 fresh2; espb=$(espstate); run <<< "$bD9p"; p=$W/esp/k114s-repair/promotion
@@ -284,7 +290,7 @@ t4boot() { alld57; FAKE_UNAME=$REL run <<< "$bT4a"; boot $REL m1n1/boot-ctxr-dis
 alld57; FAKE_UNAME=$REL run <<< "$bT4a"; boot $REL m1n1/boot-ctxr-disp-bl.bin Omarchy.linux-k114s-r3b; FAKE_REPO=$FR run <<< "$bT4b"; ok "T4b: refused before block F has run in this boot" "$rc" 1
 t4boot; FAKE_REPO=$FR run <<< "$bD6"
 ok "D6: exit 0, the ladder again, VRR on then off, D6-passed and the pending owner line written, VRR left off" "$rc $(test -s "$D/D6-passed"; echo $?) $(test -e "$W/state/vrr"; echo $?) $(grep -c 'owner-look D6 PENDING' "$D/owner-look.txt") $(cat "$BLD/brightness")" "0 0 1 1 500"
-t4boot; echo 0 > "$W/sys/class/drm/card2-eDP-1/vrr_capable"; FAKE_REPO=$FR run <<< "$bD6"; ok "D6: vrr_capable 0 stops before VRR is touched and writes no D6-failed (nothing was tried)" "$rc $(test -e "$D/D6-failed"; echo $?) $(test -e "$W/state/vrr"; echo $?)" "1 1 1"
+t4boot; echo 0 > "$W/vrrcap"; FAKE_REPO=$FR run <<< "$bD6"; ok "D6: vrr_capable 0 stops before VRR is touched and writes no D6-failed (nothing was tried)" "$rc $(test -e "$D/D6-failed"; echo $?) $(test -e "$W/state/vrr"; echo $?)" "1 1 1"
 t4boot; echo N > "$W/sys/module/appledrm/parameters/fw27_panel_vrr"; FAKE_REPO=$FR run <<< "$bD6"; ok "D6: fw27_panel_vrr N stops" "$rc" 1
 t4boot; FAKE_VRRFAIL=1 FAKE_REPO=$FR run <<< "$bD6"; ok "D6: Hyprland that does not turn VRR on: D6-failed is written and VRR is off" "$rc $(test -s "$D/D6-failed"; echo $?) $(test -e "$D/D6-passed"; echo $?) $(test -e "$W/state/vrr"; echo $?)" "1 0 1 1"
 t4boot; printf '[  9.0] apple-drm: adaptive swap timed out, restoring fixed refresh\n' > "$W/dm"; FAKE_DMESG=$W/dm FAKE_REPO=$FR run <<< "$bD6"; ok "D6: a swap-watchdog line that was in the log before the test is not counted against it (the block compares counts)" "$rc" 0
@@ -341,10 +347,17 @@ ok "D9c: the printed reboot line says STOP when N-acked-3 is missing or names ne
 ok "D9c: the first reboot is not scheduled by the block (the lead reads the output first)" "$(grep -c 'k114s-d9-reboot' "$W/calls")" 0
 FAKE_UNAME=$REL run <<< "$bD9c"; ok "D9c: a second run stops (P is no longer the configured state), nothing changed" "$rc $(echo "$out" | grep -c 'P is not the configured state')" "1 1"
 FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"; ok "P9 (with the fake boot-ctxr hashes): holds after D9c" "$rc $(echo "$out" | grep -c '^P9: ')" "0 1"
+closed "$W/esp/EFI/Linux"; FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"; reopen "$W/esp/EFI/Linux"
+ok "P9: with a root-only EFI/Linux (as on the Mac) the images are still listed and checked (a glob in the user's shell would pass a literal name)" "$rc $(echo "$out" | grep -c '^P9: ') $(echo "$out" | grep -c 'no .initrd section')" "0 1 0"
 ok "P9: prints this boot's kernel and the ESP free space" "$(echo "$out" | grep -c '^this boot: ') $(echo "$out" | grep -c '^ESP free: ')" "1 1"
 cp "$W/esp/EFI/Linux/omarchy_linux-k114s.efi" "$W/esp/EFI/Linux/omarchy_linux-aurora.efi"; run <<< "$bP9"; ok "P9: a third image (linux-aurora's came back) stops and names U1" "$rc $(echo "$out" | grep -c 'U1')" "1 1"; rm "$W/esp/EFI/Linux/omarchy_linux-aurora.efi"
-FAKE_INITRD=appledrm FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"; ok "P9: appledrm in an image's initramfs stops (G6 on every image, F16)" "$rc $(echo "$out" | grep -c 'appledrm is in the initramfs')" "1 1"
+FAKE_INITRD=appledrm FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"; ok "P9: appledrm in an image's initramfs stops (G6 on every image, F16)" "$rc $(echo "$out" | grep -c 'appledrm or dcp-fabric-core is in the initramfs')" "1 1"
 rm "$W/mkinitcpio.conf.d/99-k114s-no-appledrm.conf"; run <<< "$bP9"; ok "P9: without the no-appledrm drop-in it stops (a rebuild would put appledrm back)" "$rc $(echo "$out" | grep -c 'G6a')" "1 1"; cp "$REPO_DIR/linux/99-k114s-no-appledrm.conf" "$W/mkinitcpio.conf.d/"
+rm "$W/home/.config/hypr/monitors.lua.k114s-dcp-colour.bak"; HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" --undo >/dev/null; FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"
+ok "P9: the colour fix gone from monitors.lua (a migration rewrote it) stops" "$rc $(echo "$out" | grep -c 'colour fix is gone')" "1 1"; HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" >/dev/null
+K114S_SDDM_ROOT=$W/sddm bash "$REPO_DIR/linux/display/k114s-greeter-colour" --undo >/dev/null; FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"
+ok "P9: without the greeter's colour guard it stops and names the installer" "$rc $(echo "$out" | grep -c 'k114s-greeter-colour')" "1 1"; K114S_SDDM_ROOT=$W/sddm bash "$REPO_DIR/linux/display/k114s-greeter-colour" >/dev/null
+sed -i '/dcp_fabric_core/d' "$W/mkinitcpio.conf.d/99-k114s-no-appledrm.conf"; FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"; ok "P9: a drop-in that lost its dcp_fabric_core line stops" "$rc $(echo "$out" | grep -c 'G6a')" "1 1"; cp "$REPO_DIR/linux/99-k114s-no-appledrm.conf" "$W/mkinitcpio.conf.d/"
 rm "$W/asahi/m1n1-ctxr.bin"; run <<< "$bP9"; ok "P9: a missing m1n1-ctxr.bin stops (a Stage 2 hook run would write the installed loader's file)" "$rc" 1; cp "$W/fake/pinldr-m1n1.bin" "$W/asahi/m1n1-ctxr.bin"
 sed -i 's/linux-k114s-r3b//' "$W/pacman.conf"; run <<< "$bP9"; ok "P9: a holds block without linux-k114s-r3b stops" "$rc" 1; printf 'IgnorePkg = linux-k114s-r3b\n' > "$W/pacman.conf"
 echo x >> "$W/esp/m1n1/boot-ctxr.bin"; run <<< "$bP9"; ok "P9: a Stage 2 that is not the D9 file stops" "$rc" 1
@@ -374,6 +387,8 @@ run <<< "$bD9x"; ok "D9x: refused after one clean boot" "$rc $(echo "$out" | gre
 dboot; FAKE_REPO=$FR run <<< "$bC9"; echo 'N boot1 acked' > "$D/N-acked-1"; run <<< "$bD9x"
 ok "D9x: exit 0 after two clean boots: PROMOTED, the sync started again, the hold and window markers gone, D9-done written" "$rc $(echo "$out" | grep -c 'D9x: PROMOTED') $(test -e "$W/state/sync-stopped"; echo $?) $(test -e "$D/sync-held"; echo $?) $(test -e "$D/window-open"; echo $?) $(test -s "$D/D9-done"; echo $?)" "0 1 1 1 1 0"
 ok "D9x: the notices' acknowledgements are removed, so a later window cannot reuse them" "$(ls "$D"/N-acked-* 2>/dev/null | grep -c .)" 0
+promote; dboot; FAKE_REPO=$FR run <<< "$bC9"; dboot; FAKE_REPO=$FR run <<< "$bC9"; echo 'N boot1 acked' > "$D/N-acked-1"; echo 'N boot2 acked' > "$D/N-acked-2"; closed "$D"; run <<< "$bD9x"; reopen "$D"
+ok "D9x: with a root-only \$D (as on the Mac) the acknowledgements are removed too (a glob in the user's shell stays a literal name)" "$rc $(echo "$out" | grep -c 'D9x: PROMOTED') $(ls "$D"/N-acked-* 2>/dev/null | grep -c .)" "0 1 0"
 ok "D9x: the stay-awake mode that T3a turned on is back off (it was off before the window)" "$(test -e "$W/state/stay-awake"; echo $?)" 1
 promote; dboot; FAKE_REPO=$FR run <<< "$bC9"; dboot; FAKE_REPO=$FR run <<< "$bC9"; echo true > "$D/idle-before"; : > "$W/state/stay-awake"; run <<< "$bD9x"
 ok "D9x: with idle-before true (this Mac: on since 2026-11-14) the mode stays on, the block still passes and says to report it to Jarvis" "$rc $(echo "$out" | grep -c 'D9x: PROMOTED') $(test -e "$W/state/stay-awake"; echo $?) $(echo "$out" | grep -c 'stay-awake is still on.*Jarvis')" "0 1 0 1"
@@ -430,9 +445,15 @@ ok "U0: an installed migration with no marker (it failed or has not run, so the 
 rm -f "$mig/pend.sh" "$D/before-update.txt" "$D"/migration-ok-*; mkpkg omarchy-dev 'new3.sh=mkinitcpio -P' ; u0pend omarchy-dev /usr/share/omarchy/migrations/old.sh; ok "U0: mkinitcpio -P in a new migration stops too" "$rc $(echo "$out" | grep -c 'new3.sh')" "1 1"
 rm -rf "$W/state/pkg-omarchy-dev"; u0pend omarchy-dev /usr/share/omarchy/migrations/old.sh; ok "U0: a migration package that cannot be downloaded stops (its migrations are unread)" "$rc $(echo "$out" | grep -c 'could not be downloaded')" "1 1"
 rm -rf "$W/state/pkg-omarchy-dev"; mkpkg zed 'new1.sh=limine-update'; u0pend zed "$W/migrations/old.sh"; ok "U0: a package that does not start with omarchy but ships migrations today is read too" "$rc $(echo "$out" | grep -c 'new1.sh')" "1 1"
+rm -rf "$W/state/pkg-zed" "$D"/migration-ok-* "$D/before-update.txt"; mkdir -p "$mst/dirmark.sh"; : > "$mig/dirmark.sh"; u0pend foo /usr/bin/foo
+ok "U0: a marker that is not a regular file is no marker (omarchy-migrate tests -f), so the migration stops it" "$rc $(echo "$out" | grep -c 'dirmark.sh')" "1 1"; rmdir "$mst/dirmark.sh"; rm "$mig/dirmark.sh"
+mkdir -p "$W/omp/migrations"; : > "$W/omp/migrations/other.sh"; FAKE_OMARCHY_PATH=$W/omp u0pend foo /usr/bin/foo
+ok "U0: the migrations folder is \$OMARCHY_PATH/migrations, as omarchy-migrate reads it (a migration there with no marker stops)" "$rc $(echo "$out" | grep -c 'other.sh')" "1 1"; rm -rf "$W/omp"
+u0pend foo /usr/bin/foo; ok "U0: and the default folder with every migration marked passes" "$rc" 0
 rm -rf "$mig"
 promote; hooks; rm -f "$W/state/pending"; run <<< "$bU0"; ok "U0: nothing pending (checkupdates exit 2) passes" "$rc" 0
 promote; hooks; run <<< "$bU0"; ok "U0: the before-record is written (the Stage 2, the pins, m1n1-ctxr.bin, the images, the entries)" "$rc $(echo "$out" | grep -c '^U0: before-record') $(grep -c 'm1n1-ctxr' "$D/before-update.txt" | head -1)" "0 1 1"
+HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" --undo >/dev/null; run <<< "$bU1"; ok "U1: the colour fix gone from monitors.lua stops" "$rc $(echo "$out" | grep -c 'colour fix is gone')" "1 1"; HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" >/dev/null
 run <<< "$bU1"; ok "U1: no change: no third image, no stray file, the diff is empty" "$rc $(echo "$out" | grep -c 'no boot file changed') $(echo "$out" | grep -c '^U1: ')" "0 1 1"
 cp "$W/esp/EFI/Linux/omarchy_linux-k114s.efi" "$W/esp/EFI/Linux/omarchy_linux-aurora.efi"; run <<< "$bU1"; ok "U1: a returned linux-aurora image stops and prints the fix (the removal and the check of r3a's image), nothing is changed by the block" "$rc $(echo "$out" | grep -c 'limine-entry-tool --remove-uki linux-aurora') $(echo "$out" | grep -c "r3a's image") $(test -e "$W/esp/EFI/Linux/omarchy_linux-aurora.efi"; echo $?)" "1 1 3 0"; rm "$W/esp/EFI/Linux/omarchy_linux-aurora.efi"
 : > "$W/esp/EFI/Linux/omarchy_linux-k114s.efi.tmp"; run <<< "$bU1"; ok "U1: a stray temporary file on the ESP stops" "$rc $(echo "$out" | grep -c 'temporary file')" "1 1"; rm "$W/esp/EFI/Linux/omarchy_linux-k114s.efi.tmp"
@@ -452,6 +473,10 @@ run < "$W/oldform"
 ok "harness: a user-shell redirect or read into a sudo mktemp folder fails (the old G6b and P9 form), the sudo form works" "$(echo "$out" | grep -c 'old-redirect:[^0]') $(echo "$out" | grep -c 'old-read:2') $(echo "$out" | grep -c 'sudo-redirect:0') $(echo "$out" | grep -c 'sudo-read:0')" "1 1 1 1"
 ok "lint: no line of G6b or P9 writes or reads the root-only folder without sudo; the old lines would be caught" \
   "$(printf '%s\n%s\n' "$bG6b" "$bP9" | grep -E '"\$[tg]/' | grep -v sudo | wc -l) $(printf '%s\n' 'sudo lsinitcpio "$g/initrd" > "$g/list"; grep -c x "$g/list"' | grep -E '"\$[tg]/' | grep -v -E 'sudo (grep|tail|rm|test)' | wc -l)" "0 1"
+
+ok "lint: no N-acked-* glob is expanded by the user's shell (the folder is root-only) and no loop globs the root-only ESP folder" \
+  "$(grep -E 'rm -f.*N-acked-\*' "$DOC" | grep -v 'sh -c' | wc -l) $(grep -c -E 'for [a-z]+ in /boot/efi/[^ ;]*\*' "$DOC") $(printf '%s\n' 'sudo rm -f "$D"/N-acked-*' | grep -E 'rm -f.*N-acked-\*' | grep -v 'sh -c' | wc -l)" "0 0 1"
+ok "lint: D6 reads vrr_capable through modetest, never from sysfs" "$(printf '%s\n' "$bD6" | grep -c 'modetest -M apple -c') $(printf '%s\n' "$bD6" | grep -c 'cat "$edp/vrr_capable"') $(test -e "$W/sys/class/drm/card2-eDP-1/vrr_capable"; echo $?)" "1 0 1"
 
 # --- the abandon path: C1b, C2b, X, C4 (the first runbook's X and C4 with this window's \$D) ---------------------------------------
 session0 s5; run <<< "$bC1b"; ok "C1b: the trial file is off the ESP, its copy stays, m1n1/ as before the window" "$rc $(test -e "$W/esp/m1n1/boot-ctxr-disp-bl.bin"; echo $?) $(sum "$D/boot-ctxr-disp-bl.bin")" "0 1 $(sum "$W/fake/d5.bin")"

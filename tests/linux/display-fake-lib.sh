@@ -184,7 +184,7 @@ FAKE_SUDO='sudo() { local d r; if [ "$1" = mktemp ]; then d=$("$@") || return; c
 run() { # stdin: the block, rewritten -> $out, $rc
   out=$(cd "$W" && FAKE_W=$W HOME=$W/home PATH=$BIN:$PATH K=$L/r3a-trial/k114s-boot-once D=${FAKE_D:-$W/rec/display} R=$W/R R5=$W/R5 RT=$W/RT DO=$W/rec/display-old REPO=${FAKE_REPO:-$REPO_DIR} \
     K114S_ESP=$W/esp K114S_ETC=$W/etc K114S_EFIVARS=$W/efivars K114S_STATE=$W/rec K114S_SYSTEMCTL=$BIN/systemctl K114S_SAVE=$W/save \
-    K114S_BOOTID=boot1 bash -c "$FAKE_SUDO"'FAKE=1; '"$(cat)" 2>&1); rc=$?
+    OMARCHY_PATH=${FAKE_OMARCHY_PATH:-$W} K114S_SDDM_ROOT=$W/sddm K114S_BOOTID=boot1 bash -c "$FAKE_SUDO"'FAKE=1; '"$(cat)" 2>&1); rc=$?
 }
 state() { (cd "$W" && find esp etc lib rec systemd modprobe home -type f -exec sha256sum {} + 2>/dev/null | sort -k2 | sha256sum | cut -c1-16); }
 espstate() { (cd "$W" && find esp -type f -exec sha256sum {} + 2>/dev/null | sort -k2 | sha256sum | cut -c1-16); }

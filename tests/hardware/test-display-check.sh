@@ -34,7 +34,7 @@ mk() { # mk NAME OUTCOME: a fake machine after a boot with that outcome (refused
       { echo "[ 1.2] DCP: T6050: internal display handed off: firmware 27.2, bw-scratch 0x1+0x2, 2 clock(s), 1000 nits"
         echo "[ 1.2] DCP: T6050: external display engines not handed off on firmware 27.2"; } >> "$d/loader.log"
       mkdir -p "$d/sys/class/drm/card2-eDP-1" "$d/sys/module/appledrm/parameters" "$d/sys/class/backlight/apple-panel-bl"
-      echo connected > "$d/sys/class/drm/card2-eDP-1/status"; echo 3024x1986 > "$d/sys/class/drm/card2-eDP-1/modes"; echo 0 > "$d/sys/class/drm/card2-eDP-1/vrr_capable"
+      echo connected > "$d/sys/class/drm/card2-eDP-1/status"; echo 3024x1986 > "$d/sys/class/drm/card2-eDP-1/modes"; echo 0 > "$d/vrrcap"
       echo N > "$d/sys/module/appledrm/parameters/fw27_panel_vrr"; echo appledrmfb > "$d/sys/class/graphics/fb0/name"
       echo 1000 > "$d/sys/class/backlight/apple-panel-bl/max_brightness"; echo 500 > "$d/sys/class/backlight/apple-panel-bl/brightness"
       echo 500 > "$d/sys/class/backlight/apple-panel-bl/actual_brightness"; : > "$d/dev/dri/card2"; ln -s ../card2 "$d/dev/dri/by-path/platform-display-subsystem-card"
@@ -54,12 +54,14 @@ SH
   fi
   # the interrupt count rises while the script sleeps: a stand-in sleep bumps it
   mkdir -p "$d/bin"; printf '#!/bin/sh\nsed -i "s/        100        200/        400        500/" "%s"\n' "$d/irq" > "$d/bin/sleep"
-  chmod +x "$d/systemctl" "$d/hyprctl" "$d/bin/sleep"
+  # the KMS connector property, as modetest -M apple -c prints it (the sysfs file does not exist on this kernel)
+  printf '#!/bin/sh\necho "  23 CTM:"\nprintf "  50 vrr_capable:\\n\\t\\tflags: immutable range\\n\\t\\tvalues: 0 1\\n\\t\\tvalue: %%s\\n" "$(cat "%s/vrrcap")"\n' "$d" > "$d/bin/modetest"
+  chmod +x "$d/systemctl" "$d/hyprctl" "$d/bin/sleep" "$d/bin/modetest"
 }
 run() { # run NAME EXPECT [ARGS...]
   local d=$W/$1; shift
   out=$(PATH=$d/bin:$PATH K114S_DT=$d/dt K114S_SYS=$d/sys K114S_DEV=$d/dev K114S_DMESG_FILE=$d/dmesg K114S_INTERRUPTS=$d/irq \
-    K114S_SYSTEMCTL=$d/systemctl K114S_HYPRCTL=$d/hyprctl K114S_BACKLIGHT_STATE=$d/bl \
+    K114S_MODETEST=$d/bin/modetest K114S_SYSTEMCTL=$d/systemctl K114S_HYPRCTL=$d/hyprctl K114S_BACKLIGHT_STATE=$d/bl \
     bash "$here/k114s-display-check.sh" --expect "$@" --loader-log "$d/loader.log" --wait 1 --hypr 2>&1); rc=$?
 }
 for o in refused published none; do
@@ -89,14 +91,15 @@ mk fi published; mkdir -p "$W/fi/dt/soc/dcp@48ae00000/panel"; printf '\000\000\0
 printf '[    2.20] apple-drm x: brightness requests below 10 nits are raised to 10 nits\n[    2.30] apple-drm x: brightness floor 10 ignored for a ceiling of 5\n[    2.40] dcp: unqualified IOMFB callback 590\n' >> "$W/fi/dmesg"
 run fi published --floor; ok "--floor: a dropped floor and callback 590 are BAD" "$rc $(printf '%s\n' "$out" | grep -c '^BAD   kernel: the brightness floor was dropped') $(printf '%s\n' "$out" | grep -c '^BAD   kernel: unqualified IOMFB callback 590')" "1 1 1"
 mk nf published; run nf published; ok "without --floor the floor line is not looked for" "$rc $(printf '%s\n' "$out" | grep -c 'brightness requests below')" "0 0"
-mk vo published; echo Y > "$W/vo/sys/module/appledrm/parameters/fw27_panel_vrr"; echo 1 > "$W/vo/sys/class/drm/card2-eDP-1/vrr_capable"
+mk vo published; echo Y > "$W/vo/sys/module/appledrm/parameters/fw27_panel_vrr"; echo 1 > "$W/vo/vrrcap"
 run vo published --vrr on; ok "--vrr on: fw27_panel_vrr Y and vrr_capable 1 are ok" "$rc $(printf '%s\n' "$out" | grep -c 'ok    vrr_capable 1') $(printf '%s\n' "$out" | grep -c 'fw27_panel_vrr = Y')" "0 1 1"
-run vo published; ok "the default (--vrr off) calls that same boot BAD twice" "$rc $(printf '%s\n' "$out" | grep -c '^BAD   vrr_capable 1, expected 0') $(printf '%s\n' "$out" | grep -c '^BAD   appledrm.fw27_panel_vrr is .Y.')" "1 1 1"
-mk vm published; run vm published --vrr on; ok "--vrr on on a masked boot is BAD twice" "$rc $(printf '%s\n' "$out" | grep -c '^BAD   vrr_capable 0, expected 1') $(printf '%s\n' "$out" | grep -c '^BAD   appledrm.fw27_panel_vrr is .N.')" "1 1 1"
+run vo published; ok "the default (--vrr off) calls that same boot BAD twice" "$rc $(printf '%s\n' "$out" | grep -c '^BAD   vrr_capable is .1., expected 0') $(printf '%s\n' "$out" | grep -c '^BAD   appledrm.fw27_panel_vrr is .Y.')" "1 1 1"
+mk vm published; run vm published --vrr on; ok "--vrr on on a masked boot is BAD twice" "$rc $(printf '%s\n' "$out" | grep -c '^BAD   vrr_capable is .0., expected 1') $(printf '%s\n' "$out" | grep -c '^BAD   appledrm.fw27_panel_vrr is .N.')" "1 1 1"
 mk vh published; printf '#!/bin/sh\necho %s\n' "'[{\"name\":\"eDP-1\",\"width\":3024,\"height\":1986,\"refreshRate\":120.0,\"scale\":2.0,\"vrr\":true,\"currentFormat\":\"XRGB8888\"}]'" > "$W/vh/hyprctl"
-echo Y > "$W/vh/sys/module/appledrm/parameters/fw27_panel_vrr"; echo 1 > "$W/vh/sys/class/drm/card2-eDP-1/vrr_capable"
+echo Y > "$W/vh/sys/module/appledrm/parameters/fw27_panel_vrr"; echo 1 > "$W/vh/vrrcap"
 run vh published --vrr on; ok "--vrr on: Hyprland with vrr true is ok" "$rc $(printf '%s\n' "$out" | grep -c '^ok    hyprland: eDP-1')" "0 1"
 mk vk published; cp "$W/vh/hyprctl" "$W/vk/hyprctl"; run vk published; ok "--vrr off: Hyprland with vrr true is BAD" "$rc $(printf '%s\n' "$out" | grep -c '^BAD   hyprland: eDP-1')" "1 1"
+mk vu published; rm "$W/vu/bin/modetest"; run vu published; ok "published: an unreadable vrr_capable (no modetest) is BAD, not skipped" "$rc $(printf '%s\n' "$out" | grep -c "^BAD   vrr_capable is 'unreadable'")" "1 1"
 bash "$here/k114s-display-check.sh" --expect published --vrr maybe >/dev/null 2>&1; ok "an unknown --vrr value is refused" "$?" 2
 bash "$here/k114s-display-check.sh" --expect maybe >/dev/null 2>&1; ok "an unknown expectation is refused" "$?" 2
 echo "display-check test: $pass passed, $fail failed"

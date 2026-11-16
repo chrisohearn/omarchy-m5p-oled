@@ -936,7 +936,7 @@ block P, `sudo $K arm Omarchy/linux-k114s-r3b`, reboot, block F, T1b-D1, T1c.
     grep -q -x 'options appledrm fw27_panel_vrr=0' /etc/modprobe.d/aurora-m5-vrr.conf || stop "no fw27_panel_vrr=0 file (I0); nothing is armed"
     cmp -s "$REPO/linux/brightness/systemd/k114s-first-boot.conf" "$bd/k114s-first-boot.conf" || stop "the brightness drop-in is not installed (I0, E7); nothing is armed"
     sudo test -e /var/lib/k114s-backlight/restore-enabled && stop "brightness restore is turned on; nothing is armed"
-    [ "$(grep -c -E '^hl\.monitor\(\{ output = "eDP-[12]", mode = "preferred", position = "auto", scale = 2 \}\)$' ~/.config/hypr/monitors.lua)" = 2 ] || stop "monitors.lua does not have the eDP-1 and eDP-2 rules (I0); nothing is armed"
+    [ "$(grep -c -E '^hl\.monitor\(\{ output = "eDP-[12]", mode = "preferred", position = "auto", scale = 2(, cm = "srgb")? \}\)( --.*)?$' ~/.config/hypr/monitors.lua)" = 2 ] || stop "monitors.lua does not have the eDP-1 and eDP-2 rules (I0); nothing is armed"
     [ "$(sudo sha256sum /boot/efi/m1n1/boot-ctxr.bin | cut -c1-64)" = $GPU ] || stop "the configured Stage 2 is not P's file; nothing is armed"
     [ "$(sudo sha256sum /boot/efi/$S2 | cut -c1-64)" = $PIN ] || stop "$S2 is not 3a9884f3...; nothing is armed"
     [ "$(sudo sed -n 1p /boot/efi/aura-try)" = spent ] || stop "aura-try does not read spent; nothing is armed"

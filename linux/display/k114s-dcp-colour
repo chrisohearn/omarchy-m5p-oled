@@ -1,10 +1,12 @@
 #!/bin/bash
-# Add (or remove) the DCP colour-management fix in the user's Hyprland monitors.lua. User session only: no sudo, no reload.
+# Add (or remove) the DCP colour-management fix in the user's Hyprland monitors.lua. User session only: no sudo, no reload by this script.
 #   usage: k114s-dcp-colour [--install | --undo | --check]       (default --install)
 #   K114S_HYPR_DIR overrides ~/.config/hypr (the tests use it).
 # The snippet (dcp-colour.lua beside this script) is appended between two marker lines. Install is idempotent, keeps the file as it
 # was before the first install in monitors.lua.k114s-dcp-colour.bak, and replaces a changed block. The snippet does nothing unless
-# ASAHI_M5_BRINGUP=1, which the generator sets only on a boot with the DCP card. Hyprland reads the file at its next start.
+# ASAHI_M5_BRINGUP=1, which the generator sets only on a boot with the DCP card. Hyprland may reload the file by itself when it changes
+# (misc:disable_autoreload is off by default); it is certain to apply at the next start. --undo removes only the marked block: lines
+# written by hand in the same file (an earlier manual fix) stay, so replace those with --install rather than adding to them.
 set -u
 here=$(cd "$(dirname "$0")" && pwd); snip=$here/dcp-colour.lua
 f=${K114S_HYPR_DIR:-$HOME/.config/hypr}/monitors.lua; bak=$f.k114s-dcp-colour.bak
@@ -22,7 +24,7 @@ case ${1:---install} in
     installed && { echo "k114s-dcp-colour: already installed"; exit 0; }
     [ -e "$bak" ] || cp -p "$f" "$bak" || die "cannot keep a backup"
     { strip "$f"; cat "$snip"; } | put; installed || die "the block is not in $f after the write"
-    echo "k114s-dcp-colour: installed in $f (backup $bak); no reload: Hyprland reads it at its next start" ;;
+    echo "k114s-dcp-colour: installed in $f (backup $bak); Hyprland may reload it by itself; it applies at its next start" ;;
   --undo)
     [ -n "$(block "$f")" ] || { echo "k114s-dcp-colour: not installed"; exit 0; }
     strip "$f" | put; [ -z "$(block "$f")" ] || die "the block is still in $f"
