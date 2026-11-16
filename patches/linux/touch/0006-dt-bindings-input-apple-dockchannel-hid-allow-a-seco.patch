@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 19:11:12 +0000
+Subject: [PATCH 06/12] dt-bindings: input: apple,dockchannel-hid: allow a
+ second DART stream
+
+The T6050 MTP firmware writes its receive ring through DART stream 1 of the
+MTP DART, in addition to the transport's own stream 0. Allow the transport to
+list two iommus entries.
+
+Signed-off-by: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+(cherry picked from commit 0c524c0678c138fbdaaf65f047ce5a046a986c1d)
+---
+ .../devicetree/bindings/input/apple,dockchannel-hid.yaml    | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/input/apple,dockchannel-hid.yaml b/Documentation/devicetree/bindings/input/apple,dockchannel-hid.yaml
+index 20984450f1..78849612f1 100644
+--- a/Documentation/devicetree/bindings/input/apple,dockchannel-hid.yaml
++++ b/Documentation/devicetree/bindings/input/apple,dockchannel-hid.yaml
+@@ -66,7 +66,11 @@ properties:
+       - const: rx
+ 
+   iommus:
+-    maxItems: 1
++    minItems: 1
++    maxItems: 2
++    description:
++      DART streams of the transport. A second stream carries the coprocessor's
++      writes into the receive ring on firmware that has one.
+ 
+   apple,fifo-size:
+     $ref: /schemas/types.yaml#/definitions/uint32
+-- 
+2.56.1
+

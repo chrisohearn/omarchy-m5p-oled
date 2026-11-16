@@ -1,0 +1,233 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 19:25:26 +0000
+Subject: [PATCH 10/12] HID: dockchannel-hid: receive T6050 MTP reports through
+ the receive ring
+
+On a 14-inch M5 Max (K114c) the touch screen interface sends 17872-byte and
+448-byte reports about 120 times a second, also when nothing is touched. Reading
+them word by word from the MMIO FIFO kept the receive IRQ thread at 51 to 59
+percent of one core.
+
+Register the 20 MiB receive ring for nodes that use the T6050 compatible, as the
+T6041 path already does with a smaller one, and keep the T6050 reset and GPIO
+handling. A T6050 node still has the FIFO, so if the firmware refuses the ring
+it warns and stays on the FIFO: the ring stays published and marked registered
+so a ring the firmware did accept still drains, and the sticky error is cleared
+so later interface starts do not fail. The T6041 ring is its only receive path,
+so there a refusal still fails the interface start, as before. The refusal
+decision is a helper in dockchannel-hid-protocol.h with three KUnit cases. A
+failed ring allocation at probe still fails the probe. The parser KUnit tests
+build their own ring and now set its size.
+
+The ring needs the second MTP DART stream, so this must land after the change
+that lists it.
+
+Signed-off-by: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+(cherry picked from commit dc1dcc246e1d903c36c3d6864d8929201f6965a6)
+---
+ .../dockchannel-hid-parser-test.c             |  2 +
+ .../dockchannel-hid-protocol-test.c           | 20 ++++++
+ .../dockchannel-hid-protocol.h                | 11 ++++
+ drivers/hid/dockchannel-hid/dockchannel-hid.c | 61 +++++++++++++------
+ 4 files changed, 77 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/hid/dockchannel-hid/dockchannel-hid-parser-test.c b/drivers/hid/dockchannel-hid/dockchannel-hid-parser-test.c
+index 9a8e2e897c..1ad95d4f03 100644
+--- a/drivers/hid/dockchannel-hid/dockchannel-hid-parser-test.c
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid-parser-test.c
+@@ -237,6 +237,8 @@ static void *dchid_test_ring(struct kunit *test, u32 consumer, u32 producer)
+ 	dchid->ring_read = consumer;
+ 	dchid->ring_registered = true;
+ 	dchid->use_ring = true;
++	dchid->use_rx_ring = true;
++	dchid->ring_size = DCHID_RING_SIZE;
+ 	return dchid->ring + DCHID_RING_HEADER_SIZE;
+ }
+ 
+diff --git a/drivers/hid/dockchannel-hid/dockchannel-hid-protocol-test.c b/drivers/hid/dockchannel-hid/dockchannel-hid-protocol-test.c
+index 2c4d18a917..8af84b43d5 100644
+--- a/drivers/hid/dockchannel-hid/dockchannel-hid-protocol-test.c
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid-protocol-test.c
+@@ -62,11 +62,31 @@ static void dchid_pm2_power_off_test(struct kunit *test)
+ 	KUNIT_EXPECT_MEMEQ(test, cmd, expected, sizeof(expected));
+ }
+ 
++static void dchid_ring_refusal_keeps_fifo_test(struct kunit *test)
++{
++	/* A node with an MMIO FIFO receive path of its own may fall back to it. */
++	KUNIT_EXPECT_TRUE(test, dchid_ring_refused(-ETIMEDOUT, true));
++}
++
++static void dchid_ring_refusal_fails_start_without_fallback_test(struct kunit *test)
++{
++	/* The T6041 ring is its only receive path: a refusal must fail the start. */
++	KUNIT_EXPECT_FALSE(test, dchid_ring_refused(-ETIMEDOUT, false));
++}
++
++static void dchid_ring_success_is_not_a_refusal_test(struct kunit *test)
++{
++	KUNIT_EXPECT_FALSE(test, dchid_ring_refused(0, true));
++}
++
+ static struct kunit_case dchid_protocol_test_cases[] = {
+ 	KUNIT_CASE(dchid_pm1_command_test),
+ 	KUNIT_CASE(dchid_pm2_will_change_test),
+ 	KUNIT_CASE(dchid_pm2_has_changed_test),
+ 	KUNIT_CASE(dchid_pm2_power_off_test),
++	KUNIT_CASE(dchid_ring_refusal_keeps_fifo_test),
++	KUNIT_CASE(dchid_ring_refusal_fails_start_without_fallback_test),
++	KUNIT_CASE(dchid_ring_success_is_not_a_refusal_test),
+ 	{}
+ };
+ 
+diff --git a/drivers/hid/dockchannel-hid/dockchannel-hid-protocol.h b/drivers/hid/dockchannel-hid/dockchannel-hid-protocol.h
+index c73c911862..612cf4bf70 100644
+--- a/drivers/hid/dockchannel-hid/dockchannel-hid-protocol.h
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid-protocol.h
+@@ -52,4 +52,15 @@ static inline void dchid_pm2_command(u8 iface, u8 state, bool has_changed,
+ 	cmd[4] = has_changed;
+ }
+ 
++/*
++ * Whether a failed receive-ring command is to be absorbed. Only a node that
++ * has an MMIO FIFO receive path of its own (fifo_fallback) may fall back to
++ * it; the T6041 ring is its only receive path and its failure must fail the
++ * interface start.
++ */
++static inline bool dchid_ring_refused(int ret, bool fifo_fallback)
++{
++	return ret < 0 && fifo_fallback;
++}
++
+ #endif /* _DOCKCHANNEL_HID_PROTOCOL_H */
+diff --git a/drivers/hid/dockchannel-hid/dockchannel-hid.c b/drivers/hid/dockchannel-hid/dockchannel-hid.c
+index 76df826c1d..86c5c44379 100644
+--- a/drivers/hid/dockchannel-hid/dockchannel-hid.c
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid.c
+@@ -231,9 +231,13 @@ struct dockchannel_hid {
+ 	struct gpio_desc *afe_reset;
+ 
+ 	struct mutex ring_mutex;
++	/* The T8132 transport changes reset and GPIO handling as well as receives. */
+ 	bool use_ring;
++	/* Receive through a host-memory ring while keeping the local reset paths. */
++	bool use_rx_ring;
+ 	bool ring_registered;
+ 	int ring_error;
++	size_t ring_size;
+ 	void *ring;
+ 	dma_addr_t ring_dma;
+ 	u32 ring_read;
+@@ -591,28 +595,40 @@ static int dchid_register_ring(struct dockchannel_hid *dchid)
+ 	} __packed msg = {
+ 		.cmd = CMD_REGISTER_RING,
+ 		.addr = dchid->ring_dma,
+-		.size = DCHID_RING_SIZE,
++		.size = dchid->ring_size,
+ 	};
+ 	/* Observed in both macOS and standalone T8132 bringup before 0x91. */
+ 	u8 prepare[] = { CMD_HOST_STATE, HOST_STATE_AWAKE };
+-	int ret = 0;
++	int ret = 0, cmd_ret;
++	bool fifo_fallback = !dchid->use_ring;
+ 
+-	if (!dchid->use_ring)
++	if (!dchid->use_rx_ring)
+ 		return 0;
+ 
+ 	mutex_lock(&dchid->ring_mutex);
+ 	ret = dchid->ring_error;
+ 	if (!dchid->ring_registered) {
+-		ret = dchid_comm_cmd(dchid, prepare, sizeof(prepare));
+-		if (ret < 0) {
+-			mutex_unlock(&dchid->ring_mutex);
+-			return ret;
++		cmd_ret = dchid_comm_cmd(dchid, prepare, sizeof(prepare));
++		if (cmd_ret >= 0) {
++			/* The registration ACK itself arrives through the ring. */
++			dma_wmb();
++			WRITE_ONCE(dchid->ring_registered, true);
++			cmd_ret = dchid_comm_cmd(dchid, &msg, sizeof(msg));
++			dchid->ring_error = cmd_ret;
++		}
++		ret = cmd_ret;
++		if (dchid_ring_refused(cmd_ret, fifo_fallback)) {
++			/*
++			 * Stay on the FIFO. Keep the ring marked registered, so a
++			 * ring the firmware did accept still drains, and clear the
++			 * sticky error so later interface starts do not fail.
++			 */
++			WRITE_ONCE(dchid->ring_registered, true);
++			dchid->ring_error = 0;
++			dev_warn(dchid->dev,
++				 "receive ring refused (%d), staying on FIFO\n", cmd_ret);
++			ret = 0;
+ 		}
+-		/* The registration ACK itself arrives through the ring. */
+-		dma_wmb();
+-		WRITE_ONCE(dchid->ring_registered, true);
+-		ret = dchid_comm_cmd(dchid, &msg, sizeof(msg));
+-		dchid->ring_error = ret;
+ 	}
+ 	mutex_unlock(&dchid->ring_mutex);
+ 	return ret;
+@@ -1612,7 +1628,7 @@ static int dchid_dispatch(struct dockchannel_hid *dchid, struct dchid_hdr *hdr,
+ 		return 0;
+ 	}
+ 
+-	if (dchid->use_ring && hdr->channel == DCHID_CHANNEL_NOTIFY) {
++	if (dchid->use_rx_ring && hdr->channel == DCHID_CHANNEL_NOTIFY) {
+ 		/* A FIFO notification has no application subheader or report ID. */
+ 		return fifo && !hdr->length && hdr->iface == IFACE_COMM;
+ 	}
+@@ -1658,7 +1674,7 @@ static void dchid_ring_copy(struct dockchannel_hid *dchid, void *dst,
+ 			    u32 offset, size_t length)
+ {
+ 	size_t first = min_t(size_t, length,
+-			     DCHID_RING_SIZE - DCHID_RING_HEADER_SIZE - offset);
++			     dchid->ring_size - DCHID_RING_HEADER_SIZE - offset);
+ 	void *data = dchid->ring + DCHID_RING_HEADER_SIZE;
+ 
+ 	memcpy(dst, data + offset, first);
+@@ -1667,7 +1683,7 @@ static void dchid_ring_copy(struct dockchannel_hid *dchid, void *dst,
+ 
+ static int dchid_drain_ring(struct dockchannel_hid *dchid)
+ {
+-	const u32 capacity = DCHID_RING_SIZE - DCHID_RING_HEADER_SIZE;
++	const u32 capacity = dchid->ring_size - DCHID_RING_HEADER_SIZE;
+ 	u32 *indices = dchid->ring;
+ 	u32 producer, consumer, available;
+ 	int size;
+@@ -1824,6 +1840,17 @@ static int dockchannel_hid_probe(struct platform_device *pdev)
+ 	mutex_init(&dchid->ring_mutex);
+ 	/* The M4 Pro (J616s) MTP uses the same 26.6.2 firmware transport as T8132. */
+ 	dchid->use_ring = of_device_is_compatible(dev->of_node, "apple,t6041-dockchannel-hid");
++	/*
++	 * The T6050 MTP keeps this platform's reset and GPIO paths, but macOS gives
++	 * its large raw touch reports a 20 MiB host read FIFO. A board opts in with
++	 * the t6050 compatible, once its MTP DART streams 0 and 1 are described.
++	 * Try that receive transport and fall back to the MMIO FIFO if the
++	 * firmware refuses it.
++	 */
++	dchid->use_rx_ring = dchid->use_ring ||
++			     of_device_is_compatible(dev->of_node, "apple,t6050-dockchannel-hid");
++	dchid->ring_size = of_device_is_compatible(dev->of_node, "apple,t6050-dockchannel-hid") ?
++		20 * SZ_1M : DCHID_RING_SIZE;
+ 
+ 	ret = dchid_bind_afe_smc(dchid);
+ 	if (ret)
+@@ -1944,8 +1971,8 @@ static int dockchannel_hid_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		dev_warn(dev, "Failed to set up wakeup: %d\n", ret);
+ 
+-	if (dchid->use_ring) {
+-		dchid->ring = dmam_alloc_coherent(dev, DCHID_RING_SIZE, &dchid->ring_dma,
++	if (dchid->use_rx_ring) {
++		dchid->ring = dmam_alloc_coherent(dev, dchid->ring_size, &dchid->ring_dma,
+ 						  GFP_KERNEL);
+ 		if (!dchid->ring)
+ 			return -ENOMEM;
+-- 
+2.56.1
+

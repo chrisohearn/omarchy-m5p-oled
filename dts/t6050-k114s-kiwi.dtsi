@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s touch screen ("kiwi", docs/r3-touchscreen.md, issue #48). Not booted on a K114s.
+ *
+ * Default off: nothing here is in effect unless K114S_R3_TOUCH is defined before this file is
+ * included, and only dts/t6050-k114s-r3-touch.dts does that. Without the macro the file adds nothing
+ * and the including tree is byte-identical.
+ *
+ * Needs the touch trial kernel's base (patches/linux/r3b-t1.series): the `kiwi`, `nub_gpio0` and
+ * `ps_nub_gpio` labels and the `kiwi` interface driver come from aurora-silicon/linux #1605 and #2004,
+ * and the second MTP DART stream from #2014. On a tree without them the labels do not resolve and
+ * the compile fails, which is the intended guard.
+ *
+ * The block is the K114c's (#1605). The K114s ADT agrees on every pin it can show (tests/k114s-adt-kiwi-facts.py:
+ * 12 of 12); the reset and power polarities are the K114c's, which cannot be read from the ADT.
+ * The firmware blob is the same for both machines (docs/r3-touchscreen.md).
+ */
+#ifdef K114S_R3_TOUCH
+#include <dt-bindings/pinctrl/apple.h>
+
+&ps_nub_gpio {
+	status = "okay";
+};
+
+&nub_gpio0 {
+	status = "okay";
+
+	kiwi_clk24_pins: kiwi-clk24-pins {
+		pinmux = <APPLE_PINMUX(22, 1)>;
+	};
+};
+
+&pinctrl_ap {
+	kiwi_dsync_pins: kiwi-dsync-pins {
+		pinmux = <APPLE_PINMUX(11, 1)>;
+	};
+};
+
+&mtp_hid {
+	pinctrl-0 = <&kiwi_clk24_pins>, <&kiwi_dsync_pins>;
+	pinctrl-names = "default";
+};
+
+&kiwi {
+	firmware-name = "apple/tpkiwifw-k114c.bin";
+	apple,power-method = <2>;
+	apple,reset-gpios = <&nub_gpio0 25 GPIO_ACTIVE_LOW>;
+	apple,power-gpios = <&nub_gpio0 26 GPIO_ACTIVE_HIGH>;
+	status = "okay";
+};
+#endif /* K114S_R3_TOUCH */
