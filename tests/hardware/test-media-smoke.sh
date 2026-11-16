@@ -51,7 +51,17 @@ run "$d" --no-capture
 [[ -z $(ls -A "$d/tmp") ]] && ok "temp directory removed" || bad "temp left: $(ls -A "$d/tmp")"
 
 run "$d" --bogus
+[[ $out != *"set -u"* && $out != *"root=\${MEDIA_SMOKE_ROOT"* ]] && ok "usage text holds only the header comment" || bad "usage leaks code: $out"
+
 [[ $rc -eq 2 ]] && ok "unknown argument exits 2" || bad "bogus rc=$rc"
+
+# --vkcube: exit 0 or 124 is INFO, anything else FAIL, a missing vkcube is SKIP
+printf '#!/bin/sh\nexit 0\n' >"$d/bin/vkcube"; chmod +x "$d/bin/vkcube"
+run "$d" --no-capture --vkcube; [[ $out == *"INFO vkcube ran 10 s (exit 0)"* ]] && ok "vkcube exit 0 is INFO" || bad "vkcube 0: $out"
+printf '#!/bin/sh\nexit 3\n' >"$d/bin/vkcube"
+run "$d" --no-capture --vkcube; [[ $out == *"FAIL vkcube crashed, exit 3"* ]] && ok "vkcube exit 3 is a FAIL" || bad "vkcube 3: $out"
+rm "$d/bin/vkcube"
+run "$d" --no-capture --vkcube; [[ $out == *"SKIP vkcube missing"* ]] && ok "missing vkcube is a SKIP" || bad "vkcube skip: $out"
 
 d=$(mk b); mkdir "$d/tmp"; rm "$d/bin/vulkaninfo" "$d/home/.config/chromium-flags.conf"
 run "$d"

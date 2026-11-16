@@ -20,8 +20,8 @@
  * tunables, and the host DROM of the left router. tests/k114s-adt-usb4-facts.py checks each against
  * this Mac's ADT. The tree has no usb4_N_rc, usb4-N-acio or usb4_N_nhi aliases, which is how
  * Aura's dt_set_acio_tunables() finds the nodes, so the boot loader replaces none of it. The right
- * router has no host DROM here (the DROM is not in the repository): K114S_USB4_DROM below can name
- * a generated file that sets it from the ADT, as the PMP tunables file is.
+ * router has no host DROM here (upstream sets it in t6050-j714s.dts, not in the shared router file):
+ * K114S_USB4_DROM below can name a file that sets it, as the PMP tunables file is.
  *
  * Copyright The Asahi Linux Contributors
  */

@@ -8,6 +8,7 @@ with --adt FILE. Nothing is written except the output file you name.
 
     sudo build/k114s-adt.py show NAME [NAME...]       print the nodes with these names
     sudo build/k114s-adt.py sound-report              print the nodes the sound port relies on
+    sudo build/k114s-adt.py firmware-report [--json]  list every coprocessor firmware identity (names, build UUIDs, segments)
     sudo build/k114s-adt.py pmp-dtsi --names-from KTREE/arch/arm64/boot/dts/apple/t6050-j714s-pmp-tunables.dtsi \
                                      -o KTREE/arch/arm64/boot/dts/apple/t6050-k114s-pmp-tunables.dtsi
 
@@ -231,6 +232,51 @@ def cmd_sound_report(root, args):
     return cmd_show(root, args)
 
 
+FW_PROPS = ("firmware-name", "firmware-type", "uuid", "segment-names")
+
+
+def _cstr(v):
+    return v.split(b"\0", 1)[0].decode("ascii", "replace")
+
+
+def firmware_identities(root):
+    """Every ADT node that names a firmware image: path, firmware-name, type, build UUID, segment names.
+
+    Identity only: the ADT also holds segment address ranges and the loaded images' sizes, which are
+    this boot's memory layout and are not reported. No firmware bytes are read or written.
+    """
+    rows = []
+    for path, node in walk(root):
+        pr = node["props"]
+        if "uuid" not in pr and "firmware-name" not in pr:
+            continue
+        row = {"path": path}
+        for k in FW_PROPS:
+            if k in pr:
+                v = _cstr(pr[k])
+                row[k.replace("-", "_")] = v.split(";") if k == "segment-names" else v
+        rows.append(row)
+    return rows
+
+
+def cmd_firmware_report(root, args):
+    chosen, board = check_board(root, args.any_board)
+    rows = firmware_identities(root)
+    if args.json:
+        import json
+        print(json.dumps({"board_id": hex(board), "firmware": rows}, indent=1, sort_keys=True))
+        return 0
+    print(f"/chosen board-id = 0x{board:x}; {len(rows)} nodes name a firmware image")
+    for r in rows:
+        print(r["path"])
+        for k in ("firmware_name", "firmware_type", "uuid"):
+            if k in r:
+                print(f"    {k.replace('_', '-')} = {r[k]}")
+        if "segment_names" in r:
+            print("    segments = " + " ".join(r["segment_names"]))
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(prog="k114s-adt.py", description=__doc__.split("\n\n")[0])
     ap.add_argument("--adt", help="an ADT file instead of the \"adt\" MTD partition")
@@ -241,6 +287,9 @@ def main():
     s.add_argument("--all", action="store_true", help="also print name and AAPL,phandle")
     s = sub.add_parser("sound-report", help="print the nodes the sound port relies on")
     s.add_argument("--full", action="store_true")
+    s.add_argument("--any-board", action="store_true")
+    s = sub.add_parser("firmware-report", help="list the firmware identities the ADT names (no firmware bytes)")
+    s.add_argument("--json", action="store_true")
     s.add_argument("--any-board", action="store_true")
     s = sub.add_parser("pmp-dtsi", help="write t6050-k114s-pmp-tunables.dtsi from this ADT")
     s.add_argument("--names-from", required=True,
@@ -253,7 +302,8 @@ def main():
     args = ap.parse_args()
     try:
         root = load(args.adt)
-        return {"show": cmd_show, "sound-report": cmd_sound_report, "pmp-dtsi": cmd_pmp_dtsi}[args.cmd](root, args)
+        return {"show": cmd_show, "sound-report": cmd_sound_report, "pmp-dtsi": cmd_pmp_dtsi,
+                "firmware-report": cmd_firmware_report}[args.cmd](root, args)
     except AdtError as e:
         print(f"k114s-adt: {e}", file=sys.stderr)
         return 2
