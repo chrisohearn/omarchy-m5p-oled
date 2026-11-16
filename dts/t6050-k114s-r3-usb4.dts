@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s candidate r3-usb4: the r3a tree plus both USB4/Thunderbolt routers (issue #61).
+ * Build against a kernel tree that has aurora-silicon/linux #1841 and #1791 and
+ * patches/linux/usb4/0001 (docs/r3-usb4.md). NOT booted; needs a USB4 device.
+ */
+/* Before the includes: the patched guards of t6050-max.dtsi and t6050-peripherals.dtsi read it. */
+#define T6050_K114S_USB4
+#define K114S_R1_N1
+#define K114S_R1_USB
+#include "t6050-k114s-common.dtsi"
+#include "t6050-k114s-usb.dtsi"
+#include "t6050-k114s-sleep.dtsi"
+#include "t6050-k114s-usb4.dtsi"
