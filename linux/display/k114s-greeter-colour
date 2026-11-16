@@ -1,0 +1,35 @@
+#!/bin/bash
+# Give the SDDM greeter the DCP colour guard (the greeter's Hyprland has the same black-panel problem as the user session, section 4a).
+#   usage: sudo k114s-greeter-colour [--install | --undo | --check]       (default --install; --check needs no root)
+#   K114S_SDDM_ROOT is a prefix for every path below (the tests use it).
+# Writes /etc/sddm/hyprland-k114s.lua: a copy of /usr/share/sddm/hyprland.lua plus the guard (nothing happens unless
+# ASAHI_M5_BRINGUP=1, which only a DCP boot sets; the same text the root put there by hand on 2026-11-15), and points /etc/sddm.conf.d/70-k114s-greeter-software.conf at it. The conf must
+# exist already (linux/gpu-desktop). The first-install conf is kept as <conf>.k114s-greeter-colour.bak. Run --install again after an
+# omarchy-settings-dev update changes the stock file: --check then fails, because the copy no longer matches stock plus the guard.
+set -u
+r=${K114S_SDDM_ROOT:-}; stock=$r/usr/share/sddm/hyprland.lua; mine=$r/etc/sddm/hyprland-k114s.lua; conf=$r/etc/sddm.conf.d/70-k114s-greeter-software.conf
+S=/usr/share/sddm/hyprland.lua; M=/etc/sddm/hyprland-k114s.lua; bak=$conf.k114s-greeter-colour.bak
+die() { echo "k114s-greeter-colour: $*" >&2; exit 1; }
+want() { cat "$stock"; printf '\n-- K114s DCP boots: Hyprland colour management blanks the OLED (betizzel/omarchy-m5#21)\nif os.getenv("ASAHI_M5_BRINGUP") == "1" then hl.config({ render = { cm_enabled = false } }) end\n'; }
+pointed() { grep -q -F -- "--config $M" "$conf" 2>/dev/null; }
+installed() { [ -f "$mine" ] && [ "$(want 2>/dev/null | sha256sum)" = "$(sha256sum < "$mine")" ] && pointed && ! grep -q -F -- "--config $S" "$conf"; }
+put() { # put FILE: stdin becomes FILE, same mode, atomically
+  local t; t=$(mktemp "$1.XXXXXX") || exit 1; cat > "$t" && chmod --reference="$1" "$t" 2>/dev/null || chmod 644 "$t"; mv "$t" "$1" || { rm -f "$t"; die "cannot write $1"; }; }
+case ${1:---install} in
+  --check) installed && echo "k114s-greeter-colour: installed ($mine, $conf)" || die "not installed (or the stock $S changed): sudo bash $0" ;;
+  --install)
+    [ -s "$stock" ] || die "no $stock"; [ -f "$conf" ] || die "no $conf (install linux/gpu-desktop/70-k114s-greeter-software.conf first)"
+    grep -q -F -- "--config $S" "$conf" || pointed || die "$conf has no --config $S to replace"
+    installed && { echo "k114s-greeter-colour: already installed"; exit 0; }
+    mkdir -p "$(dirname "$mine")"; [ -e "$bak" ] || cp -p "$conf" "$bak" || die "cannot keep a backup"
+    [ -e "$mine" ] || : > "$mine"; want | put "$mine"
+    sed "s#--config $S#--config $M#g" "$conf" | put "$conf"
+    installed || die "the guard is not in place after the write"
+    echo "k114s-greeter-colour: installed ($mine; $conf points at it, backup $bak); the greeter reads it at its next start" ;;
+  --undo)
+    [ -e "$mine" ] || pointed || { echo "k114s-greeter-colour: not installed"; exit 0; }
+    sed "s#--config $M#--config $S#g" "$conf" | put "$conf"; rm -f "$mine"
+    pointed && die "$conf still points at $M"; [ ! -e "$mine" ] || die "$mine is still there"
+    echo "k114s-greeter-colour: removed ($conf points at $S again; the first-install backup $bak stays)" ;;
+  *) die "usage: k114s-greeter-colour [--install | --undo | --check]" ;;
+esac

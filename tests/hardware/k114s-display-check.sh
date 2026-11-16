@@ -12,11 +12,11 @@
 #   --floor             published only: this boot carries the brightness build (D5: the floor line in the kernel log, apple,min-brightness 10)
 # Root makes the kernel-log lines complete (dmesg is root-only here); the rest needs none.
 # It never prints the kernel command line: every kernel-log line it shows has passed a filter that drops it.
-# Test hooks: K114S_DT K114S_SYS K114S_DEV K114S_DMESG_FILE K114S_INTERRUPTS K114S_HYPRCTL K114S_SYSTEMCTL K114S_BACKLIGHT_STATE
+# Test hooks: K114S_DT K114S_SYS K114S_DEV K114S_DMESG_FILE K114S_INTERRUPTS K114S_HYPRCTL K114S_SYSTEMCTL K114S_BACKLIGHT_STATE K114S_MODETEST
 set -u
 DT=${K114S_DT:-/proc/device-tree}; SYS=${K114S_SYS:-/sys}; DEV=${K114S_DEV:-/dev}
 IRQ=${K114S_INTERRUPTS:-/proc/interrupts}; HYPRCTL=${K114S_HYPRCTL:-hyprctl}; SYSTEMCTL=${K114S_SYSTEMCTL:-systemctl}
-BLSTATE=${K114S_BACKLIGHT_STATE:-/var/lib/systemd/backlight}
+BLSTATE=${K114S_BACKLIGHT_STATE:-/var/lib/systemd/backlight}; MODETEST=${K114S_MODETEST:-modetest}
 expect=; log=; wait_s=10; hypr=0; vrr=off; floor=0
 while [ $# -gt 0 ]; do
   case $1 in
@@ -87,7 +87,9 @@ if [ "$expect" = published ]; then
     ok "connector ${edp##*/}: $(cat "$edp/status" 2>/dev/null)"
     modes=$(sort -u "$edp/modes" 2>/dev/null | tr '\n' ' ')
     [ -n "$modes" ] && ! sort -u "$edp/modes" | grep -v -q -x -E '3024x(1986|1964)' && ok "modes: $modes(3024 wide, 1986 or 1964 high)" || bad "modes: ${modes:-none}"
-    [ -e "$edp/vrr_capable" ] && { [ "$(cat "$edp/vrr_capable")" = $vcap ] && ok "vrr_capable $vcap" || bad "vrr_capable $(cat "$edp/vrr_capable"), expected $vcap (--vrr $vrr)"; }
+    # vrr_capable is a KMS connector property, not a sysfs file on this kernel: read it with modetest (no root needed)
+    vc=$($MODETEST -M apple -c 2>/dev/null | awk '$2 == "vrr_capable:" { f = 1; next } f && $1 == "value:" { print $2; exit }')
+    [ "$vc" = $vcap ] && ok "vrr_capable $vcap" || bad "vrr_capable is '${vc:-unreadable}', expected $vcap (--vrr $vrr; KMS property read with modetest -M apple -c)"
   else bad "no eDP connector"; fi
   case $(cat "$SYS/class/graphics/fb0/name" 2>/dev/null) in *appledrm*) ok "fb0 is appledrm's" ;; *) info "fb0 is not appledrm's" ;; esac
   p=$SYS/module/appledrm/parameters/fw27_panel_vrr
