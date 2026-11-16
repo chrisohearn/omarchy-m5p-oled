@@ -91,9 +91,13 @@ One install and one reboot, after the D6 VRR boot or instead of it, never unatte
 3. Read-only: `journalctl -k -b | grep -E 'EDID primaries default|panel EDR off|panel peak'` shows the P3 line and
    `panel EDR off: cap 500 nits is not above the SDR maximum 1000 nits`; the connector EDID decodes with P3 primaries
    (about 0.680/0.320, 0.265/0.690, 0.150/0.060) and no HDR static metadata block.
-4. Then the colour test the owner asked to watch: colour management on at runtime with a 20-second auto-revert, first
-   the `edid` preset, then `dp3`. If the panel stays lit and colours look right, make that the managed default through a
-   repository PR and retire the workaround.
+4. Then the colour test the owner asked to watch, one preset at a time, each with the owner saying whether the panel
+   stayed lit and how colours look: `bash linux/display/k114s-cm-trial edid`, then `dp3`, then `srgb` (TripleU613's
+   question in betizzel/omarchy-m5#21). The script turns colour management on at runtime and schedules its own revert
+   (20 s, a transient systemd user unit, so a black panel comes back even if the terminal goes) before it changes
+   anything, then checks that the revert happened. If a preset stays lit and colours look right, make it the managed
+   default through a repository PR and retire the workaround. On r3b.b1 (before step 1) only `srgb` and `dp3` are worth
+   trying: `edid` is the zero-primaries case that blacks the panel.
 
 Way back: the Limine menu's r3a entry (`Omarchy/linux-k114s`) boots as before; from there,
 `sudo pacman -U .../release-display-d5/pkg/linux-k114s-r3b-7.3.0.r3b.b1-1-aarch64.pkg.tar.zst` restores r3b.b1.
