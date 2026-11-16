@@ -104,7 +104,7 @@ installed guard, which in the window is exactly the case D4 calls a STOP (two ke
 
 - **Before the r3a window.** Trimming makes the installed guard pass (99.4 MB free against 88.1 MB). **Restore the trim with `esp-trim --restore <backup>` before runbook step D1**: D4 measures free space after the swap (about 99.3 MB trimmed) and STOPs when it is at or above 88,080,384, so a trimmed ESP loses the attended window. A kernel-only update then fits: it rebuilds
   `omarchy_linux-aurora.efi` (79.3 MB). A transaction that also changes `boot.bin` does **not** fit: with `boot.bin.old` gone, `update-m1n1` peaks at
-  `boot.bin` + `.new` + `.old` (+20.3 MB over today) plus the 79.3 MB image, about 104 MB against 99.4 MB free, and the r2c guard does not count the loader (the
+  `boot.bin` + `.new` + `.old` (+20.3 MB over today) plus the 79.3 MB image, about 99.6 MB (the +20.3 MB loader transient plus the 79.3 MB image, counted as if the two peaks overlap in time; nothing here shows the loader's transient is gone before the image is written) against 99.4 MB free, so at best no margin, and the r2c guard does not count the loader (the
   r3 guard, `k114s-guard`, does: one image per kernel directory + loader transient + 8 MiB margin, and would refuse). So the trims alone are a partial fix; installing
   the r3 tooling first is what makes the pause lift safely.
 - **Inside the r3a window**, do not trim to pass the guard. The window has two kernel directories; the r3 guard refuses it correctly. Do not delete `macos-junk` or `boot.bin.old` for

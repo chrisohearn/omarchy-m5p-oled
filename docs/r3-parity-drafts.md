@@ -20,6 +20,11 @@ only enable them, the SD fragment adds the port-1 node as the K114c tree does.
 
 ## What the ADT says (agent-run, 2026-11-15, `tests/k114s-adt-parity-facts.py`, 72 facts, all hold)
 
+**Address frames.** The AVD and SD values below, in the fragment headers and in the upstream comment draft
+are raw ADT `reg` values. The AOP values are physical, already translated through the arm-io `ranges`
+(ASC raw `0x90600000` is `0x290600000`). The tree and the checker print the translated form: `avd0`
+`0x2308000000`, `dart-avd0` `0x2309020000`, `dart-apcie1` `0x411000000` (the raw values are 0x200000000 lower).
+
 **AVD (#30).** `avd0` window `0x2108000000 + 0x1404000` (the tree's four sub-blocks lie inside it),
 interrupts 2417 and 2418; `dart-avd0` `0x2109020000 + 0x20000`, interrupt 2424, streams 0 to 2 as the
 tree's `iommus`; pmgr block `reg[46]` `0x2180600000`; power states `FAB1_SOC` offset `0x1b0` and
@@ -43,7 +48,7 @@ tree that carries an amplifier or an enabled `spkr` channel.
 
 - **#30:** which pmgr register block the base's `psreg 4` maps to is upstream's step (#1856), not
   derivable from the ADT; the tree and ADT agree on `reg[46]` and both offsets. Decoding itself,
-  10-bit and over 1080p are untested upstream (#1995, #1936 open). Decided: keep the omarchy-mac `mpv.conf`
+  10-bit and over 1080p are untested upstream (#1995 open; #1936, the AVD SRAM ring overrun at the counter wrap, merged 2026-11-15 and is not in the installed base). Decided: keep the omarchy-mac `mpv.conf`
   (`hwdec=vaapi-copy`) as it is; it is already `/etc/mpv/mpv.conf` here, and mpv falls back to software without
   the decoder. See [r3-avd-decode.md](r3-avd-decode.md).
 - **#62:** the reader's DART stream (iommu-map `0x200` to `dart_apcie1` stream 1) is the K114c and
@@ -55,7 +60,7 @@ tree that carries an amplifier or an enabled `spkr` channel.
   runs. The ADT's `als` node carries no calibration (`harmony-db-version` 3 only), and the VD6286
   starts only after a calibration (driver file `apple/aop-als-cal.bin`). Open linux #1983 (193-byte
   calibration on the 14-inch M5 Max) and #1929 (VD6286 enable sequence) are driver changes for that;
-  #1876 (stop reports on suspend) and #1924 (motion sensors only while read) are open drafts too.
+  #1876 (stop reports on suspend) and #1924 (motion sensors only while read) are open pull requests too (#1924 is not a draft).
   Applicability judged from the PR text only, nothing was built or run: none is needed to boot the
   node; #1983 and #1929 are what could make readings appear. The ADT also has `accel` and `gyro`
   nodes (the `aop_motion` driver, not enabled here).
@@ -89,6 +94,13 @@ is a read-only report to run after such a boot (marked owner-at-the-mac; it chan
 Booting follows the one-boot trial of docs/r3-gpu-result.md; a hang needs a forced power-off. The
 candidates should be separate trials (AVD alone, SD alone, AOP with the sound Stage A), because each
 adds its own way to hang.
+
+## Decode check (#30) and what is not done
+
+Compare software and VA-API decode with `tests/hardware/k114s-avd-decode-test.sh` (a synthetic clip, `ffmpeg
+-hwaccel none ... -f md5` against `-hwaccel vaapi ... -f md5`, both as `nv12`; `--software-only` proves the clip
+and md5 steps without the decoder). Not done: the offline md5 test #30 asked for (it needs the decoder, so it can
+only run after the AVD boot), and the QEMU tests #62 and #67 asked for.
 
 ## Upstream drafts
 

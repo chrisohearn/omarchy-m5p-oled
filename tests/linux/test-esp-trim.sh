@@ -48,6 +48,18 @@ run --restore "$bk2"; ok "restore: a backup holding a path the tool never saves 
 rm -rf "$bk2/files/vendorfw"; cp "$X/sums.orig" "$bk2/SHA256SUMS"; echo x > "$bk2/files/.Trashes/unlisted"
 run --restore "$bk2"; ok "restore: an unlisted file in an allowed folder restores nothing" "$rc $(echo "$out" | grep -c 'does not list')" "1 1"
 ok "restore refusals left the ESP as the apply left it" "$(snap)" "$s1"
+# failures after the backup: the tool must say how to undo and stop non-zero (stubbed rm, sync and cp first in PATH)
+stub() { mkdir -p "$X/stub"; printf '#!/bin/sh\nexit 1\n' > "$X/stub/$1"; chmod +x "$X/stub/$1"; }
+frun() { out=$(PATH=$X/stub:$PATH K114S_TEST=1 K114S_ROOT=$X K114S_NO_MOUNTCHECK=1 bash "$TOOL" "$@" 2>&1); rc=$?; }
+mk; stub rm; frun --apply m1n1-old; ok "apply: a failed delete stops with the undo command" "$rc $(echo "$out" | grep -c 'delete of m1n1/boot.bin.old failed.*--restore')" "1 1"
+mk; stub sync; frun --apply m1n1-old; ok "apply: a failed sync stops with the undo command" "$rc $(echo "$out" | grep -c 'sync failed after the delete.*--restore')" "1 1"
+mk; run --apply m1n1-old; bk3=$(ls -d "$X"/var/lib/k114s-recovery/esp-trim-*); stub cp; frun --restore "$bk3"
+ok "restore: a failed copy stops and leaves no partial file" "$rc $(echo "$out" | grep -c 'copy of m1n1/boot.bin.old failed') $(test -e "$X/boot/efi/m1n1/boot.bin.old"; echo $?)" "1 1 1"
+rm -f "$X/stub/cp"; stub sync; frun --restore "$bk3"; ok "restore: a failed sync is reported" "$rc $(echo "$out" | grep -c 'sync failed after the restore')" "1 1"
+mk; run --apply m1n1-old; bk4=$(ls -d "$X"/var/lib/k114s-recovery/esp-trim-*)
+mkdir -p "$X/stub"
+printf '#!/bin/sh\nprintf "Avail\\n1\\n"\n' > "$X/stub/df"; printf '#!/bin/sh\necho 99999999\n' > "$X/stub/du"; chmod +x "$X/stub/df" "$X/stub/du"
+frun --restore "$bk4"; ok "restore: too little room on the ESP restores nothing" "$rc $(echo "$out" | grep -c 'too little room') $(test -e "$X/boot/efi/m1n1/boot.bin.old"; echo $?)" "1 1 1"
 mk; unset K114S_NO_MOUNTCHECK; out=$(K114S_TEST=1 K114S_ROOT=$X bash "$TOOL" --apply 2>&1); rc=$?
 ok "a folder that is not a mount point is refused (no K114S_NO_MOUNTCHECK)" "$rc $(echo "$out" | grep -c 'not a mount point')" "1 1"
 ok "the ESP is untouched by that" "$(test -e "$X/boot/efi/.Trashes"; echo $?)" 0

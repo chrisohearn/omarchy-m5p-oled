@@ -14,6 +14,10 @@
  * define K114S_AOP_WITH_AUDIO as well: the AOP is then enabled once (the same four lines in both
  * files do no harm) and the audio service is left to the sound fragment. Without the sound
  * fragment the audio service is disabled here: it has no chassis name, no DMA channel, no card.
+ * Without the sound fragment the PMP is not brought up either, and without the PMP no AOP service
+ * is announced (t6050-k114s-sound.dtsi, K116s tree), so the sensors stay silent. K114S_AOP_WITH_AUDIO
+ * without the sound fragment re-enables the base's aop_audio with its spkr and sense channels;
+ * nothing here guards against it, only the checker (tests/k114s-adt-parity-facts.py) fails it.
  *
  * What the K114s ADT confirms (tests/k114s-adt-parity-facts.py, agent-run 2026-11-15): the AOP
  * ASC 0x290600000, SRAM window 0x290c00000, interrupts 578-581, dart-aop 0x290fc0000 interrupt

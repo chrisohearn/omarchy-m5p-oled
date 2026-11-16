@@ -27,6 +27,9 @@
  * extended, not replaced. Define K114S_R3_SD to turn it on. If this tree also includes
  * t6050-k114s-sound.dtsi, define K114S_SD_WITH_SOUND as well: that file replaces
  * gpio-reserved-ranges, so this one must carry its pins too (80, 81, 134, 139 exposed).
+ * Include this file AFTER the sound fragment: the later gpio-reserved-ranges wins, and nothing
+ * enforces the order. tests/lint-dtb.py checks the pins (tests/test-parity-dtb.sh runs it); the
+ * build scripts do not.
  * Pin 112 stays reserved either way: its register takes an SError when read.
  *
  * OPEN, needs the Mac or an upstream answer:

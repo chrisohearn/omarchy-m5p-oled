@@ -36,7 +36,19 @@ ev() { python3 -I -c 'import struct,sys;sys.stdout.buffer.write(struct.pack("@ll
 
 out=$(cap keys 2); rc=$?
 [[ $rc -eq 0 && $out == *"SEEN     KEY_MUTE"* && $out == *"MISSING  KEY_VOLUMEDOWN"* && $out == *"KEY_BRIGHTNESSUP XF86MonBrightnessUp presses=1 (with Ctrl: 1)"* ]] && ok "keys: seen, missing and Ctrl chord" || { bad "keys (rc=$rc)"; echo "$out"; }
-[[ $out == *"XF86AudioLowerVolume"*"NOT BOUND"* || $out == *"bind XF86AudioLowerVolume"*"NOT BOUND"* ]] && ok "keys: unbound key is reported" || bad "unbound key not reported"
+grep -qE '^bind XF86AudioLowerVolume +NOT BOUND$' <<<"$out" && grep -qE '^bind XF86AudioMute +Mute$' <<<"$out" && ok "keys: the unbound key is reported on its own line, a bound key is not" || bad "unbound key not reported on its own line"
+
+# status: the LED and device-tree report, and the ABS_MT_TOOL_TYPE yes/no line
+mkdir -p "$t/leds/kbd_backlight" "$t/dt/led-0"
+echo 5 >"$t/leds/kbd_backlight/brightness"; echo 255 >"$t/leds/kbd_backlight/max_brightness"; echo "[none] kbd-backlight-timeout" >"$t/leds/kbd_backlight/trigger"
+printf 'Keyboard\0' >"$t/dt/led-0/label"
+python3 -I -c 'import struct,sys;sys.stdout.buffer.write(struct.pack(">3I",1,2,40000))' >"$t/dt/led-0/pwms"
+out=$(cap status); rc=$?
+[[ $out == *"led kbd_backlight: 5/255 trigger=[none]"* ]] && ok "status: LED line" || { bad "status LED line"; echo "$out"; }
+[[ $out == *"dt Keyboard: pwm phandle 1 channel 2 period 40000 ns (25.0 kHz)"* ]] && ok "status: device-tree PWM line" || { bad "status DT line"; echo "$out"; }
+[[ $out == *"ABS_MT_TOOL_TYPE (code 55) advertised: no"* ]] && ok "status: tool type not advertised" || { bad "status tool type (no)"; echo "$out"; }
+sed -i 's/^B: ABS=.*/B: ABS=80000000000000/' "$t/devices"
+out=$(cap status); [[ $out == *"ABS_MT_TOOL_TYPE (code 55) advertised: yes"* ]] && ok "status: tool type advertised" || { bad "status tool type (yes)"; echo "$out"; }
 
 out=$(cap power 2); rc=$?
 [[ $rc -eq 0 && $out == *"SEEN     KEY_POWER XF86PowerOff presses=1"* && $out == *"POWER-KEY POLICY: ok"* ]] && ok "power: press seen, policy ok" || { bad "power (rc=$rc)"; echo "$out"; }
@@ -52,7 +64,11 @@ out=$(cap status); rc=$?
 [[ $rc -eq 1 && $out == *"aurora-sep drop-in present"* && $out == *"POLICY: FAIL"* ]] && ok "policy fails when an aurora-sep drop-in is installed" || { bad "aurora-sep drop-in (rc=$rc)"; echo "$out"; }
 rm "$t/ld/50-aurora-sep.conf"
 
-rm "$t/dev/event2"; : >"$t/dev/event2"
+# a device that errors on read mid-capture (ENODEV in real life; a directory raises the same OSError family)
+rm "$t/dev/event2"; mkdir "$t/dev/event2"
+out=$(cap power 1); rc=$?
+[[ $rc -eq 0 && $out != *Traceback* && $out == *"went away mid-capture"* && $out == *"MISSING  KEY_POWER"* ]] && ok "power: a device that fails on read keeps the summary" || { bad "read error (rc=$rc)"; echo "$out"; }
+rmdir "$t/dev/event2"; : >"$t/dev/event2"
 out=$(cap power 1); [[ $out == *"MISSING  KEY_POWER"* ]] && ok "power: no press is MISSING" || bad "no-press case"
 
 out=$(cap keys 1); [[ $out == *"the moon key"* && $out != *"Do NOT press the moon"* ]] && ok "keys prompt names the moon key by default" || bad "default keys prompt"

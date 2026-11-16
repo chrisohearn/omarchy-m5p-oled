@@ -3,8 +3,10 @@
 # (dts/t6050-k114s-avd.dtsi, -sd.dtsi, -aop-sensors.dtsi; docs/r3-parity-drafts.md). Changes nothing.
 # No root needed (dmesg lines are better with it and say so). Prints "ok", "BAD" or "info" lines.
 #   tests/hardware/k114s-parity-check.sh [avd] [sd] [sensors]      (default: all three)
+# Exit status: 0 with no BAD line, 1 with at least one.
 # It cannot judge playback, a card or a hand over the sensor: the lines tell you what to do next.
-ok() { echo "ok    $*"; }; bad() { echo "BAD   $*"; }; info() { echo "info  $*"; }
+nbad=0; ok() { echo "ok    $*"; }; bad() { echo "BAD   $*"; nbad=$((nbad + 1)); }; info() { echo "info  $*"; }
+dmbad() { local l; while IFS= read -r l; do bad "dmesg: $l"; done; }   # counts each line, so the exit status sees it
 groups=${*:-avd sd sensors}
 dm=$(dmesg 2>/dev/null) || { dm=$(journalctl -k -b --no-pager 2>/dev/null); info "dmesg needs root; used the kernel journal"; }
 st() { tr -d '\0' < "$1" 2>/dev/null; }
@@ -17,8 +19,8 @@ avd)
   ls /dev/media* >/dev/null 2>&1 && ok "media nodes: $(ls /dev/media* | tr '\n' ' ')" || bad "no /dev/media*"
   lsmod | grep -qi avd && ok "driver loaded: $(lsmod | awk '/avd/{print $1}' | tr '\n' ' ')" || info "no avd module loaded (modprobe is a root step: apple_avd or similar, see modinfo)"
   grep -i 'avd' <<<"$dm" | tail -15 | sed 's/^/info  dmesg: /'
-  grep -iE 'avd.*(fail|error|timeout|fault)' <<<"$dm" | head -5 | sed 's/^/BAD   dmesg: /'
-  info "next: vaapi decode needs libva-v4l2_request-avd; compare md5 of ffmpeg software and vaapi output of one short clip (docs/r3-parity-drafts.md)"
+  dmbad < <(grep -iE 'avd.*(fail|error|timeout|fault)' <<<"$dm" | head -5)
+  info "next: vaapi decode needs libva-v4l2_request-avd; compare md5 of ffmpeg software and vaapi output with tests/hardware/k114s-avd-decode-test.sh (docs/r3-parity-drafts.md)"
   ;;
 sd)
   echo "== SD card reader (issue #62)"
@@ -26,7 +28,7 @@ sd)
   ls -d /sys/class/mmc_host/mmc* >/dev/null 2>&1 && ok "mmc host: $(ls /sys/class/mmc_host | tr '\n' ' ')" || bad "no mmc host"
   lsmod | grep -q sdhci_pci && ok "sdhci_pci loaded" || info "sdhci_pci not loaded"
   grep -iE 'apple-pcie|pcie.*port ?1|sdhci|mmc' <<<"$dm" | tail -12 | sed 's/^/info  dmesg: /'
-  grep -iE 'port ?1.*(fail|timeout)|PERST' <<<"$dm" | head -5 | sed 's/^/BAD   dmesg: /'
+  dmbad < <(grep -iE 'port ?1.*(fail|timeout)|PERST' <<<"$dm" | head -5)
   info "next: insert an SD card, then lsblk (read-only); write only to a card you can lose"
   ;;
 sensors)
@@ -38,8 +40,9 @@ sensors)
     *las*|*lid*) info "lid angle: $(cat $d/in_angl_raw $d/in_angl_input 2>/dev/null | head -1) (move the lid and run again)";; esac
   done
   grep -iE 'aop' <<<"$dm" | tail -15 | sed 's/^/info  dmesg: /'
-  grep -iE 'aop.*(fail|error|timeout|crash|panic)' <<<"$dm" | head -5 | sed 's/^/BAD   dmesg: /'
+  dmbad < <(grep -iE 'aop.*(fail|error|timeout|crash|panic)' <<<"$dm" | head -5)
   [ -d /sys/class/sound ] && ls /sys/class/sound | grep -q '^card' && info "a sound card exists: speakers stay muted, never play unprotected" || ok "no sound card from this tree"
   info "known open (docs/r3-parity-drafts.md): the ALS may stay silent without the calibration drivers (#1983, #1929); no ADT las node"
   ;;
 esac; done
+[ "$nbad" = 0 ]   # exit status: 0 no BAD line, 1 at least one

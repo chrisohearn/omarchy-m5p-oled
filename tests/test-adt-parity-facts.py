@@ -130,7 +130,7 @@ def main():
         expect("no test serial or MAC address in the output (%s)" % secret[:8], secret.lower() not in text.lower(), text)
 
     bad, text = check(build(), [("sd", path("sd-with-sound"))])
-    expect("SD tree built beside the sound fragment keeps pins 80 and 81 exposed and 112 reserved", bad == 0, text)
+    expect("SD tree built with K114S_SD_WITH_SOUND (the sound fragment itself is not built here) keeps pins 80 and 81 exposed and 112 reserved", bad == 0, text)
     bad, text = check(build(), [("aop", path("aop-with-audio"))], with_audio=True)
     expect("AOP with audio left on but the speaker channels in place: refused", bad == 1 and "speaker DMA channel" in text, text)
 
