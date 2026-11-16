@@ -1014,7 +1014,7 @@ Expected: the check with `default_entry is Omarchy/linux-k114s (entry 3, ...)` a
     # G6 on every image, every time (F16): a rebuild from a display-tree boot can put appledrm into the initramfs; the drop-in is what prevents it
     grep -q -x '  _addedmodules\[appledrm\]=1' /etc/mkinitcpio.conf.d/99-k114s-no-appledrm.conf 2>/dev/null && grep -q -x '  _addedmodules\[dcp_fabric_core\]=1' /etc/mkinitcpio.conf.d/99-k114s-no-appledrm.conf || stop "the no-appledrm drop-in is not installed (G6a): the next rebuild would put appledrm in the initramfs (F16)"
     # an Omarchy migration rewrote monitors.lua once: a DCP boot without the colour fix is black (section 4a)
-    bash "$REPO/linux/display/k114s-dcp-colour" --check >/dev/null 2>&1 || stop "the DCP colour fix is gone from monitors.lua (a black screen on a DCP boot: bash $REPO/linux/display/k114s-dcp-colour, then restart Hyprland)"
+    bash "$REPO/linux/display/k114s-dcp-colour" --check >/dev/null 2>&1 || stop "the DCP colour fix is missing or outdated in monitors.lua (a black screen on a DCP boot: bash $REPO/linux/display/k114s-dcp-colour, then restart Hyprland)"
     bash "$REPO/linux/display/k114s-greeter-colour" --check >/dev/null 2>&1 || stop "the greeter's colour guard is not in place (an omarchy-settings-dev update may have changed the stock greeter config): sudo bash $REPO/linux/display/k114s-greeter-colour"
     g=$(sudo mktemp -d /var/tmp/k114s-p9.XXXXXX) || exit 1; trap 'sudo rm -rf "$g"' EXIT
     # the folder is root-only: a glob here is expanded by the user's shell, finds nothing and passes the literal name, so list it under sudo
@@ -1224,7 +1224,7 @@ stops the update, nothing has changed: read the free space; do not use `allow-lo
     : "${D:?STOP: set K, REPO, D, R5, RT and DO first (section 3)}" "${REPO:?STOP: set REPO first}"
     findmnt /boot/efi >/dev/null || { echo "STOP: /boot/efi is not mounted"; exit 1; }
     stop() { echo "STOP: $*; do not reboot"; exit 1; }
-    bash "$REPO/linux/display/k114s-dcp-colour" --check >/dev/null 2>&1 || stop "the DCP colour fix is gone from monitors.lua (an Omarchy migration rewrote it? a DCP boot would be black: bash $REPO/linux/display/k114s-dcp-colour)"
+    bash "$REPO/linux/display/k114s-dcp-colour" --check >/dev/null 2>&1 || stop "the DCP colour fix is missing or outdated in monitors.lua (an Omarchy migration rewrote it? a DCP boot would be black: bash $REPO/linux/display/k114s-dcp-colour)"
     sudo test -s "$D/before-update.txt" || stop "no before-record: run U0 before the update next time"
     sudo true || stop "sudo is not available (a failed sudo would look like a diff)"
     if sudo test -e /boot/efi/EFI/Linux/omarchy_linux-aurora.efi; then
@@ -1335,7 +1335,8 @@ output replaces the earlier rule, so the rule in the block wins on a DCP boot an
 `bash "$REPO/linux/display/k114s-dcp-colour"`. It is idempotent, keeps the file as it was in `monitors.lua.k114s-dcp-colour.bak`
 (first install only), replaces a changed block, and prints where it wrote. Check: `--check` (exit 0 when the block is there and
 equal). Undo: `--undo` removes only the marked block and leaves the backup: a fix written by hand in the same file (the root's own, tonight)
-is not removed by it, so replace such lines with the installer (delete them, then run it) instead of adding the block beside them. T3a, T4a,
+is not removed by it, so run the installer instead of adding a second block by hand. **On this Mac** the hand-edited line is the eDP-1 rule itself, `hl.monitor({ output = "eDP-1", ..., cm = "srgb" }) -- K114s DCP...`, and the I0 check counts it as one of the two eDP rules (T3a checks for both): do not delete it, put it back to the plain I0 rule, `hl.monitor({ output = "eDP-1", mode = "preferred", position = "auto", scale = 2 })` (remove `, cm = "srgb"` and the trailing comment), then run the installer. The installed block then holds the `cm = "srgb"` rule, which wins on a DCP boot.
+**After this is merged, on the live Mac (user session, no sudo):** edit that line as above, then `bash "$REPO/linux/display/k114s-dcp-colour"`; `--check` must exit 0 before the next P9 or U1, which stop on a block that is missing or outdated (the live file has the older block without the `hl.monitor` line). `sudo bash "$REPO/linux/display/k114s-greeter-colour" --check` already passes for the hand-installed greeter state. T3a, T4a,
 D9a, C9, P9 and U1 stop when `--check` fails (nothing armed, nothing written; C9 writes no marker). P9 and U1 are there because an Omarchy
 migration rewrote `monitors.lua` once; U0's stop message says to look for migrations that rewrite it.
 

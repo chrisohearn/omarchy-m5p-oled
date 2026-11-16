@@ -136,7 +136,7 @@ fresh2() { # the Mac as window 1 left it (I0's files in place), the build area, 
   printf 'options appledrm fw27_panel_vrr=1\n' > "$W/usrmodprobe/aurora-m5-vrr.conf"; printf 'options appledrm fw27_panel_vrr=0\n' > "$W/modprobe/aurora-m5-vrr.conf"
   mkdir -p "$W/systemd/systemd-backlight@backlight:apple-panel-bl.service.d"; cp "$REPO_DIR/linux/brightness/systemd/k114s-first-boot.conf" "$W/systemd/systemd-backlight@backlight:apple-panel-bl.service.d/"
   printf 'hl.monitor({ output = "eDP-2", mode = "preferred", position = "auto", scale = 2 })\n' >> "$W/home/.config/hypr/monitors.lua"
-  HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" >/dev/null   # the DCP colour fix (section 4a), as the root installs it before boot 1
+  HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" >/dev/null   # the DCP colour fix (section 4a), as installed before boot 1
   rm -rf "$W/sddm"; mkdir -p "$W/sddm/usr/share/sddm" "$W/sddm/etc/sddm.conf.d"; printf -- '-- stock greeter\n' > "$W/sddm/usr/share/sddm/hyprland.lua"
   cp "$REPO_DIR/linux/gpu-desktop/70-k114s-greeter-software.conf" "$W/sddm/etc/sddm.conf.d/"; K114S_SDDM_ROOT=$W/sddm bash "$REPO_DIR/linux/display/k114s-greeter-colour" >/dev/null   # the greeter's guard, as the root installs it
   echo 500 > "$BLD/brightness"; echo 500 > "$BLD/actual_brightness"; echo 1000 > "$BLD/max_brightness"; echo platform > "$BLD/type"; echo linear > "$BLD/scale"; : > "$BLD/writes.log"
@@ -347,14 +347,14 @@ ok "D9c: the printed reboot line says STOP when N-acked-3 is missing or names ne
 ok "D9c: the first reboot is not scheduled by the block (the lead reads the output first)" "$(grep -c 'k114s-d9-reboot' "$W/calls")" 0
 FAKE_UNAME=$REL run <<< "$bD9c"; ok "D9c: a second run stops (P is no longer the configured state), nothing changed" "$rc $(echo "$out" | grep -c 'P is not the configured state')" "1 1"
 FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"; ok "P9 (with the fake boot-ctxr hashes): holds after D9c" "$rc $(echo "$out" | grep -c '^P9: ')" "0 1"
-closed "$W/esp/EFI/Linux"; FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"; reopen "$W/esp/EFI/Linux"
-ok "P9: with a root-only EFI/Linux (as on the Mac) the images are still listed and checked (a glob in the user's shell would pass a literal name)" "$rc $(echo "$out" | grep -c '^P9: ') $(echo "$out" | grep -c 'no .initrd section')" "0 1 0"
+rm -f "$W/objcopy-calls"; closed "$W/esp/EFI/Linux"; FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"; reopen "$W/esp/EFI/Linux"
+ok "P9: with a root-only EFI/Linux (as on the Mac) the images are still listed and checked (a glob in the user's shell would pass a literal name)" "$rc $(echo "$out" | grep -c '^P9: ') $(echo "$out" | grep -c 'no .initrd section') $(wc -l < "$W/objcopy-calls")" "0 1 0 2"
 ok "P9: prints this boot's kernel and the ESP free space" "$(echo "$out" | grep -c '^this boot: ') $(echo "$out" | grep -c '^ESP free: ')" "1 1"
 cp "$W/esp/EFI/Linux/omarchy_linux-k114s.efi" "$W/esp/EFI/Linux/omarchy_linux-aurora.efi"; run <<< "$bP9"; ok "P9: a third image (linux-aurora's came back) stops and names U1" "$rc $(echo "$out" | grep -c 'U1')" "1 1"; rm "$W/esp/EFI/Linux/omarchy_linux-aurora.efi"
 FAKE_INITRD=appledrm FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"; ok "P9: appledrm in an image's initramfs stops (G6 on every image, F16)" "$rc $(echo "$out" | grep -c 'appledrm or dcp-fabric-core is in the initramfs')" "1 1"
 rm "$W/mkinitcpio.conf.d/99-k114s-no-appledrm.conf"; run <<< "$bP9"; ok "P9: without the no-appledrm drop-in it stops (a rebuild would put appledrm back)" "$rc $(echo "$out" | grep -c 'G6a')" "1 1"; cp "$REPO_DIR/linux/99-k114s-no-appledrm.conf" "$W/mkinitcpio.conf.d/"
 rm "$W/home/.config/hypr/monitors.lua.k114s-dcp-colour.bak"; HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" --undo >/dev/null; FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"
-ok "P9: the colour fix gone from monitors.lua (a migration rewrote it) stops" "$rc $(echo "$out" | grep -c 'colour fix is gone')" "1 1"; HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" >/dev/null
+ok "P9: the colour fix gone from monitors.lua (a migration rewrote it) stops" "$rc $(echo "$out" | grep -c 'colour fix is missing or outdated')" "1 1"; HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" >/dev/null
 K114S_SDDM_ROOT=$W/sddm bash "$REPO_DIR/linux/display/k114s-greeter-colour" --undo >/dev/null; FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"
 ok "P9: without the greeter's colour guard it stops and names the installer" "$rc $(echo "$out" | grep -c 'k114s-greeter-colour')" "1 1"; K114S_SDDM_ROOT=$W/sddm bash "$REPO_DIR/linux/display/k114s-greeter-colour" >/dev/null
 sed -i '/dcp_fabric_core/d' "$W/mkinitcpio.conf.d/99-k114s-no-appledrm.conf"; FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"; ok "P9: a drop-in that lost its dcp_fabric_core line stops" "$rc $(echo "$out" | grep -c 'G6a')" "1 1"; cp "$REPO_DIR/linux/99-k114s-no-appledrm.conf" "$W/mkinitcpio.conf.d/"
@@ -453,7 +453,7 @@ u0pend foo /usr/bin/foo; ok "U0: and the default folder with every migration mar
 rm -rf "$mig"
 promote; hooks; rm -f "$W/state/pending"; run <<< "$bU0"; ok "U0: nothing pending (checkupdates exit 2) passes" "$rc" 0
 promote; hooks; run <<< "$bU0"; ok "U0: the before-record is written (the Stage 2, the pins, m1n1-ctxr.bin, the images, the entries)" "$rc $(echo "$out" | grep -c '^U0: before-record') $(grep -c 'm1n1-ctxr' "$D/before-update.txt" | head -1)" "0 1 1"
-HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" --undo >/dev/null; run <<< "$bU1"; ok "U1: the colour fix gone from monitors.lua stops" "$rc $(echo "$out" | grep -c 'colour fix is gone')" "1 1"; HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" >/dev/null
+HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" --undo >/dev/null; run <<< "$bU1"; ok "U1: the colour fix gone from monitors.lua stops" "$rc $(echo "$out" | grep -c 'colour fix is missing or outdated')" "1 1"; HOME=$W/home bash "$REPO_DIR/linux/display/k114s-dcp-colour" >/dev/null
 run <<< "$bU1"; ok "U1: no change: no third image, no stray file, the diff is empty" "$rc $(echo "$out" | grep -c 'no boot file changed') $(echo "$out" | grep -c '^U1: ')" "0 1 1"
 cp "$W/esp/EFI/Linux/omarchy_linux-k114s.efi" "$W/esp/EFI/Linux/omarchy_linux-aurora.efi"; run <<< "$bU1"; ok "U1: a returned linux-aurora image stops and prints the fix (the removal and the check of r3a's image), nothing is changed by the block" "$rc $(echo "$out" | grep -c 'limine-entry-tool --remove-uki linux-aurora') $(echo "$out" | grep -c "r3a's image") $(test -e "$W/esp/EFI/Linux/omarchy_linux-aurora.efi"; echo $?)" "1 1 3 0"; rm "$W/esp/EFI/Linux/omarchy_linux-aurora.efi"
 : > "$W/esp/EFI/Linux/omarchy_linux-k114s.efi.tmp"; run <<< "$bU1"; ok "U1: a stray temporary file on the ESP stops" "$rc $(echo "$out" | grep -c 'temporary file')" "1 1"; rm "$W/esp/EFI/Linux/omarchy_linux-k114s.efi.tmp"

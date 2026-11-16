@@ -36,7 +36,16 @@ printf '#!/bin/sh\n[ "$1" = -r ] && { echo "${FAKE_UNAME:-7.3.0-17.v272-4-k114s-
 printf '#!/bin/sh\necho "Avail"; echo "${FAKE_FREE:-190300000}"\n' > "$BIN/df"
 printf '#!/bin/sh\necho "check-package: ${FAKE_CHECK:-all passed}"\n' > "$BIN/check-package"
 printf '#!/bin/sh\necho "reboot-scheduled $*" >> "$FAKE_W/calls"\nexit 0\n' > "$BIN/systemd-run"
-printf '#!/bin/sh\nfor a; do case $a in .initrd=*) echo initrd > "${a#.initrd=}" ;; esac; done\nexit 1\n' > "$BIN/objcopy"   # exits 1 as the real one does on a UKI
+# objcopy --dump-section .initrd=OUT IMAGE /dev/null: like the real one it fails and writes nothing when IMAGE is not readable (a glob a
+# root-only folder left unexpanded is a literal name); it logs each readable IMAGE to $FAKE_W/objcopy-calls; exits 1 as the real one does on a UKI
+cat > "$BIN/objcopy" <<'SH'
+#!/bin/sh
+for a; do case $a in -*|.initrd=*) ;; *) [ -n "${img:-}" ] || img=$a ;; esac; done
+[ -r "${img:-}" ] || exit 1
+echo "$img" >> "$FAKE_W/objcopy-calls"
+for a; do case $a in .initrd=*) echo initrd > "${a#.initrd=}" ;; esac; done
+exit 1
+SH
 # lsinitcpio: a module list without appledrm unless FAKE_INITRD=appledrm
 cat > "$BIN/lsinitcpio" <<'SH'
 #!/bin/sh

@@ -26,4 +26,11 @@ out=$(bash "$S" --undo 2>&1); ok "undo twice is a no-op" "$? $(sum "$C")" "0 $co
 rm "$C"; bash "$S" >/dev/null 2>&1; ok "no conf: refuses and creates nothing" "$? $(ls "$K114S_SDDM_ROOT/etc/sddm" 2>/dev/null | wc -l)" "1 0"
 cp "$L/gpu-desktop/70-k114s-greeter-software.conf" "$C"; rm "$ST"; bash "$S" >/dev/null 2>&1; ok "no stock file: refuses, the conf is unchanged" "$? $(sum "$C")" "1 $conf0"
 bash "$S" --bogus >/dev/null 2>&1; ok "an unknown option fails" $? 1
+# the state the root left by hand on 2026-11-15: the copy (stock plus the exact guard) in place, the conf already pointed at it, no .bak
+printf -- '-- stock greeter\nhl.config({ general = {} })\n' > "$ST"; rm -rf "$K114S_SDDM_ROOT/etc/sddm" "$C".*
+mkdir -p "$K114S_SDDM_ROOT/etc/sddm"; { cat "$ST"; printf '\n-- K114s DCP boots: Hyprland colour management blanks the OLED (betizzel/omarchy-m5#21)\nif os.getenv("ASAHI_M5_BRINGUP") == "1" then hl.config({ render = { cm_enabled = false } }) end\n'; } > "$MY"
+sed 's#--config /usr/share/sddm/hyprland.lua#--config /etc/sddm/hyprland-k114s.lua#' "$L/gpu-desktop/70-k114s-greeter-software.conf" > "$C"; hand=$(sum "$C")$(sum "$MY")
+bash "$S" --check >/dev/null 2>&1; ok "hand-installed state: --check passes" $? 0
+out=$(bash "$S" 2>&1); ok "hand-installed state: --install says already installed, changes no byte and makes no .bak" "$? $(echo "$out" | grep -c 'already installed') $(sum "$C")$(sum "$MY") $(ls "$C".* 2>/dev/null | wc -l)" "0 1 $hand 0"
+bash "$S" --undo >/dev/null 2>&1; ok "hand-installed state: --undo points the conf back at the stock file and removes the copy" "$(grep -c -F -- '--config /usr/share/sddm/hyprland.lua' "$C") $(grep -c -F -- '--config /etc/sddm/hyprland-k114s.lua' "$C") $(test -e "$MY"; echo $?)" "1 0 1"
 finish "greeter colour tests"
