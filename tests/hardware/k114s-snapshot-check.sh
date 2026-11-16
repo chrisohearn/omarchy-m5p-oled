@@ -2,12 +2,12 @@
 # K114s snapshot-boot checks for the owner to run on the Mac. See docs/r3-snapshot-boot.md (issue #68).
 #
 #   sudo k114s-snapshot-check.sh status     read-only: ESP budget, Limine snapshot entries, which snapshots
-#                                           carry the installed kernels, whether Limine could honour a
-#                                           boot-menu request
+#                                           carry the installed kernels, what Limine advertises for
+#                                           boot-menu requests (bootctl)
 #   k114s-snapshot-check.sh budget TOTAL USED UKI...   pure arithmetic (bytes); no system access
 #   sudo k114s-snapshot-check.sh after      run AFTER booting a Snapshots entry: says whether this boot is
 #                                           a snapshot boot and whether the overlay is in place
-#   sudo k114s-snapshot-check.sh after-menu run after 'systemctl reboot --boot-loader-menu': says which
+#   sudo k114s-snapshot-check.sh after-menu run after 'systemctl reboot --boot-loader-menu=0': says which
 #                                           entry booted (an unattended default boot means it was ignored)
 #
 # Nothing here writes anything. The output holds no serial numbers, addresses or network names.
@@ -36,12 +36,12 @@ status() {
   [ "$(id -u)" -eq 0 ] || { echo "run with sudo (the ESP is root-only)"; return 1; }
   read -r total used < <(df -B1 --output=size,used "$esp" | tail -1)
   echo "== Limine snapshot entries"
-  if grep -q '^/Snapshots' "$conf"; then grep -c '^  //' "$conf" | sed 's/^/entries under Snapshots or OS: /'; else echo "no Snapshots section in limine.conf"; fi
+  if grep -q '^/Snapshots' "$conf"; then awk '/^\//{s=($0 ~ /^\/Snapshots/)} s && /^  \//{n++} END{print "entries under Snapshots: " n+0}' "$conf"; else echo "no Snapshots section in limine.conf"; fi
   echo "== UKIs on the ESP"
   # shellcheck disable=SC2046
-  ukis=$(find "$esp" -name '*.efi' -path '*Linux*' -o -name '*.efi' -path '*limine_history*' 2>/dev/null)
   sizes=()
-  for u in $ukis; do s=$(stat -c %s "$u"); echo "$(basename "$u") $s"; sizes+=("$s"); done
+  for u in $(find "$esp" -name '*.efi' -path '*Linux*' -not -path '*limine_history*' 2>/dev/null); do s=$(stat -c %s "$u"); echo "kernel $(basename "$u") $s"; sizes+=("$s"); done
+  for u in $(find "$esp" -name '*.efi' -path '*limine_history*' 2>/dev/null); do echo "snapshot (already counted in used) $(basename "$u") $(stat -c %s "$u")"; done
   echo "== budget if every current kernel UKI were copied once"
   budget "$total" "$used" "${sizes[@]}"
   echo "== snapshots versus installed kernels (first 12 hex of sha256)"
@@ -55,6 +55,8 @@ status() {
       echo "  $(basename "$(dirname "$k")") $h same as /boot: $m"
     done
   done
+  echo "== Limine boot-menu support (bootctl)"
+  bootctl status --no-pager 2>/dev/null | grep -E 'Product:|One-shot menu timeout' || echo "bootctl reports nothing"
   echo "== EFI variables saved across reset (efi-vars service)"
   systemctl is-active omarchy-mac-efi-vars
   ls /sys/firmware/efi/efivars | grep -E '^(RTStorageVolatile|VarToFile)' || echo "missing"

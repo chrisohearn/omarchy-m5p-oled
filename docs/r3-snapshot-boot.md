@@ -49,10 +49,12 @@ The 2026-11-14 incident (a pruned snapshot UKI, `incident-2026-11-14-edge-refres
 
 ## Boot-menu request (model, to verify)
 
-`systemctl reboot --boot-loader-menu` writes `LoaderConfigTimeoutOneShot`, which systemd-boot reads. Limine is not
-systemd-boot and, to my knowledge, ignores it, so it may only reboot and boot the default (`Omarchy/linux-k114s`).
-The efi-vars service only makes variables survive a reset; it does not make Limine read them. Unverified until the owner
-step below. Limine's own menu is reachable by holding a key at the 5-second timeout (`timeout: 5`).
+`systemctl reboot --boot-loader-menu=0` writes `LoaderConfigTimeoutOneShot` (the value is a time; 0 shows the menu with no
+timeout, `=30s` counts down 30 seconds and then boots the default). A bare `--boot-loader-menu` is an error on systemd 262.
+Limine advertises support: a read-only `bootctl status` shows Limine 12.9.6 with LoaderFeatures that include "One-shot menu
+timeout control", "Menu timeout control", "Default entry control" and "One-shot entry control". Still unverified: that the
+efi-vars service keeps the variable across the reset. The owner step below tests exactly that. Without it, Limine's own menu
+is reachable by holding a key at the 5-second timeout (`timeout: 5`).
 
 ## Left
 
@@ -63,8 +65,8 @@ free ESP to model against, and the replica route for limine-snapper-sync was not
 ## Owner steps (agent cannot do: needs reboot and a screen)
 
 1. Menu request, safe (default boots anyway), now:
-   `systemctl reboot --boot-loader-menu`
-   After it: `sudo bash tests/hardware/k114s-snapshot-check.sh after-menu`. Report whether Limine's menu showed.
+   `systemctl reboot --boot-loader-menu=0`
+   After it: `sudo bash tests/hardware/k114s-snapshot-check.sh after-menu`. Report whether Limine's menu showed (with a timeout value it counts down, then boots).
 2. Snapshot boot, only after the ESP has room and a Snapshots entry for snapshot 3 or 4 exists (check:
    `sudo bash tests/hardware/k114s-snapshot-check.sh status`). Keep the power button ready to force off; pick the default
    entry on the next boot. After the boot: `sudo bash tests/hardware/k114s-snapshot-check.sh after`. Do not click "Restore".
