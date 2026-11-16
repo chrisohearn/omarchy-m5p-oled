@@ -443,6 +443,22 @@ Not done here: G2's measurement, the D5a install and UKI rebuild, the drop-in in
 with the owner, in the second window (4.4). The D5a rebuild runs from a boot on P's Stage 2 (section 12, `appledrm` and
 the initramfs).
 
+### 5.3 Result of the display window, boot 1 (2026-11-15)
+
+The internal display runs on the DCP (`appledrm`) at 3024x1986, 120 Hz, in the D5-D9 window (`docs/r3-display-d5-d9.md`,
+section 4a). The black screens of earlier DCP boots were Hyprland colour management (`render:cm_enabled`), not the hand-off;
+`linux/display/k114s-dcp-colour` adds `cm_enabled = false` only when `ASAHI_M5_BRINGUP=1`. T2 had been agent-checked only.
+
+| Stage | Result | Label |
+| --- | --- | --- |
+| D4 picture (DCP, 3024x1986, 120 Hz) | seen with colour management off; black with it on | owner-observed |
+| D5 brightness | ladder read back; the panel dimmed and recovered | agent-run, owner-observed |
+| D7 DPMS | off and on three times | owner-observed |
+| D8 night light | on and off, no DCP crash; the warming is not recorded | agent-run |
+| Look | colours normal, text sharp, movement smooth; the notch covered some text (cutout overlay now installed) | owner-observed |
+| D6 VRR | not yet run (boot 2) | unknown |
+| G6b | stopped: an initramfs from this boot contains `appledrm` (blocks D9, F16) | agent-run |
+
 ## 6. Device-tree nodes (display tree)
 
 Everything stays `disabled` in the tree. The loader enables it only after its ADT, DT and DART checks pass. source-read

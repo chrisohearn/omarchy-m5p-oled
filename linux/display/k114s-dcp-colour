@@ -1,0 +1,31 @@
+#!/bin/bash
+# Add (or remove) the DCP colour-management fix in the user's Hyprland monitors.lua. User session only: no sudo, no reload.
+#   usage: k114s-dcp-colour [--install | --undo | --check]       (default --install)
+#   K114S_HYPR_DIR overrides ~/.config/hypr (the tests use it).
+# The snippet (dcp-colour.lua beside this script) is appended between two marker lines. Install is idempotent, keeps the file as it
+# was before the first install in monitors.lua.k114s-dcp-colour.bak, and replaces a changed block. The snippet does nothing unless
+# ASAHI_M5_BRINGUP=1, which the generator sets only on a boot with the DCP card. Hyprland reads the file at its next start.
+set -u
+here=$(cd "$(dirname "$0")" && pwd); snip=$here/dcp-colour.lua
+f=${K114S_HYPR_DIR:-$HOME/.config/hypr}/monitors.lua; bak=$f.k114s-dcp-colour.bak
+B='-- k114s-dcp-colour begin'; E='-- k114s-dcp-colour end'
+die() { echo "k114s-dcp-colour: $*" >&2; exit 1; }
+[ -s "$snip" ] || die "no $snip"
+[ -f "$f" ] || die "no $f (Omarchy's monitors.lua)"
+block() { awk -v b="$B" -v e="$E" 'index($0, b) == 1 { p = 1 } p { print } p && index($0, e) == 1 { p = 0 }' "$1"; }
+strip() { awk -v b="$B" -v e="$E" 'index($0, b) == 1 { p = 1 } !p { print } p && index($0, e) == 1 { p = 0 }' "$1"; }
+installed() { [ -n "$(block "$f")" ] && [ "$(block "$f")" = "$(cat "$snip")" ]; }
+put() { t=$(mktemp "$f.XXXXXX") || exit 1; cat > "$t" && chmod --reference="$f" "$t" && mv "$t" "$f" || { rm -f "$t"; die "cannot write $f"; }; }
+case ${1:---install} in
+  --check) installed && echo "k114s-dcp-colour: installed in $f" || die "not installed in $f" ;;
+  --install)
+    installed && { echo "k114s-dcp-colour: already installed"; exit 0; }
+    [ -e "$bak" ] || cp -p "$f" "$bak" || die "cannot keep a backup"
+    { strip "$f"; cat "$snip"; } | put; installed || die "the block is not in $f after the write"
+    echo "k114s-dcp-colour: installed in $f (backup $bak); no reload: Hyprland reads it at its next start" ;;
+  --undo)
+    [ -n "$(block "$f")" ] || { echo "k114s-dcp-colour: not installed"; exit 0; }
+    strip "$f" | put; [ -z "$(block "$f")" ] || die "the block is still in $f"
+    echo "k114s-dcp-colour: removed from $f (the first-install backup $bak stays)" ;;
+  *) die "usage: k114s-dcp-colour [--install | --undo | --check]" ;;
+esac
