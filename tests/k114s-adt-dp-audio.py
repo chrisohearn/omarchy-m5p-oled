@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""List the K114s ADT display-audio nodes (dp-audio0..N) against the merged T602x pattern.
+"""List the K114s ADT display-audio nodes (dp-audio0..N) against the merged J714s (T6050) pattern.
 
     sudo python3 tests/k114s-adt-dp-audio.py [--adt FILE]
 
@@ -9,12 +9,16 @@ Reuses the parser in tests/k114s-adt-display-facts.py.
 """
 import importlib.util
 import os
+import struct
 import sys
 
 here = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location("facts", os.path.join(here, "k114s-adt-display-facts.py"))
 facts = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(facts)
+
+
+USAGE = "usage: sudo python3 tests/k114s-adt-dp-audio.py [--adt FILE]"
 
 
 def walk(node, trail):
@@ -24,7 +28,10 @@ def walk(node, trail):
 
 
 def main(argv):
-    src = argv[1] if len(argv) > 1 and argv[0] == "--adt" else facts.find_adt_device()
+    if argv and not (len(argv) == 2 and argv[0] == "--adt"):
+        print(USAGE)
+        return 2
+    src = argv[1] if argv else facts.find_adt_device()
     if src is None:
         print("no ADT source; give --adt FILE")
         return 2
@@ -33,18 +40,31 @@ def main(argv):
     except PermissionError:
         print("run with sudo")
         return 2
-    root, _ = facts.parse_adt(blob)
+    try:
+        root, _ = facts.parse_adt(blob)
+    except (ValueError, struct.error) as err:
+        print("could not parse the ADT (%s)" % err)
+        return 1
+    by_phandle = {facts.u32s(t[-1].props["AAPL,phandle"])[0]: t[-1].name
+                  for t in walk(root, []) if len(t[-1].props.get("AAPL,phandle", b"")) == 4}
     for trail in walk(root, []):
         n = trail[-1]
         if not (n.name.startswith(("dp-audio", "dcpext", "admac-disp", "sio", "dart-sio"))):
             continue
-        full = trail
-        path = "/".join(x.name for x in full[1:])
+        path = "/".join(x.name for x in trail[1:])
         print("%s" % path)
         print("  compatible: %s" % facts.text(n.props.get("compatible")))
-        reg = facts.get_reg(full, 0) if "reg" in n.props and len(full) > 1 else None
+        reg = facts.get_reg(trail, 0) if "reg" in n.props and len(trail) > 1 else None
         print("  reg[0]: %s" % (("0x%x size 0x%x" % reg) if reg else "none"))
-        for key in ("audio", "dma-channels", "dma-parent", "power-gates", "clock-gates", "interrupts"):
+        dp = n.props.get("dma-parent")
+        if dp is not None:
+            # a name string on some ADTs, a phandle on others
+            if len(dp) == 4:
+                target = by_phandle.get(facts.u32s(dp)[0])
+                print("  dma-parent: %s" % (target or "phandle %d" % facts.u32s(dp)[0]))
+            else:
+                print("  dma-parent: %s" % facts.text(dp))
+        for key in ("audio", "dma-channels", "power-gates", "clock-gates", "interrupts"):
             if key in n.props and len(n.props[key]) % 4 == 0:
                 print("  %s: %s" % (key, facts.u32s(n.props[key])))
         print("  props: %s" % ", ".join(sorted(k for k in n.props)))
