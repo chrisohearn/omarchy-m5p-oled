@@ -39,6 +39,8 @@ out=$(run "$t/k114s" "$t/marker"); rc=$?
 ok "K114s, qualified: gate is open (next check runs)" "$rc:$(grep -c 'differs from the installed command' <<<"$out")" "1:1"
 out=$(run "$t/other" "$t/none"); rc=$?
 ok "another Mac: gate is open" "$rc:$(grep -c 'switched off' <<<"$out"):$(grep -c 'differs from the installed command' <<<"$out")" "1:0:1"
+err=$(env -i PATH=/usr/bin:/bin K114S_DT_COMPATIBLE="$t/missing" K114S_RESET_QUALIFIED="$t/none" bash "$f" </dev/null 2>&1 >/dev/null | grep -c -e "No such file")
+ok "no device tree: no 'No such file' on stderr" "$err" 0
 out=$(run "$t/missing" "$t/none"); rc=$?
 ok "no device tree (not an Apple Mac): gate is open" "$rc:$(grep -c 'switched off' <<<"$out")" "1:0"
 

@@ -13,8 +13,8 @@ m=json.load(sys.stdin)[0]; print(m["name"], m["width"], m["height"], m["scale"],
 info "internal panel: name mode(WxH) scale reserved = $mode"
 read -r name w h scale _ <<<"$mode"
 if python3 -I -c 'import json,sys
-w,h=int(sys.argv[1]),int(sys.argv[2])
-sys.exit(0 if any(abs(p["width"]-w)<=4 and abs(p["height"]-h)<=4 for p in json.load(open("/usr/share/omarchy-platform/display-cutouts.json"))["panels"]) else 1)' "$w" "$h"; then
+n,w,h=sys.argv[1],int(sys.argv[2]),int(sys.argv[3])
+sys.exit(0 if any(n.startswith(p.get("connector","\0")) and abs(p["width"]-w)<=4 and abs(p["height"]-h)<=4 for p in json.load(open("/usr/share/omarchy-platform/display-cutouts.json"))["panels"]) else 1)' "$name" "$w" "$h"; then
   ok "display-cutouts.json has an entry for ${w}x${h}"
 else
   case $name in eDP*) bad "no display-cutouts.json entry for ${w}x${h}: the bar has no notch floor (the DCP mode differs from 3024x1986; if the notch is hidden in this mode, no entry is right)" ;;

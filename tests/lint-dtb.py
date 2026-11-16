@@ -35,6 +35,7 @@ for f in sys.argv[1:]:
     want=[80] if b'pci106b,1900' in blob else []
     if b'cirrus,cs42l84' in blob: want+=[134,139]  # the jack codec's interrupt and reset (dts/t6050-k114s-sound.dtsi)
     if b'pci17a0,9755' in blob: want+=[81]  # the SD reader's PERST# (dts/t6050-k114s-sd.dtsi)
+    if b'apple,mesa-fingerprint' in blob: want+=[138]  # the Touch ID sensor's data-ready line (dts/t6050-k114s-touchid.dtsi)
     want.sort()
     if compat!='apple,k114s': print(f'FAIL {f}: root compatible {compat}'); bad+=1
     if exposed_ap is not None and exposed_ap!=want: print(f'FAIL {f}: AP pin controller exposes {exposed_ap}, expected {want}'); bad+=1

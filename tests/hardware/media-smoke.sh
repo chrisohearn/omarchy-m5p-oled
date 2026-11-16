@@ -20,7 +20,7 @@ capture=1 vkcube=0 chromium=0
 for a in "$@"; do
   case $a in
     --no-capture) capture=0 ;; --vkcube) vkcube=1 ;; --chromium) chromium=1 ;;
-    *) sed -n '2,18p' "$0"; exit 2 ;;
+    *) sed -n '2,16p' "$0"; exit 2 ;;
   esac
 done
 tmp=$(mktemp -d) || exit 2
