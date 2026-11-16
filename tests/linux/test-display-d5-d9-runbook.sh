@@ -145,6 +145,7 @@ b1() { export FAKE_PKGVER=7.3.0.r3b.b1-1; }
 session0() { # session 0 up to the stage given: w0 w1 i1b s5 (the gates record before I1b, as the runbook says)
   fresh2; run <<< "$bD9p" >/dev/null 2>&1; run <<< "$bW0"; [ "$1" = w0 ] && return; run <<< "$bW1"; [ "$1" = w1 ] && return
   gates; b1; run <<< "$bI1b"; [ "$1" = i1b ] && return; run <<< "$bS5"
+  for i in 1 2 3; do echo "N boot$i acked test (the owner is reachable)" > "$D/N-acked-$i"; done   # the lead's record of Jarvis's acknowledgement of N
 }
 boot() { # boot RELEASE TRIAL ENTRY UNAME_V: what a reboot leaves; the snapshot sync is back until block F
   export FAKE_UNAME=$1 FAKE_UNAME_V=${4:-K114S-R3B-B1}; rm -f "$W/efivars/LoaderEntryOneShot-$BLI" "$W/state/sync-stopped"; : > "$W/esp/ubootefi.var"
@@ -204,6 +205,8 @@ session0 s5; rm -r "$W/systemd/systemd-backlight@backlight:apple-panel-bl.servic
 session0 s5; mkdir -p "$W/klb"; : > "$W/klb/restore-enabled"; run <<< "$bT3a"; ok "T3a: with brightness restore turned on nothing is armed" "$rc $(echo "$out" | grep -c 'restore is turned on')" "1 1"
 session0 s5; echo 7.3.0.r3b-1 > "$W/state/r3b"; run <<< "$bT3a"; ok "T3a: the older r3b package installed stops (it is not b1)" "$rc $(ls "$W/efivars" | grep -c LoaderEntryOneShot)" "1 0"
 session0 s5; run <<< "$bT3a"; ok "T3a: the stay-awake mode is on and what it was is kept" "$rc $(test -e "$W/state/stay-awake"; echo $?) $(cat "$D/idle-before")" "0 0 false"
+session0 s5; : > "$W/state/stay-awake"; run <<< "$bT3a"; ok "T3a: a stay-awake mode that was on already (this Mac: the owner's own setting) is recorded as true and stays on" "$rc $(cat "$D/idle-before") $(test -e "$W/state/stay-awake"; echo $?)" "0 true 0"
+session0 s5; rm "$D/N-acked-1"; run <<< "$bT3a"; ok "T3a: without the acknowledgement of N (N-acked-1) nothing is armed and no reboot is scheduled" "$rc $(echo "$out" | grep -c 'N-acked-1') $(ls "$W/efivars" | grep -c LoaderEntryOneShot) $(grep -c 'k114s-d5-reboot' "$W/calls" 2>/dev/null)" "1 1 0 0"
 session0 s5; FAKE_IDLEFAIL=1 run <<< "$bT3a"; ok "T3a: a stay-awake mode that does not turn on stops, nothing armed" "$rc $(ls "$W/efivars" | grep -c LoaderEntryOneShot) $(sed -n 1p "$W/esp/aura-try")" "1 0 spent"
 session0 s5; echo junk >> "$W/esp/m1n1/boot-ctxr-disp-bl.bin"; run <<< "$bT3a"; ok "T3a: a trial file that is not the D5 Stage 2 stops" "$rc $(ls "$W/efivars" | grep -c LoaderEntryOneShot)" "1 0"
 session0 s5; sed -i '/eDP-2/d' "$W/home/.config/hypr/monitors.lua"; run <<< "$bT3a"; ok "T3a: without the eDP-2 rule nothing is armed" "$rc $(echo "$out" | grep -c 'eDP-1 and eDP-2 rules')" "1 1"
@@ -264,6 +267,7 @@ alld57; FAKE_UNAME=$REL run <<< "$bT4a"
 ok "T4a: exit 0, the mask is out and its copy kept, the one-shot names r3b, aura-try armed for the same file, the reboot scheduled" \
   "$rc $(test -e "$W/modprobe/aurora-m5-vrr.conf"; echo $?) $(grep -c 'fw27_panel_vrr=0' "$D/aurora-m5-vrr.conf.masked") $(tail -c +5 "$W/efivars/LoaderEntryOneShot-$BLI" | iconv -f UTF-16LE -t UTF-8 | tr -d '\0') $(sed -n 1,2p "$W/esp/aura-try" | tr '\n' ' ')$(grep -c 'unit=k114s-d6-reboot' "$W/calls")" \
   "0 1 1 Omarchy.linux-k114s-r3b armed m1n1/boot-ctxr-disp-bl.bin 1"
+alld57; rm "$D/N-acked-2"; FAKE_UNAME=$REL run <<< "$bT4a"; ok "T4a: without the acknowledgement of N (N-acked-2) nothing is armed, the mask stays and no reboot is scheduled" "$rc $(echo "$out" | grep -c 'N-acked-2') $(ls "$W/efivars" | grep -c LoaderEntryOneShot) $(test -e "$W/modprobe/aurora-m5-vrr.conf"; echo $?)" "1 1 0 0"
 alld57; rm "$D/D7-passed"; FAKE_UNAME=$REL run <<< "$bT4a"; ok "T4a: without D7 nothing is armed and the mask stays" "$rc $(test -e "$W/modprobe/aurora-m5-vrr.conf"; echo $?) $(ls "$W/efivars" | grep -c LoaderEntryOneShot)" "1 0 0"
 alld57; : > "$W/usrmodprobe/aurora-m5-vrr.conf"; FAKE_UNAME=$REL run <<< "$bT4a"; ok "T4a: an installed aurora-m5-vrr.conf that is not the J714s file stops, the mask stays" "$rc $(test -e "$W/modprobe/aurora-m5-vrr.conf"; echo $?)" "1 0"
 alld57; printf 'options appledrm fw27_panel_vrr=1\n# x\n' > "$W/modprobe/aurora-m5-vrr.conf"; FAKE_UNAME=$REL run <<< "$bT4a"; ok "T4a: a file that is not the mask is not touched" "$rc $(grep -c '# x' "$W/modprobe/aurora-m5-vrr.conf")" "1 1"
@@ -320,6 +324,8 @@ ok "D9c: the holds name linux-k114s-r3b, the chain declaration names the new def
 ok "D9c: D6 passed, so the mask file stays out; the after-record and limine.conf copy are kept; r3a's and r3b's images are unchanged" \
   "$(test -e "$W/modprobe/aurora-m5-vrr.conf"; echo $?) $(test -s "$D/after-d9.txt"; echo $?) $(cmp -s "$D/limine.conf.after-d9" "$W/esp/limine.conf"; echo $?) $(LC_ALL=C ls "$W/esp/EFI/Linux" | tr '\n' ' ')" "1 0 0 omarchy_linux-k114s-r3b.efi omarchy_linux-k114s.efi "
 ok "D9c: the P fallback files are still on the ESP (the way back from Linux and from macOS)" "$(sum "$W/esp/m1n1/boot-ctxr-r3-gpu.bin") $(sum "$W/esp/k114s-repair/promotion/k114s.dtb.gpu")" "$(sum "$W/fake/gpu.bin") $(sum "$W/fake/gpu.dtb")"
+ok "D9c: the printed reboot line names N-acked-3 and the owner or macOS agent check; the block schedules nothing" "$(echo "$out" | grep -c "N-acked-3.*owner|macos.*N-acked-3 && sudo systemd-run")" 1
+ok "D9c: the printed reboot line says STOP when N-acked-3 is missing or names neither" "$(echo "$out" | grep -c "systemctl reboot || echo 'STOP: no reboot scheduled")" 1
 ok "D9c: the first reboot is not scheduled by the block (the lead reads the output first)" "$(grep -c 'k114s-d9-reboot' "$W/calls")" 0
 FAKE_UNAME=$REL run <<< "$bD9c"; ok "D9c: a second run stops (P is no longer the configured state), nothing changed" "$rc $(echo "$out" | grep -c 'P is not the configured state')" "1 1"
 FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"; ok "P9 (with the fake boot-ctxr hashes): holds after D9c" "$rc $(echo "$out" | grep -c '^P9: ')" "0 1"
@@ -352,9 +358,13 @@ promote; dboot; ok "F on a D9 boot: the folder is named configured" "$rc $(basen
 ok "C9: passes with --expect published --floor --vrr on (D6 passed), writes its boot marker" "$rc $(grep -c 'display-check --expect published --floor --vrr on' "$W/calls") $(echo "$out" | grep -c '^C9: a clean default boot') $(ls "$D" | grep -c '^C9-passed-')" "0 1 1 1"
 ok "C9: holds the snapshot sync off while the hold marker exists" "$(test -e "$W/state/sync-stopped"; echo $?)" 0
 run <<< "$bD9x"; ok "D9x: refused after one clean boot" "$rc $(echo "$out" | grep -c 'fewer than two')" "1 1"
-dboot; FAKE_REPO=$FR run <<< "$bC9"; run <<< "$bD9x"
+dboot; FAKE_REPO=$FR run <<< "$bC9"; echo 'N boot1 acked' > "$D/N-acked-1"; run <<< "$bD9x"
 ok "D9x: exit 0 after two clean boots: PROMOTED, the sync started again, the hold and window markers gone, D9-done written" "$rc $(echo "$out" | grep -c 'D9x: PROMOTED') $(test -e "$W/state/sync-stopped"; echo $?) $(test -e "$D/sync-held"; echo $?) $(test -e "$D/window-open"; echo $?) $(test -s "$D/D9-done"; echo $?)" "0 1 1 1 1 0"
+ok "D9x: the notices' acknowledgements are removed, so a later window cannot reuse them" "$(ls "$D"/N-acked-* 2>/dev/null | grep -c .)" 0
 ok "D9x: the stay-awake mode that T3a turned on is back off (it was off before the window)" "$(test -e "$W/state/stay-awake"; echo $?)" 1
+promote; dboot; FAKE_REPO=$FR run <<< "$bC9"; dboot; FAKE_REPO=$FR run <<< "$bC9"; echo true > "$D/idle-before"; : > "$W/state/stay-awake"; run <<< "$bD9x"
+ok "D9x: with idle-before true (this Mac: on since 2026-11-14) the mode stays on, the block still passes and says to report it to Jarvis" "$rc $(echo "$out" | grep -c 'D9x: PROMOTED') $(test -e "$W/state/stay-awake"; echo $?) $(echo "$out" | grep -c 'stay-awake is still on.*Jarvis')" "0 1 0 1"
+promote; dboot; FAKE_REPO=$FR run <<< "$bC9"; dboot; FAKE_REPO=$FR run <<< "$bC9"; run <<< "$bD9x"
 run <<< "$bD9y"; ok "D9y: no sync run yet stops, benign, nothing changed" "$rc $(echo "$out" | grep -c 'benign')" "1 1"
 printf 'Boot usage limit reached: x\nStopping boot entry creation: Boot partition usage from 78.8%% to 109.3%% will exceed the 85.0%% limit.\nUpdated: %s/esp/limine.conf\n' "$W" > "$W/since"
 FAKE_SINCE=$W/since run <<< "$bD9y"; ok "D9y: after the sync's run, limine.conf is as D9c wrote it" "$rc $(echo "$out" | grep -c '^D9y: the snapshot sync ran (1)')" "0 1"
@@ -367,20 +377,67 @@ promote; dboot; FAKE_REPO=$FR FAKE_DCHECK=BAD run <<< "$bC9"; ok "C9: a BAD from
 promote; boot $REL "" Omarchy.linux-k114s; printf '1.0.0b13-g22b71758-dirty\0' > "$W/chosen/asahi,m1n1-stage2-version"; run <<< "$bF"; FAKE_REPO=$FR run <<< "$bC9"; ok "C9: Limine that started the r3a entry stops" "$rc $(echo "$out" | grep -c 'did not start Omarchy.linux-k114s-r3b')" "1 1"
 
 # --- the first update: U0 and U1 ----------------------------------------------------------------------------------------------------
-promote; printf 'foo 1-1 -> 1-2\n' > "$W/state/pending"; printf 'foo /usr/bin/foo\nfoo /usr/share/foo/x\n' > "$W/state/ql-foo"; run <<< "$bU0"
+hooks() { # the active hooks of the replica: /usr's copy (with modprobe.d and mdadm), the /etc override of 90-mkinitcpio-install (with dtbs, without modprobe.d), the Mac-boot hook, a remove hook and an unrelated one
+  mkdir -p "$W/hooks-etc" "$W/hooks-usr"
+  printf '[Trigger]\nType = Path\nOperation = Install\nOperation = Upgrade\nOperation = Remove\nTarget = usr/lib/initcpio/*\nTarget = usr/lib/firmware/*\nTarget = usr/lib/modprobe.d/\nTarget = usr/bin/mdadm\n\n[Trigger]\nType = Path\nOperation = Install\nOperation = Upgrade\nTarget = usr/lib/modules/*/vmlinuz\n\n[Trigger]\nType = Package\nOperation = Install\nOperation = Upgrade\nTarget = mkinitcpio\n\n[Action]\nWhen = PostTransaction\nExec = /usr/share/libalpm/scripts/mkinitcpio install\nNeedsTargets\n' > "$W/hooks-usr/90-mkinitcpio-install.hook"
+  printf '[Trigger]\nType = Path\nOperation = Install\nOperation = Upgrade\nOperation = Remove\nTarget = usr/lib/initcpio/*\nTarget = usr/lib/firmware/*\nTarget = boot/dtbs/*\nTarget = usr/bin/cryptsetup\n\n[Trigger]\nType = Path\nOperation = Install\nOperation = Upgrade\nTarget = usr/lib/modules/*/vmlinuz\n\n[Trigger]\nType = Package\nOperation = Install\nOperation = Upgrade\nTarget = mkinitcpio\nTarget = mkinitcpio-git\n\n[Action]\nWhen = PostTransaction\nExec = /usr/share/libalpm/scripts/limine-apple-gate /usr/share/libalpm/scripts/limine-mkinitcpio-install\nNeedsTargets\n' > "$W/hooks-etc/90-mkinitcpio-install.hook"
+  printf '[Trigger]\nType = Path\nOperation = Upgrade\nTarget = etc/initcpio/install/*\nTarget = usr/lib/omarchy/initcpio/*\n\n[Action]\nWhen = PostTransaction\nExec = /usr/share/libalpm/scripts/mkinitcpio install\n' > "$W/hooks-usr/91-omarchy-mac-boot-initramfs.hook"
+  printf '[Trigger]\nType = Path\nOperation = Remove\nTarget = usr/lib/removeonly/*\n\n[Action]\nWhen = PreTransaction\nExec = /usr/share/libalpm/scripts/mkinitcpio remove\n' > "$W/hooks-usr/60-mkinitcpio-remove.hook"
+  printf '[Trigger]\nType = Path\nOperation = Upgrade\nTarget = usr/lib/unrelated/*\n\n[Action]\nWhen = PostTransaction\nExec = /usr/bin/true\n' > "$W/hooks-usr/30-unrelated.hook"
+}
+u0pend() { printf '%s 1-1 -> 1-2\n' "$1" > "$W/state/pending"; printf '%s %s\n' "$1" "$2" > "$W/state/ql-$1"; run <<< "$bU0"; }
+promote; hooks; printf 'foo 1-1 -> 1-2\n' > "$W/state/pending"; printf 'foo /usr/bin/foo\nfoo /usr/share/foo/x\n' > "$W/state/ql-foo"; run <<< "$bU0"
 ok "U0: a pending package that triggers no rebuild passes and says so" "$rc $(echo "$out" | grep -c '^U0: 1 pending packages, none triggers')" "0 1"
 rm -f "$D/before-update.txt"; printf 'foo 1-1 -> 1-2\nmkinitcpio 40-1 -> 41-1\n' > "$W/state/pending"; run <<< "$bU0"
-ok "U0: a pending mkinitcpio stops before anything is recorded (F8) and names the package" "$rc $(echo "$out" | grep -c 'trigger the rebuild of every image.*mkinitcpio') $(test -e "$D/before-update.txt"; echo $?)" "1 1 1"
-printf 'baz 1-1 -> 1-2\n' > "$W/state/pending"; printf 'baz /usr/lib/firmware/baz/blob.bin\n' > "$W/state/ql-baz"; run <<< "$bU0"
-ok "U0: a package that ships files under usr/lib/firmware stops too" "$rc $(echo "$out" | grep -c 'rebuild of every image.*baz')" "1 1"
-printf 'qux 1-1 -> 1-2\n' > "$W/state/pending"; printf 'qux /usr/lib/modprobe.d/qux.conf\n' > "$W/state/ql-qux"; run <<< "$bU0"; ok "U0: a modprobe.d file is a trigger" "$rc" 1
-rm -f "$W/state/pending"; run <<< "$bU0"; ok "U0: nothing pending (checkupdates exit 2) passes" "$rc" 0
-promote; run <<< "$bU0"; ok "U0: the before-record is written (the Stage 2, the pins, m1n1-ctxr.bin, the images, the entries)" "$rc $(echo "$out" | grep -c '^U0: before-record') $(grep -c 'm1n1-ctxr' "$D/before-update.txt" | head -1)" "0 1 1"
+ok "U0: a pending mkinitcpio (a Package target of the active hook) stops before anything is recorded (F8) and names the package" "$rc $(echo "$out" | grep -c 'trigger the rebuild of every image.*mkinitcpio') $(test -e "$D/before-update.txt"; echo $?)" "1 1 1"
+u0pend baz /usr/lib/firmware/baz/blob.bin; ok "U0: a package that ships files under usr/lib/firmware stops too" "$rc $(echo "$out" | grep -c 'rebuild of every image.*baz')" "1 1"
+u0pend qux /usr/lib/modprobe.d/; ok "U0: a modprobe.d file is no trigger while the /etc hook overrides the /usr one (the active hook has no such line)" "$rc" 0
+u0pend dtb /boot/dtbs/x.dtb; ok "U0: a boot/dtbs file stops (a trigger line only the /etc override has)" "$rc $(echo "$out" | grep -c 'rebuild of every image.*dtb')" "1 1"
+u0pend omx /usr/lib/omarchy/initcpio/hooks/y; ok "U0: a path trigger of a second active hook (the Mac-boot one) stops" "$rc" 1
+u0pend rem /usr/lib/removeonly/z; ok "U0: a hook that only removes (Exec mkinitcpio remove) and an unrelated hook add no trigger" "$rc $(u0pend unr /usr/lib/unrelated/z >/dev/null; echo $rc)" "0 0"
+rm "$W/hooks-etc/90-mkinitcpio-install.hook"; u0pend qux /usr/lib/modprobe.d/; ok "U0: with no /etc override the /usr hook's lines apply (modprobe.d is a trigger)" "$rc" 1
+u0pend dtb /boot/dtbs/x.dtb; ok "U0: and a boot/dtbs file is no trigger of the /usr hook" "$rc" 0
+rm -rf "$W/hooks-etc" "$W/hooks-usr"; u0pend foo /usr/bin/foo; ok "U0: no active mkinitcpio hook found stops (the trigger list is unknown)" "$rc $(echo "$out" | grep -c 'trigger list is unknown')" "1 1"
+hooks
+mig=$W/migrations; mst=$W/home/.local/state/omarchy/migrations; rm -rf "$mig" "$mst"; mkdir -p "$mig" "$mst"; : > "$mig/old.sh"; : > "$mst/old.sh"
+mkpkg() { d=$W/state/pkg-$1/usr/share/omarchy/migrations; mkdir -p "$d"; shift; for m; do echo "${m#*=}" > "$d/${m%%=*}"; done; }
+rm -f "$D/before-update.txt"; mkpkg omarchy-dev 'old.sh=sudo limine-mkinitcpio' 'new1.sh=[ -e /x ] || exit 0; sudo limine-mkinitcpio' 'new2.sh=echo hello'
+u0pend omarchy-dev /usr/share/omarchy/migrations/old.sh
+ok "U0: every new migration stops, the one that calls limine-mkinitcpio and the harmless-looking one alike (named, kept in \\$D for reading, nothing recorded); the one already run (its marker) does not" "$rc $(echo "$out" | grep -c 'new1.sh') $(echo "$out" | grep -c 'new2.sh') $(echo "$out" | grep -c 'old.sh') $(test -s "$D/migration-pending-new1.sh"; echo $?) $(test -s "$D/migration-pending-new2.sh"; echo $?) $(test -e "$D/before-update.txt"; echo $?)" "1 1 1 0 0 0 1"
+mkpkg omarchy-dev 'old.sh=sudo limine-mkinitcpio' 'new4.sh=omarchy-hibernation-setup'; u0pend omarchy-dev /usr/share/omarchy/migrations/old.sh
+ok "U0: a new migration that reaches the rebuild through a helper (no rebuild command by name) stops" "$rc $(echo "$out" | grep -c 'new4.sh')" "1 1"
+mkpkg omarchy-dev 'old.sh=sudo limine-mkinitcpio' 'new5.sh=omarchy-pkg-drop yt6801-dkms'; u0pend omarchy-dev /usr/share/omarchy/migrations/old.sh
+ok "U0: a new migration that drops a package (a pacman transaction checkupdates never lists) stops" "$rc $(echo "$out" | grep -c 'new5.sh')" "1 1"
+rm -rf "$W/state/pkg-omarchy-dev"; mkpkg omarchy-dev 'old.sh=sudo limine-mkinitcpio' 'new1.sh=[ -e /x ] || exit 0; sudo limine-mkinitcpio' 'new2.sh=echo hello'
+for m in new1.sh new2.sh; do echo "read: its gate exits on a Mac without the J-board marker" > "$D/migration-ok-$m"; done; run <<< "$bU0"
+ok "U0: once the lead has recorded every new migration as read, U0 passes and the record is written" "$rc $(echo "$out" | grep -c 'migrations of omarchy-dev were read') $(test -s "$D/before-update.txt"; echo $?)" "0 1 0"
+rm -f "$D/before-update.txt"; echo 'sudo limine-mkinitcpio' > "$mig/pend.sh"; u0pend omarchy-dev /usr/share/omarchy/migrations/old.sh
+ok "U0: an installed migration with no marker (it failed or has not run, so the update runs it) stops too, and its record releases it" "$rc $(echo "$out" | grep -c 'pend.sh') $(test -s "$D/migration-pending-pend.sh"; echo $?) $(echo ok > "$D/migration-ok-pend.sh"; run <<< "$bU0"; echo $rc)" "1 1 0 0"
+rm -f "$mig/pend.sh" "$D/before-update.txt" "$D"/migration-ok-*; mkpkg omarchy-dev 'new3.sh=mkinitcpio -P' ; u0pend omarchy-dev /usr/share/omarchy/migrations/old.sh; ok "U0: mkinitcpio -P in a new migration stops too" "$rc $(echo "$out" | grep -c 'new3.sh')" "1 1"
+rm -rf "$W/state/pkg-omarchy-dev"; u0pend omarchy-dev /usr/share/omarchy/migrations/old.sh; ok "U0: a migration package that cannot be downloaded stops (its migrations are unread)" "$rc $(echo "$out" | grep -c 'could not be downloaded')" "1 1"
+rm -rf "$W/state/pkg-omarchy-dev"; mkpkg zed 'new1.sh=limine-update'; u0pend zed "$W/migrations/old.sh"; ok "U0: a package that does not start with omarchy but ships migrations today is read too" "$rc $(echo "$out" | grep -c 'new1.sh')" "1 1"
+rm -rf "$mig"
+promote; hooks; rm -f "$W/state/pending"; run <<< "$bU0"; ok "U0: nothing pending (checkupdates exit 2) passes" "$rc" 0
+promote; hooks; run <<< "$bU0"; ok "U0: the before-record is written (the Stage 2, the pins, m1n1-ctxr.bin, the images, the entries)" "$rc $(echo "$out" | grep -c '^U0: before-record') $(grep -c 'm1n1-ctxr' "$D/before-update.txt" | head -1)" "0 1 1"
 run <<< "$bU1"; ok "U1: no change: no third image, no stray file, the diff is empty" "$rc $(echo "$out" | grep -c 'no boot file changed') $(echo "$out" | grep -c '^U1: ')" "0 1 1"
 cp "$W/esp/EFI/Linux/omarchy_linux-k114s.efi" "$W/esp/EFI/Linux/omarchy_linux-aurora.efi"; run <<< "$bU1"; ok "U1: a returned linux-aurora image stops and prints the fix (the removal and the check of r3a's image), nothing is changed by the block" "$rc $(echo "$out" | grep -c 'limine-entry-tool --remove-uki linux-aurora') $(echo "$out" | grep -c "r3a's image") $(test -e "$W/esp/EFI/Linux/omarchy_linux-aurora.efi"; echo $?)" "1 1 3 0"; rm "$W/esp/EFI/Linux/omarchy_linux-aurora.efi"
 : > "$W/esp/EFI/Linux/omarchy_linux-k114s.efi.tmp"; run <<< "$bU1"; ok "U1: a stray temporary file on the ESP stops" "$rc $(echo "$out" | grep -c 'temporary file')" "1 1"; rm "$W/esp/EFI/Linux/omarchy_linux-k114s.efi.tmp"
 head -c 2100 /dev/urandom > "$W/esp/EFI/Linux/omarchy_linux-k114s-r3b.efi"; run <<< "$bU1"; ok "U1: a rebuilt image shows as a diff (only its hash line), not as no change" "$rc $(echo "$out" | grep -c 'the diff above is the change')" "0 1"
 promote; run <<< "$bU1"; ok "U1: without U0's record it stops" "$rc" 1
+
+# --- the root-only scratch folders of G6b and P9 (the fake sudo closes a `sudo mktemp -d` folder to the plain user) -----------------------
+cat > "$W/oldform" <<'X'
+g=$(sudo mktemp -d "$FAKE_W/vartmp/x.XXXXXX") || exit 9
+sudo lsinitcpio /dev/null > "$g/list" 2>/dev/null; echo "old-redirect:$?"
+grep -c ko "$g/list" 2>/dev/null; echo "old-read:$?"
+sudo sh -c 'lsinitcpio "$1/x" > "$1/list" 2>/dev/null' _ "$g"; echo "sudo-redirect:$?"
+sudo grep -c ko "$g/list"; echo "sudo-read:$?"
+sudo rm -rf "$g"
+X
+run < "$W/oldform"
+ok "harness: a user-shell redirect or read into a sudo mktemp folder fails (the old G6b and P9 form), the sudo form works" "$(echo "$out" | grep -c 'old-redirect:[^0]') $(echo "$out" | grep -c 'old-read:2') $(echo "$out" | grep -c 'sudo-redirect:0') $(echo "$out" | grep -c 'sudo-read:0')" "1 1 1 1"
+ok "lint: no line of G6b or P9 writes or reads the root-only folder without sudo; the old lines would be caught" \
+  "$(printf '%s\n%s\n' "$bG6b" "$bP9" | grep -E '"\$[tg]/' | grep -v sudo | wc -l) $(printf '%s\n' 'sudo lsinitcpio "$g/initrd" > "$g/list"; grep -c x "$g/list"' | grep -E '"\$[tg]/' | grep -v -E 'sudo (grep|tail|rm|test)' | wc -l)" "0 1"
 
 # --- the abandon path: C1b, C2b, X, C4 (the first runbook's X and C4 with this window's \$D) ---------------------------------------
 session0 s5; run <<< "$bC1b"; ok "C1b: the trial file is off the ESP, its copy stays, m1n1/ as before the window" "$rc $(test -e "$W/esp/m1n1/boot-ctxr-disp-bl.bin"; echo $?) $(sum "$D/boot-ctxr-disp-bl.bin")" "0 1 $(sum "$W/fake/d5.bin")"

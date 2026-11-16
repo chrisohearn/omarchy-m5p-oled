@@ -94,8 +94,10 @@ go to the 1000-nit maximum: that is the owner's `Shift + brightness-up`. The lev
 locks, and the screensaver runs before that. The profile is two numbers in `~/.config/omarchy/shell.json`: `idle.screensaver`
 60 and `idle.lock` 120 (today 150 and 300), so a static desktop is at most two minutes lit. It hot-reloads. Reversible, so it
 is taken as the default (the lead tells Jarvis's inbox which values); the idle timing itself needs the owner (the lock cannot be
-unlocked by an agent), so the check is: the file, the reload, and the DPMS cycles of D7. **The profile only acts once the idle
-guard of F15 is off (D9x)**, because an unattended window keeps the session awake.
+unlocked by an agent), so the check is: the file, the reload, and the DPMS cycles of D7. **The profile only acts while the idle
+guard of F15 is off**: an unattended window keeps the session awake, and D9x puts the mode back as `idle-before` recorded. On this Mac
+that is **on** (the owner's own stay-awake setting since 2026-11-14), so the profile does not act after D9x unless the owner runs
+`omarchy-toggle-idle` (section 8).
 
 **F8. What fits on the ESP after D9: r3b.b1 (default) and r3a. The `linux-aurora` image stays off.** The ESP is 523,132,928
 bytes. The images are 79,253,504 (`linux-aurora`), 79,420,416 (r3a) and about 79,485,000 (r3b.b1: r3a's size plus 64 KiB, as the
@@ -125,14 +127,22 @@ guard cannot see this (it checks the free space before the transaction, 110 MB).
 a stray temporary file, or a short image, is unknown (the tool builds into a temporary file first, then `limine-entry-tool
 --add-uki` copies it; its failure mode was not read). So the runbook **prevents** it rather than detects it: U0 lists the pending upgrades before `omarchy update`
 (`checkupdates`, which syncs a throw-away copy of the databases and changes nothing) and stops when any of them would hit a
-rebuild-all trigger of `90-mkinitcpio-install.hook` or `90-mkinitcpio-apple-install.hook` (the package is `mkinitcpio`, or it
-ships files under `usr/lib/initcpio/`, `usr/lib/firmware/`, `usr/lib/modprobe.d/`, a kernel's `extramodules` or `vmlinuz`, or is
-`systemd`'s `systemd` or `systemd-udevd`, `cryptsetup`, `lvm`, `mdadm`, `pdata_tools` or one of three libraries). Those updates wait: no
+trigger of an active hook that runs `mkinitcpio` or `limine-mkinitcpio-install` (U0 reads the trigger lines of the hooks themselves:
+`/etc/pacman.d/hooks` first, then `/usr/share/libalpm/hooks`, a same-named `/etc` hook overriding the `/usr` one; a package that is a
+Package target, or that ships a file matching a Path target, stops it). Those updates wait: no
 pacman hold is added for them, and `omarchy update` is not run until the pre-transaction hook of section 7 exists, or the owner
-decides otherwise. The detection stays behind that as a net (U1, P9): a third image stops everything before the reboot, and the fix
+decides otherwise. A pending package that ships Omarchy migrations (`usr/share/omarchy/migrations/`: `omarchy-dev`, `omarchy-settings-dev`) is the
+second path: a migration that runs `limine-mkinitcpio` with no arguments rebuilds every image, outside pacman, so no hook sees it.
+Migrations reach a rebuild through helpers too (`omarchy-hibernation-setup` and `omarchy-keyboard-toprow` run
+`limine-mkinitcpio`), and through `omarchy-pkg-add`, `omarchy-pkg-drop` or `pacman -S`/`-R` (a transaction whose packages
+`checkupdates` never lists), so no text pattern is enough. U0 therefore downloads such a package into a throw-away cache (a
+throw-away database and cache folder; the real ones are never written) and stops on **every** migration that would run at the
+update, new in the package or installed with no marker in `omarchy-migrate`'s state folder, until the lead has read it (with the
+helpers it calls and the packages it adds or drops) and recorded in `$D` that it cannot rebuild every image on this Mac. The detection stays behind that as a net (U1, P9): a third image stops everything before the reboot, and the fix
 rebuilds and re-verifies r3a's image as well as removing the extra one (U1). **This remains the largest risk of the promoted
 layout** (section 8); the hook itself (a PreTransaction hook that refuses a rebuild-all while kernel module directories outnumber the
-images) is not part of this change.
+images) is not part of this change; it would catch a migration's pacman transaction but not a migration that calls
+`limine-mkinitcpio` directly or through a helper (that runs outside pacman).
 
 **F9. The Stage 2 hook is made to write the pin loader by a file, not by code.** `update-boot-ctxr-k114s` already reads the
 loader it writes from `/usr/lib/asahi-boot/m1n1-ctxr.bin` when that file exists (`m1n1_out`), and checks the existing
@@ -182,8 +192,10 @@ the wake-up, the screen can be locked and DPMS-off (the lock blanks the display 
 and an agent cannot unlock it. D7 would then stop on 'not lit', and D6's VRR run behind a lock would record a result about a
 dark panel, on which D9c removes the VRR mask. So T3a turns on Omarchy's stay-awake mode (`omarchy-toggle-idle stay-awake`: a state
 file in the home directory, so it holds from the login of every boot), after recording what it was (`$D/idle-before`). D5, D7, D8 and D6
-begin with `omarchy-shell lock isLocked` = `false`. D9x puts the mode back as it was; the abandon path does the same. The idle timing
-itself stays owner-observed (D7b).
+begin with `omarchy-shell lock isLocked` = `false`. D9x puts the mode back as it was; the abandon path does the same. **On this Mac
+the mode has been on since 2026-11-14 (the owner's own setting, not this window's: `omarchy-toggle-idle --status` reads `enabled`
+true), so T3a records `idle-before` = true and D9x leaves it on**; whether to allow idle afterwards is the owner's call (section 8).
+The idle timing itself stays owner-observed (D7b).
 
 **F16. G6 is checked on every image, every time.** The plan wants no `appledrm` in the initramfs after every UKI rebuild. I1b held it
 only because it ran from P, a boot with no display subsystem. After D9 every boot is on the display tree, and mkinitcpio's
@@ -206,8 +218,10 @@ is not guessed here, it is designed from the listing the block prints and proved
 - No write to `/sys/class/backlight/*/brightness` except the stepped writes of D5 (the ladder, the Omarchy steps) and the level
   put back; never 0; no `brightnessctl set 0`; no Alt + brightness-down held. A DPMS test uses `omarchy-brightness-display
   off` and `on` only.
-- Reboots and wake-ups: F14. **N, the notice to Jarvis's inbox before each of boots 1, 2 and 3** (the lead sends it before the
-  arm's reboot line, and arms the reboot only after Jarvis acknowledges it). It stands alone, with the thread link and the ledger
+- Reboots and wake-ups: F14. **N, the notice to Jarvis's inbox before each of boots 1, 2 and 3** (the lead sends it first, and records Jarvis's
+  acknowledgement with `echo 'N boot<n> acked <time> <Jarvis message>' | sudo tee "$D/N-acked-<n>"`; T3a (boot 1), T4a (boot 2) and
+  D9c's printed reboot line (boot 3) refuse to schedule the reboot without that file, and boot 3's line must also say that the owner or
+  the macOS agent is reachable). It stands alone, with the thread link and the ledger
   key: "Boot <n> of the K114s display window is armed for <time>. The Mac reports 'booted' (block T3b, T4b or C9 wrote its marker, and
   the lead posts it) by T+10 minutes. With no report by then, Chris must hold the Mac's power button until it is off, then start it
   (boot 1 and 2: that returns r3a or r3b on P and costs nothing; boot 3: the configured display Stage 2 may be the cause, and the way
@@ -438,6 +452,7 @@ Expected: the last line with about 106.0 million free. Undo: C1b.
     B5=90b351377d6fcbad00ddc4c2fb74fce4313dd7fa5f4978ba895a7c41be523e30; GPU=9825a10317866865b49d26bc1df2d0d04a818d385ca62c1a3ce81d96f3d6b8fc
     S2=m1n1/boot-ctxr-disp-bl.bin; bd='/etc/systemd/system/systemd-backlight@backlight:apple-panel-bl.service.d'
     [ ! -e /proc/device-tree/chosen/aurora,trial ] || stop "arm T3 from a boot on P; nothing is armed"
+    sudo test -s "$D/N-acked-1" || stop "the notice N for boot 1 is not acknowledged: the lead records it (echo 'N boot1 acked <time> <Jarvis message>' | sudo tee $D/N-acked-1); nothing is armed"
     sudo grep -q '^G0 confirmed' "$D/gates.txt" 2>/dev/null && sudo grep -q '^G4 accepted' "$D/gates.txt" || stop "$D/gates.txt has no 'G0 confirmed' or no 'G4 accepted' line (the gates record); nothing is armed"
     [ "$(systemctl is-active snapper-cleanup.timer limine-snapper-sync.service snapper-cleanup.service | sort -u)" = inactive ] || stop "the snapshot sync runs (E12): block C's stop lines first; nothing is armed"
     [ "$(pacman -Q linux-k114s-r3b)" = "linux-k114s-r3b 7.3.0.r3b.b1-1" ] || stop "r3b.b1 is not installed (I1b); nothing is armed"
@@ -604,10 +619,10 @@ stop; `$D/D7-passed` is then not written and D9a will not run. Undo: `omarchy-br
     [ -e "$f.bak.d7" ] || cp -p "$f" "$f.bak.d7" || stop "no copy of $f; nothing was changed"
     tmp=$(mktemp "$f.XXXXXX") && jq '.idle.screensaver = 60 | .idle.lock = 120' "$f" > "$tmp" && jq -e '.idle.screensaver == 60 and .idle.lock == 120' "$tmp" >/dev/null && mv -f "$tmp" "$f" || { rm -f "$tmp"; stop "the profile was not written; $f is unchanged"; }
     echo "D7b: idle screensaver 60 s and lock 120 s (the lock blanks the display 5 s later; was $(jq -c '.idle' "$f.bak.d7")); undo: cp -p $f.bak.d7 $f"
-    echo "owner-look D7b PENDING: after D9x (the stay-awake mode is off then): leave the desktop untouched for two minutes: screensaver, then lock, then the panel goes dark; wake it by a key and unlock" | sudo tee -a "$D/owner-look.txt" >/dev/null
+    echo "owner-look D7b PENDING: once the stay-awake mode is off (it is the owner's own setting, on since 2026-11-14; the owner runs omarchy-toggle-idle to allow idle): leave the desktop untouched for two minutes: screensaver, then lock, then the panel goes dark; wake it by a key and unlock" | sudo tee -a "$D/owner-look.txt" >/dev/null
     )
 
-Expected: the last line. The profile acts only once the stay-awake mode (F15) is off at D9x. The idle timing itself is not agent-checked (the lock cannot be unlocked by an agent).
+Expected: the last line. The profile acts only while the stay-awake mode (F15) is off; D9x restores it as `idle-before` recorded, which is on for this Mac, so the owner decides (section 8). The idle timing itself is not agent-checked (the lock cannot be unlocked by an agent).
 
 **D8. Night light (as the user, in the desktop; about 20 seconds). Agent-run: the toggle, hyprsunset's temperature, no crash.**
 Whether the picture warms is the owner's (pending line).
@@ -648,14 +663,15 @@ This is the prevention for F16: the build is what a rebuild in the promoted layo
     REL=7.3.0-17.v272-11-k114s-r3b-ARCH
     sudo test -s "$D/T3-booted" && [ "$(uname -r)" = $REL ] || stop "run G6b in the T3 boot, after T3b; nothing was changed"
     ls /sys/class/drm | grep -q -- '-eDP-' || stop "no eDP connector: this boot has no display subsystem, so a build here proves nothing about the promoted boots"
+    # the folder is root-only (an initramfs may hold disk-unlock material): every write into it and read from it runs under sudo, and nothing from the image is printed
     t=$(sudo mktemp -d /var/tmp/k114s-g6b.XXXXXX) || exit 1; trap 'sudo rm -rf "$t"' EXIT
-    sudo mkinitcpio -k $REL -g "$t/test.img" >"$t/build.log" 2>&1 || { tail -5 "$t/build.log"; stop "mkinitcpio could not build a test image (the log lines are above); nothing on the ESP was touched"; }
-    sudo lsinitcpio "$t/test.img" > "$t/list" 2>/dev/null; [ "$(grep -c '\.ko' "$t/list")" -ge 20 ] || stop "lsinitcpio lists no modules: cannot read the test image"
-    if [ "$(grep -c appledrm "$t/list")" != 0 ]; then
+    sudo sh -c 'mkinitcpio -k "$1" -g "$2/test.img" > "$2/build.log" 2>&1' _ $REL "$t" || { sudo tail -5 "$t/build.log"; stop "mkinitcpio could not build a test image (the log lines are above); nothing on the ESP was touched"; }
+    sudo sh -c 'lsinitcpio "$1/test.img" > "$1/list" 2>/dev/null' _ "$t"; [ "$(sudo grep -c '\.ko' "$t/list")" -ge 20 ] || stop "lsinitcpio lists no modules: cannot read the test image"
+    if [ "$(sudo grep -c appledrm "$t/list")" != 0 ]; then
       echo "G6b-failed $(date -Is): a display-tree build puts appledrm in the initramfs" | sudo tee "$D/G6b-failed" >/dev/null
-      stop "appledrm is in an initramfs built from this boot (F16): D9 stays blocked until a drop-in keeps it out and this block passes; the lead reads $t/build.log's hooks and the list before deciding"
+      stop "appledrm is in an initramfs built from this boot (F16): D9 stays blocked until a drop-in keeps it out and this block passes; the lead reads $t/build.log's hooks and the module names (sudo grep appledrm $t/list; never copy the image) before deciding"
     fi
-    echo "G6b $(date -Is): $(grep -c '\.ko' "$t/list") modules, no appledrm" | sudo tee "$D/G6b-passed" >/dev/null
+    echo "G6b $(date -Is): $(sudo grep -c '\.ko' "$t/list") modules, no appledrm" | sudo tee "$D/G6b-passed" >/dev/null
     echo "G6b: a build from a display-tree boot has no appledrm in its initramfs (the ESP and /boot were not touched)"
     )
 
@@ -674,6 +690,7 @@ Record `T3 PASSED` (D5, D7, D8, G6b) in the recovery log with the start level. T
     stop() { echo "STOP: $*"; exit 1; }
     B5=90b351377d6fcbad00ddc4c2fb74fce4313dd7fa5f4978ba895a7c41be523e30; GPU=9825a10317866865b49d26bc1df2d0d04a818d385ca62c1a3ce81d96f3d6b8fc
     S2=m1n1/boot-ctxr-disp-bl.bin; m=/etc/modprobe.d/aurora-m5-vrr.conf
+    sudo test -s "$D/N-acked-2" || stop "the notice N for boot 2 is not acknowledged: the lead records it (echo 'N boot2 acked <time> <Jarvis message>' | sudo tee $D/N-acked-2); nothing is armed"
     [ "$(omarchy-toggle-idle --status | jq -r .enabled)" = true ] || stop "the stay-awake mode (F15) is off: omarchy-toggle-idle stay-awake; nothing is armed"
     sudo test -s "$D/T3-booted" && sudo test -s "$D/D5-passed" && sudo test -s "$D/D7-passed" || stop "T3 has not passed (T3-booted, D5-passed, D7-passed in $D); nothing is armed"
     case $(uname -r) in 7.3.0-17.v272-11-k114s-r3b-ARCH | 7.3.0-17.v272-4-k114s-r3a-ARCH) ;; *) stop "an unexpected kernel; nothing is armed" ;; esac
@@ -891,7 +908,7 @@ T1), the loader file, `default_entry` (r3b.b1 on P's Stage 2: T1's configuration
     sudo $K check || stop "check is not clean: run the undo of D9c now; do not reboot"
     rec | sudo tee "$D/after-d9.txt" >/dev/null && sudo cp -p $c "$D/limine.conf.after-d9" && sudo chmod 600 "$D/limine.conf.after-d9" || stop "no after-record"
     sudo $K entries
-    echo "D9c: default Omarchy/linux-k114s-r3b, Stage 2 and pins the display files, the pin loader in m1n1-ctxr.bin, holds updated; ESP free $(df -B1 --output=avail /boot/efi | tail -1). Reboot (boot 3) only after the notice N is acknowledged with the owner or the macOS agent reachable: sudo systemd-run --on-active=15s --unit=k114s-d9-reboot systemctl reboot"
+    echo "D9c: default Omarchy/linux-k114s-r3b, Stage 2 and pins the display files, the pin loader in m1n1-ctxr.bin, holds updated; ESP free $(df -B1 --output=avail /boot/efi | tail -1). Reboot (boot 3) only after the lead has recorded the acknowledgement of the notice N in $D/N-acked-3, saying that the owner or the macOS agent is reachable; this line checks it: sudo grep -q -i -E 'owner|macos' $D/N-acked-3 && sudo systemd-run --on-active=15s --unit=k114s-d9-reboot systemctl reboot || echo 'STOP: no reboot scheduled: N-acked-3 is missing or does not say the owner or the macOS agent is reachable'"
     )
 
 Expected: `ok    default_entry is Omarchy/linux-k114s-r3b (entry 3, id Omarchy.linux-k114s-r3b, boots boot():/EFI/Linux/omarchy_linux-k114s-r3b.efi#...)`
@@ -958,8 +975,8 @@ Expected: the check with `default_entry is Omarchy/linux-k114s (entry 3, ...)` a
     g=$(sudo mktemp -d /var/tmp/k114s-p9.XXXXXX) || exit 1; trap 'sudo rm -rf "$g"' EXIT
     for i in /boot/efi/EFI/Linux/*.efi; do
       sudo objcopy --dump-section .initrd="$g/initrd" "$i" /dev/null 2>/dev/null; sudo test -s "$g/initrd" || stop "no .initrd section dumped from $i"
-      sudo lsinitcpio "$g/initrd" > "$g/list" 2>/dev/null; [ "$(grep -c '\.ko' "$g/list")" -ge 20 ] || stop "lsinitcpio lists no modules for $i"
-      [ "$(grep -c appledrm "$g/list")" = 0 ] || stop "appledrm is in the initramfs of $i (G6): do not reboot into it; section 4, U1 says what to rebuild"
+      sudo sh -c 'lsinitcpio "$1/initrd" > "$1/list" 2>/dev/null' _ "$g"; [ "$(sudo grep -c '\.ko' "$g/list")" -ge 20 ] || stop "lsinitcpio lists no modules for $i"
+      [ "$(sudo grep -c appledrm "$g/list")" = 0 ] || stop "appledrm is in the initramfs of $i (G6): do not reboot into it; section 4, U1 says what to rebuild"
       sudo rm -f "$g/initrd"
     done
     [ "$(sudo grep -E '^[[:blank:]]*/' $c | tr -d ' \t' | LC_ALL=C sort | tr '\n' ' ')" = "$(printf '%s\n' /+Omarchy //linux-k114s //linux-k114s-r3b | LC_ALL=C sort | tr '\n' ' ')" ] || stop "the menu is not exactly the folder, linux-k114s and linux-k114s-r3b (a Snapshots entry?)"
@@ -1048,15 +1065,17 @@ the DCP card (#25): the session is the check (the T2 and T3 boots reached Hyprla
     date +%s | sudo tee "$D/sync-restarted" >/dev/null
     sudo systemctl start snapper-cleanup.timer limine-snapper-sync.service || stop "the snapshot sync did not start: sudo systemctl start snapper-cleanup.timer limine-snapper-sync.service"
     systemctl is-active -q snapper-cleanup.timer && systemctl is-active -q limine-snapper-sync.service || stop "the snapshot sync is not active again"
-    sudo rm -f "$D/sync-held" "$D/window-open"
-    # F15: the stay-awake mode goes back as it was (the idle profile of D7b acts from now on); never leave an OLED awake and static
+    sudo rm -f "$D/sync-held" "$D/window-open" "$D"/N-acked-*   # the notices' acknowledgements belong to this window only
+    # F15: the stay-awake mode goes back as it was (on for this Mac: the owner's own setting since 2026-11-14), never changed beyond that
     [ "$(sudo cat "$D/idle-before" 2>/dev/null)" = true ] || omarchy-toggle-idle allow-idle >/dev/null
+    [ "$(sudo cat "$D/idle-before" 2>/dev/null)" = true ] && echo "D9x: stay-awake is still on (the owner's own setting): the OLED stays lit and static, with no idle lock or panel-off; put this in the report to Jarvis as a reversible decision, recommended default omarchy-toggle-idle allow-idle"
     echo "D9 $(date -Is)" | sudo tee "$D/D9-done" >/dev/null
     echo "D9x: PROMOTED. ESP free $now; the snapshot sync runs again; the display window is closed. In a minute: D9y"
     )
 
 Expected: `no boot file changed since D9c`, the check with `entry 3`, and `D9x: PROMOTED`. Record it in the recovery log. From here
-neither block F nor block C9 is run (see C9); the stay-awake mode is off (`omarchy-toggle-idle --status` reads `"enabled":false`).
+neither block F nor block C9 is run (see C9); the stay-awake mode is as `idle-before` recorded (this Mac: on, so `omarchy-toggle-idle --status` reads `"enabled":true`; a Mac where it
+was off before T3a reads `"enabled":false`).
 
 **D9y. The sync's first run after the close left `limine.conf` alone (reads only; a minute after D9x; C5's twin).**
 
@@ -1094,17 +1113,55 @@ images that rebuild overfills the ESP. `checkupdates` works on a throw-away copy
     : "${D:?STOP: set K, REPO, D, R5, RT and DO first (section 3)}"
     findmnt /boot/efi >/dev/null || { echo "STOP: /boot/efi is not mounted"; exit 1; }
     stop() { echo "STOP: $*"; exit 1; }
-    t=$(mktemp) || exit 1; trap 'rm -f "$t"' EXIT
-    checkupdates > "$t" 2>/dev/null; r=$?
+    t=$(mktemp) && db=$(mktemp -d) && c=$(mktemp -d) || exit 1; trap 'rm -rf "$t" "$db" "$c"' EXIT
+    # a throw-away database and package cache: the real ones are never written
+    CHECKUPDATES_DB=$db checkupdates > "$t" 2>/dev/null; r=$?
     [ $r = 0 ] || [ $r = 2 ] || stop "checkupdates failed (exit $r): the pending set is unknown; do not run the update"
-    trig='^/usr/lib/(initcpio/|firmware/|modprobe\.d/[^/]|libcryptsetup\.so|libp11-kit\.so|libpcsclite\.so|systemd/systemd(-udevd)?$)|^/usr/bin/(cryptsetup|lvm|mdadm|pdata_tools)$|^/usr/lib/modules/[^/]+/(vmlinuz|extramodules/)'
-    bad=
+    # the triggers come from the active hooks that run mkinitcpio or limine-mkinitcpio-install (/etc/pacman.d/hooks first; a same-named /etc hook overrides the /usr one)
+    seen=; tg=
+    for f in /etc/pacman.d/hooks/*.hook /usr/share/libalpm/hooks/*.hook; do
+      [ -e "$f" ] || continue; b=${f##*/}; case " $seen " in *" $b "*) continue ;; esac; seen="$seen $b"
+      grep '^Exec' "$f" | grep mkinitcpio | grep -q -v remove || continue
+      tg="$tg
+$(awk 'function fl() { if (sec == "[Trigger]" && op) for (i = 1; i <= n; i++) if (t[i] !~ /^!/) print (type == "Path" ? "P " : "K ") t[i]; n = 0; op = 0; type = "" }
+        /^\[/ { fl(); sec = $1; next }
+        sec == "[Trigger]" && $1 == "Type" { type = $3 }
+        sec == "[Trigger]" && $1 == "Operation" && $3 != "Remove" { op = 1 }
+        sec == "[Trigger]" && $1 == "Target" { t[++n] = $3 }
+        END { fl() }' "$f")"
+    done
+    trig=$(printf '%s\n' "$tg" | sed -n 's/^P //p' | sort -u | sed 's/[]+?^$(){}|.[]/\\&/g; s/\*/.*/g; s#^#^/#; s#$#$#' | paste -sd'|')
+    pk=$(printf '%s\n' "$tg" | sed -n 's/^K //p' | sort -u)
+    [ -n "$trig" ] || stop "no active mkinitcpio hook with a path trigger was found (/etc/pacman.d/hooks, /usr/share/libalpm/hooks): the trigger list is unknown; do not run the update"
+    bad=; mig=
     for n in $(cut -d' ' -f1 "$t"); do
-      case $n in mkinitcpio|mkinitcpio-*|systemd|cryptsetup|lvm2|mdadm|linux-firmware*) bad="$bad $n"; continue ;; esac
-      pacman -Ql "$n" 2>/dev/null | cut -d' ' -f2 | grep -q -E "$trig" && bad="$bad $n"
+      fl=$(pacman -Ql "$n" 2>/dev/null | cut -d' ' -f2)
+      { printf '%s\n' "$pk" | grep -q -x -F -- "$n" || printf '%s\n' "$fl" | grep -q -E "$trig"; } && bad="$bad $n"
+      # shortcut: only omarchy* packages and packages that ship migrations today are read for new ones; upgrade when another package starts shipping them
+      case $n in omarchy*) mig="$mig $n" ;; *) printf '%s\n' "$fl" | grep -q '^/usr/share/omarchy/migrations/' && mig="$mig $n" ;; esac
     done
     [ -z "$bad" ] || stop "these pending packages would trigger the rebuild of every image (F8):$bad. Do not run omarchy update (and do not hold them one by one); the pre-transaction hook of section 7 or the owner's decision comes first"
-    echo "U0: $(grep -c '' "$t") pending packages, none triggers a rebuild of every image"
+    # Omarchy migrations run outside pacman (no hook, no space guard sees them), and they reach a rebuild through helpers
+    # (omarchy-hibernation-setup, omarchy-keyboard-toprow), omarchy-pkg-add or -drop, or pacman itself, so no pattern is enough:
+    # every migration that would run (no marker in omarchy-migrate's state folder) stops U0 until the lead has read it and recorded it
+    ms=${OMARCHY_MIGRATION_STATE:-$HOME/.local/state/omarchy/migrations}; badm=
+    for f in /usr/share/omarchy/migrations/*.sh; do
+      [ -e "$f" ] || continue; m=${f##*/}; [ -e "$ms/$m" ] && continue
+      sudo cp "$f" "$D/migration-pending-$m"; sudo test -s "$D/migration-ok-$m" || badm="$badm $m"
+    done
+    if [ -n "$mig" ]; then
+      fakeroot -- pacman -Sw --noconfirm --disable-sandbox --cachedir "$c" --dbpath "$db" --logfile /dev/null $mig >/dev/null 2>&1 || stop "the pending packages$mig could not be downloaded into the throw-away cache: their migrations are unread; do not run the update"
+      for p in "$c"/*.pkg.tar.*; do
+        case $p in *.sig) continue ;; esac; [ -e "$p" ] || continue
+        for f in $(bsdtar -tf "$p" | grep -E '^usr/share/omarchy/migrations/.'); do
+          m=${f##*/}; [ -e "$ms/$m" ] && continue
+          bsdtar -xOf "$p" "$f" | sudo tee "$D/migration-pending-$m" >/dev/null
+          sudo test -s "$D/migration-ok-$m" || badm="$badm $m"
+        done
+      done
+    fi
+    [ -z "$badm" ] || stop "these Omarchy migrations would run at the update and are not recorded as read (F8):$(printf ' %s' $badm | tr ' ' '\n' | sort -u | paste -sd' ' -). Do not run omarchy update. Read each (sudo cat $D/migration-pending-<name>), including the helpers it calls and any package it adds or drops; when it cannot rebuild every image on this Mac, record it: echo '<why it is safe here>' | sudo tee $D/migration-ok-<name>, then run U0 again"
+    echo "U0: $(grep -c '' "$t") pending packages, none triggers a rebuild of every image${mig:+; the migrations of$mig were read}; every migration that would run is recorded as read"
     sudo sh -c "cd /boot/efi && { sha256sum limine.conf m1n1/boot-ctxr.bin k114s-repair/k114s.dtb EFI/Linux/*.efi; sha256sum /usr/local/lib/omarchy-k114s/k114s.dtb; sha256sum /usr/lib/asahi-boot/m1n1-ctxr.bin; grep -i '^default_entry' limine.conf; grep -E '^[[:blank:]]*/' limine.conf; grep -E '^[[:blank:]]*path:' limine.conf; sed -n 1p aura-try; } > '$D/before-update.txt'"
     sudo test -s "$D/before-update.txt" || { echo "STOP: the before-record is empty or unreadable; do not run the update"; exit 1; }
     echo "U0: before-record $(sudo grep -c '' "$D/before-update.txt") lines; ESP free $(df -B1 --output=avail /boot/efi | tail -1)"
@@ -1149,7 +1206,8 @@ expected, and P9 then re-checks G6 on it: an initramfs with `appledrm` stops eve
 
 If D9 does not run (a failed gate, or the owner's decision), the first window's close applies with this window's `D`:
 C1b (the trial file off the ESP), C2b (remove r3b.b1), block X (the `linux-aurora` image and entry back), C4 and C5. The configured
-files were never written. Put the idle mode back as well (F15): `[ "$(sudo cat /var/lib/k114s-recovery/display-d5/idle-before)" = true ] || omarchy-toggle-idle allow-idle`.
+files were never written. Put the idle mode back as well (F15): `[ "$(sudo cat /var/lib/k114s-recovery/display-d5/idle-before)" = true ] || omarchy-toggle-idle allow-idle`, and remove the notices'
+acknowledgements so a later window cannot reuse them: `sudo rm -f /var/lib/k114s-recovery/display-d5/N-acked-*`.
 
 **C1b. The trial Stage 2 file off the ESP (its copy stays in `$D`).**
 
@@ -1256,17 +1314,24 @@ C9 on a D9 boot), then block P (P9 after D9c), then the row:
 
 D9 leaves open: the owner's look at the pending items in `$D/owner-look.txt`; whether `systemd-backlight` restore is turned on
 (`docs/r3-brightness.md`, "The first write": `restore-enabled` plus one `systemctl start`, after the owner has seen the ladder);
-the lock-screen and idle timing; HDR (#92); the pre-transaction hook for the rebuild trap (F8: it refuses a rebuild-all while kernel module directories with `modules.builtin` outnumber the images on the ESP; until it ships, U0 holds every update that would trigger one); the K114s report to TripleU613 and the
+the lock-screen and idle timing; HDR (#92); the pre-transaction hook for the rebuild trap (F8: it refuses a rebuild-all while kernel module directories with `modules.builtin` outnumber the images on the ESP; until it ships, U0 holds every update whose pending packages hit a trigger, and every Omarchy migration that would run until the lead has read it; the hook would see a migration's pacman transaction but not a direct or helper call of `limine-mkinitcpio`); the K114s report to TripleU613 and the
 linux PR with the K114s display section (plan section 11); and `hyprland-m5 0.57.2-3` (H of the first runbook, a log-out, not
 yet run).
 
 ## 8. Risks the owner should know
 
 - **The promoted layout has three kernel packages and two images (F8).** A full-rebuild transaction (systemd, mkinitcpio,
-  firmware, cryptsetup, or a migration that calls `limine-mkinitcpio`) would write `linux-aurora`'s image as well, on about
+  firmware, cryptsetup, or an Omarchy migration that calls `limine-mkinitcpio`) would write `linux-aurora`'s image as well, on about
   110 MB of free space, and the space guard cannot see it. What a failed copy leaves is unknown. U0 prevents it for the packages it
-  can see (`checkupdates`, the triggers of the two mkinitcpio hooks; a trigger file that a new package version adds and the installed
-  one lacks is not seen), and a pending package that triggers it means no `omarchy update` until the pre-transaction hook ships. U1
+  can see (`checkupdates`, the trigger lines of the active mkinitcpio hooks; a trigger file that a new package version adds and the
+  installed one lacks is not seen) and for the migrations that a pending Omarchy package brings (downloaded to a throw-away cache and
+  read; a package that starts shipping migrations only in the new version, and is not named `omarchy*`, is not seen). A pending
+  package or migration that triggers it means no `omarchy update` until the lead has read the migration's gate and recorded it, or
+  the owner decides. Every migration that would run stops U0 until the lead has read it, because migrations reach a rebuild through
+helpers and through packages they add or drop. The planned pre-transaction hook would see a migration's pacman transaction, not a
+direct or helper call of `limine-mkinitcpio`. **Owner option, not taken:**
+  removing the `linux-aurora` package (after keeping its package file and image copy in `$D`) would make two kernel packages match
+  the two images and remove the trap itself. U1
   and P9 are the net if one slips through: a third image or a stray file stops everything before the reboot, and the fix rebuilds
   and re-verifies r3a's image too. A rebuild that damages r3a's image (the macOS `default k114s` target) before U1 runs is the worst
   case.
@@ -1277,7 +1342,9 @@ yet run).
   hold; boot 3 by macOS. The deadline lives with Jarvis (N) because a hung Mac cannot report itself; if the notice is not
   acknowledged the boot is not armed.
 - **The idle guard (F15) keeps an OLED awake and possibly static for the whole window** (hours, in the worst case). The runbook's dark
-  theme and the first-window screensaver advice limit it; D9x turns idle back on, and the abandon path does too.
+  theme and the first-window screensaver advice limit it; D9x and the abandon path put the mode back as it was before T3a. **The owner
+  has had stay-awake on since 2026-11-14, so after D9 the OLED stays lit and static** (no screensaver, no lock, no DPMS-off) at 500
+  nits, and D7b's idle profile does not act. The owner can run `omarchy-toggle-idle` to allow idle.
 - **A failed D8 leaves a click that could crash the DCP.** Night light stays one click away on the promoted default; a `D8-failed`
   writes the owner's README line and the report to Jarvis, nothing guards the toggle.
 - **`Alt` + brightness-down passes `1%-` on the eDP, which could ask for 0.** Only patch 0006's floor (a request below
@@ -1290,7 +1357,7 @@ yet run).
   The macOS way back therefore puts P's Stage 2 back first.
 - **The agent cannot see the panel.** Brightness following, black versus dim, warmth and flicker are owner-observed and stay
   pending until reported (F5). A panel that does not follow brightness writes (nobody has published a K-board OLED result) would
-  leave 500 nits on a static desktop: the idle profile (60 and 120 seconds) and the lock's DPMS-off are the mitigation, and
+  leave 500 nits on a static desktop: the idle profile (60 and 120 seconds) and the lock's DPMS-off are the mitigation once the owner has allowed idle, and
   DPMS-off is dim, not black, until the owner says otherwise.
 - **The brightness ladder writes through `brightnessctl`, which asks logind.** If the agent's session is not allowed, D5's first
   write fails and nothing was changed; the block names the retry from a desktop terminal.
@@ -1309,8 +1376,8 @@ worktree and the scratch folders:
 
 | Test | Result | Label |
 | --- | --- | --- |
-| `bash tests/linux/run-r3.sh` | `r3 update tooling: 1366 passed, 0 failed, 0 test file(s) skipped` | emulator/replica |
-| `tests/linux/test-display-d5-d9-runbook.sh` (new; it is in `run-r3.sh`) | `display d5-d9 runbook tests: 159 passed, 0 failed` (the repair round added: a D5 ladder whose read-back differs and a D5 write that fails each stop D5 and write no `D5-passed`; the locked-session stops of D5, D7, D8 and D6; T3a's stay-awake mode and its refusal; G6b's pass, its `appledrm` failure and its no-eDP stop; D9a's refusal without `G6b-passed`; P9's G6 on every image; D9x's idle restore; U0's pending-package stops; U1's r3a-image lines). Cuts the blocks D9p, I1b, S5, T3a, T3b, D5, D7, D7b, D8, G6b, T4a, T4b, D6, D9a, D9c, the undo of D9c, P9, C9, D9x, D9y, U0, U1, C1b and C2b out of this file, and the first runbook's P, W0, W1, X, F, C, C4 and C5 out of that one, and runs them against the fake Mac of `display-fake-lib.sh` with this window's record folder. Covered: the first window's folder is never written; I1b installs version `7.3.0.r3b.b1-1` with G3 and G6 and refuses the older package, a wrong hash, a full rebuild and `appledrm` in the initramfs; S5 and both arms (the one-shot, `aura-try`, the mask, the reboot scheduled with `systemd-run` and never `systemctl reboot`); every STOP of the arms (no gates, no mask, no drop-in, restore turned on, a wrong trial file, a missing `eDP-2` rule); T3b and T4b after block F with `--floor` and `--vrr on`, and refused before F, on the wrong kernel, with a `BAD`, with no trial; D5 (the ladder `500 250 100 50 20 10 20 50 100 250 500`, the Omarchy steps `500 450 400 450 500`, no write below 10 nits, none of 0 or 1000, the start level back; no floor line, an unmoving step, another scale, a `BAD` stop it), D7 (three cycles; a panel that does not wake, a DCP crash line), D7b (the profile, the copy, bad JSON), D8, D6 (the failed-marker, the watchdog counted, VRR off again); D9a with the real Stage 2 hook run in a throw-away root against fake loaders and trees, which must write the D9 file byte for byte (and, without the pin loader, must not); D9c (the Stage 2, the pins, the loader file, `default_entry`, the holds, the chain text, the mask by D6's outcome, the records), its undo, and its refusals (no D9a, an unexpected kernel, the sync running, a `limine.conf` that is not I1b's, a half-run); P9 (a third image, a missing `m1n1-ctxr.bin`, a missing hold, a wrong Stage 2); C9 and D9x after one and two clean boots, D9y, U0 and U1 (a returned `linux-aurora` image, a stray temporary file, a rebuilt image); the abandon path to `no boot file changed`; every block parses with `bash -n`, no block writes 0 to the backlight, no block prints a `limine.conf` line that could hold the command line. about 45 seconds in a quiet run (the fake `sleep` makes the blocks' waits instant) | emulator/replica |
+| `bash tests/linux/run-r3.sh` | `r3 update tooling: 1389 passed, 0 failed, 0 test file(s) skipped` | emulator/replica |
+| `tests/linux/test-display-d5-d9-runbook.sh` (new; it is in `run-r3.sh`) | `display d5-d9 runbook tests: 182 passed, 0 failed` (the third round added: U0 stops on every migration that would run until it is recorded as read, with helper, package-drop and unmarked-installed cases; D9x removes the notices' acknowledgements and reports stay-awake to Jarvis; D9c's printed line says STOP. The second repair round added: root-only scratch folders for G6b and P9 (the fake sudo closes a `sudo mktemp -d` folder to the plain user, with a test that the old form fails and a lint); U0's migration reading and its recorded-gate release, and its trigger regex built from replica hook files (an /etc override, a second hook, a remove-only hook); N's `N-acked-<boot>` refusal in T3a and T4a and D9c's printed line; the stay-awake mode already on (idle-before true) kept by T3a and D9x. The first repair round added: a D5 ladder whose read-back differs and a D5 write that fails each stop D5 and write no `D5-passed`; the locked-session stops of D5, D7, D8 and D6; T3a's stay-awake mode and its refusal; G6b's pass, its `appledrm` failure and its no-eDP stop; D9a's refusal without `G6b-passed`; P9's G6 on every image; D9x's idle restore; U0's pending-package stops; U1's r3a-image lines). Cuts the blocks D9p, I1b, S5, T3a, T3b, D5, D7, D7b, D8, G6b, T4a, T4b, D6, D9a, D9c, the undo of D9c, P9, C9, D9x, D9y, U0, U1, C1b and C2b out of this file, and the first runbook's P, W0, W1, X, F, C, C4 and C5 out of that one, and runs them against the fake Mac of `display-fake-lib.sh` with this window's record folder. Covered: the first window's folder is never written; I1b installs version `7.3.0.r3b.b1-1` with G3 and G6 and refuses the older package, a wrong hash, a full rebuild and `appledrm` in the initramfs; S5 and both arms (the one-shot, `aura-try`, the mask, the reboot scheduled with `systemd-run` and never `systemctl reboot`); every STOP of the arms (no gates, no mask, no drop-in, restore turned on, a wrong trial file, a missing `eDP-2` rule); T3b and T4b after block F with `--floor` and `--vrr on`, and refused before F, on the wrong kernel, with a `BAD`, with no trial; D5 (the ladder `500 250 100 50 20 10 20 50 100 250 500`, the Omarchy steps `500 450 400 450 500`, no write below 10 nits, none of 0 or 1000, the start level back; no floor line, an unmoving step, another scale, a `BAD` stop it), D7 (three cycles; a panel that does not wake, a DCP crash line), D7b (the profile, the copy, bad JSON), D8, D6 (the failed-marker, the watchdog counted, VRR off again); D9a with the real Stage 2 hook run in a throw-away root against fake loaders and trees, which must write the D9 file byte for byte (and, without the pin loader, must not); D9c (the Stage 2, the pins, the loader file, `default_entry`, the holds, the chain text, the mask by D6's outcome, the records), its undo, and its refusals (no D9a, an unexpected kernel, the sync running, a `limine.conf` that is not I1b's, a half-run); P9 (a third image, a missing `m1n1-ctxr.bin`, a missing hold, a wrong Stage 2); C9 and D9x after one and two clean boots, D9y, U0 and U1 (a returned `linux-aurora` image, a stray temporary file, a rebuilt image); the abandon path to `no boot file changed`; every block parses with `bash -n`, no block writes 0 to the backlight, no block prints a `limine.conf` line that could hold the command line. about 45 seconds in a quiet run (the fake `sleep` makes the blocks' waits instant) | emulator/replica |
 | `tests/linux/test-display-trials-runbook.sh` (now sharing `display-fake-lib.sh`) | `display trials runbook tests: 108 passed, 0 failed` (unchanged by the split) | emulator/replica |
 | `tests/hardware/test-display-check.sh` | `display-check test: 33 passed, 0 failed` (10 new: `--floor` on the brightness build, on the D4 build and tree, a dropped floor and callback 590; `--vrr on` on an unmasked boot, on a masked one, with Hyprland's vrr true; an unknown `--vrr`) | emulator/replica |
 | `tests/brightness/test-backlight-check.sh` | `# backlight-check replica: 0 failed` (30 `ok` lines; 8 new for `--auto`: the ladder from 500 and from 40 nits, the start level back, a read-back that differs stops and puts 500 back, a failing write never tries the maximum, nothing above the start or below 10, a reported level below the floor starts at the floor, a TERM mid-ladder puts the start level back) | emulator/replica |

@@ -22,6 +22,7 @@ rewrite() { # the block with the system paths and the real hashes of this Mac re
        s#/etc/machine-id#$W/machine-id#g; s#/proc/sys/kernel/random/boot_id#$W/boot_id#g; s#/dev/mtd1ro#$W/mtd1ro#g
        s#/etc/modprobe.d#$W/modprobe#g; s#/usr/lib/modprobe.d#$W/usrmodprobe#g; s#/var/lib/k114s-backlight#$W/klb#g
        s#/usr/lib/asahi-boot#$W/asahi#g; s#/etc/pacman.conf#$W/pacman.conf#g; s#/etc/omarchy-mac-boot#$W/macboot#g
+       s#/etc/pacman.d/hooks#$W/hooks-etc#g; s#/usr/share/libalpm/hooks#$W/hooks-usr#g; s#/usr/share/omarchy/migrations#$W/migrations#g
        s#/sys/class#$W/sys/class#g; s#/sys/module#$W/sys/module#g; s#/var/tmp#$W/vartmp#g
        s#bash \"\$REPO/packaging/linux-k114s/check-package.sh\"#$BIN/check-package#g
        s#$GPU#$(sum "$W/fake/gpu.bin")#g; s#$GPUT#$(sum "$W/fake/gpu.dtb")#g; s#$R3A#$(sum "$W/fake/r3a.efi")#g
@@ -90,6 +91,9 @@ SH
 cat > "$BIN/pacman" <<'SH'
 #!/bin/sh
 s=$FAKE_W/state; c=$FAKE_W/esp/limine.conf; rel=7.3.0-17.v272-11-k114s-r3b-ARCH
+if [ "$1" = -Sw ]; then # -Sw ... --cachedir DIR NAMES: the package files come from $s/pkg-NAME (a tree), as the real one writes them
+  shift; cdir=; while [ $# -gt 0 ]; do case $1 in --cachedir) cdir=$2; shift 2 ;; --dbpath|--logfile) shift 2 ;; -*) shift ;; *) [ -d "$s/pkg-$1" ] || exit 1; bsdtar -cf "$cdir/$1-2-aarch64.pkg.tar.zst" -C "$s/pkg-$1" usr; shift ;; esac; done; exit 0
+fi
 case "$1" in -Ql) cat "$s/ql-$2" 2>/dev/null; [ -e "$s/ql-$2" ]; exit ;; esac
 case "$1 $2" in
   "-Q linux-k114s-r3b") [ -e "$s/r3b" ] && { echo "linux-k114s-r3b $(cat "$s/r3b")"; exit 0; }; exit 1 ;;
@@ -114,10 +118,11 @@ case "$1 $2" in
 esac
 exit 1
 SH
+printf '#!/bin/sh\n[ "$1" = -- ] && shift\nexec "$@"\n' > "$BIN/fakeroot"
 chmod +x "$BIN"/*
 for f in gpu.bin:4001 gpu.dtb:301 r3a.efi:2000 aurora.efi:1900 r3b.pkg:500 oldldr.bin:4100 pinldr.bin:4200 gpinldr.bin:4150; do head -c "${f#*:}" /dev/urandom > "$W/fake/${f%%:*}"; done
 fresh() { # the Mac as the promotion left it, on a default boot of r3a
-  rm -rf "$W/esp" "$W/etc" "$W/lib" "$W/rec" "$W/lock" "$W/efivars" "$W/chosen" "$W/calls" "$W/home" "$W/modules" "$W/systemd" \
+  rm -rf "$W/rootdirs" "$W/hooks-etc" "$W/hooks-usr" "$W/esp" "$W/etc" "$W/lib" "$W/rec" "$W/lock" "$W/efivars" "$W/chosen" "$W/calls" "$W/home" "$W/modules" "$W/systemd" \
     "$W/modprobe" "$W/usrmodprobe" "$W/klb" "$W/state" "$W/R"; unset FAKE_UNAME
   echo 00000000000000000000000000000000 > "$W/machine-id"; echo boot-0 > "$W/boot_id"
   printf '[0.1] FDT: GPU: firmware 26B8125\n[0.2] the device tree does not describe the internal display: no handoff\n' > "$W/mtd1ro"
@@ -171,10 +176,15 @@ comment: machine-id=00000000000000000000000000000000
 
 CONF
 }
+# The fake sudo is not a plain pass-through: a folder made by `sudo mktemp -d` is closed (mode 000) to the plain user and opens
+# only for the commands run through sudo, as root-only folders do on the Mac (a bare redirect or read into it fails).
+FAKE_SUDO='sudo() { local d r; if [ "$1" = mktemp ]; then d=$("$@") || return; chmod 000 "$d"; echo "$d" >> "$FAKE_W/rootdirs"; echo "$d"; return; fi
+  for d in $(cat "$FAKE_W/rootdirs" 2>/dev/null); do [ -d "$d" ] && chmod 700 "$d"; done; "$@"; r=$?
+  for d in $(cat "$FAKE_W/rootdirs" 2>/dev/null); do [ -d "$d" ] && chmod 000 "$d"; done; return $r; }; '
 run() { # stdin: the block, rewritten -> $out, $rc
   out=$(cd "$W" && FAKE_W=$W HOME=$W/home PATH=$BIN:$PATH K=$L/r3a-trial/k114s-boot-once D=${FAKE_D:-$W/rec/display} R=$W/R R5=$W/R5 RT=$W/RT DO=$W/rec/display-old REPO=${FAKE_REPO:-$REPO_DIR} \
     K114S_ESP=$W/esp K114S_ETC=$W/etc K114S_EFIVARS=$W/efivars K114S_STATE=$W/rec K114S_SYSTEMCTL=$BIN/systemctl K114S_SAVE=$W/save \
-    K114S_BOOTID=boot1 bash -c 'sudo() { "$@"; }; '"$(cat)" 2>&1); rc=$?
+    K114S_BOOTID=boot1 bash -c "$FAKE_SUDO"'FAKE=1; '"$(cat)" 2>&1); rc=$?
 }
 state() { (cd "$W" && find esp etc lib rec systemd modprobe home -type f -exec sha256sum {} + 2>/dev/null | sort -k2 | sha256sum | cut -c1-16); }
 espstate() { (cd "$W" && find esp -type f -exec sha256sum {} + 2>/dev/null | sort -k2 | sha256sum | cut -c1-16); }
