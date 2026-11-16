@@ -11,7 +11,7 @@
 #              the draft left-back (ATC0) tree is also compared with the J716c's ATC0 nodes.
 # Needs clang (or CPP="gcc -E") and dtc on PATH.
 set -euo pipefail
-K=${1:?usage: test-usb-dtb.sh KTREE [K116S_KTREE]}; R=${2:-}; J=${3:-}
+K=${1:?usage: test-usb-dtb.sh KTREE [K116S_KTREE [J716C_KTREE]]}; R=${2:-}; J=${3:-}
 here=$(cd "$(dirname "$0")" && pwd); dts=$here/../dts
 CPP=${CPP:-clang -E}; DTC=${DTC:-dtc}
 out=$(mktemp -d); trap 'rm -rf "$out"' EXIT

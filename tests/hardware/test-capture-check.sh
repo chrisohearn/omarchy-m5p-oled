@@ -9,9 +9,10 @@ fail=0
 ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; fail=1; }
 basics=$t/basics; mkdir "$basics"
-for c in bash sh file grep sed cut tr timeout mktemp rm ls head base64 dirname basename readlink cat sleep; do
+for c in bash sh file grep sed cut tr timeout mktemp rm ls head base64 pgrep dirname basename readlink cat mkdir; do
   p=$(command -v "$c") && ln -s "$p" "$basics/$c"
 done
+printf '#!/bin/sh\n' >"$basics/sleep"; chmod +x "$basics/sleep" # no real waiting
 mk() { # name; $2 = broken makes the --no-dmabuf path fail
   local d=$t/$1 b=$t/$1/bin
   mkdir -p "$b" "$d/root/sys/class/drm/card0" "$d/root/sys/class/drm/renderD128" "$d/tmp"
@@ -30,6 +31,21 @@ mk a; run a
 mk b broken; run b
 [[ $out == *"FAIL wf-recorder no-dmabuf"* && $rc -eq 1 ]] && ok "failing --no-dmabuf path is a FAIL, exit 1" || bad "broken: $out rc=$rc"
 rm "$t/b/bin/grim" "$t/b/bin/ffprobe"; run b
-[[ $out == *"SKIP grim missing"* && $out == *"SKIP wf-recorder or ffprobe missing"* ]] && ok "missing tools are SKIPs" || bad "skip: $out"
+[[ $out == *"SKIP grim missing"* && $out == *"SKIP wf-recorder or ffprobe missing"* && $rc -eq 1 ]] && ok "missing core tools are SKIPs and exit 1" || bad "skip: $out"
+# --script: the stub toggle starts a (fake) wf-recorder state file and writes a clip on stop; pgrep is stubbed.
+mk c; b=$t/c/bin
+printf '#!/bin/sh\ncase "$1" in --status) exit 1;; --stop-recording) [ "${STUB_NOFILE:-}" = 1 ] || echo clip >"$OMARCHY_SCREENRECORD_DIR/v.mp4";; esac\n' >"$b/omarchy-capture-screenrecording"
+printf '#!/bin/sh\n[ "$2" = wf-recorder ]\n' >"$b/pgrep"; printf '#!/bin/sh\nexit 1\n' >"$b/pidof"; chmod +x "$b"/*
+run c --script
+[[ $out == *"PASS script recorded with wf-recorder"* && $out == *"PASS script wrote a readable clip"* && $rc -eq 0 ]] && ok "--script passes with wf-recorder and a clip" || bad "script: $out rc=$rc"
+STUB_NOFILE=1 run c --script
+[[ $out == *"FAIL script wrote no readable h264 clip"* && $rc -eq 1 ]] && ok "--script with no file is a FAIL, exit 1" || bad "nofile: $out rc=$rc"
+printf '#!/bin/sh\n[ "$1" = gpu-screen-recorder ]\n' >"$b/pidof"; chmod +x "$b/pidof"; run c --script
+[[ $out == *"FAIL script did not record with wf-recorder alone"* && $rc -eq 1 ]] && ok "--script with gpu-screen-recorder running is a FAIL" || bad "gsr: $out rc=$rc"
+printf '#!/bin/sh\nexit 1\n' >"$b/pidof"; chmod +x "$b/pidof"
+printf '#!/bin/sh\nexit 1\n' >"$b/pgrep"; run c --script
+[[ $out == *"FAIL script did not record with wf-recorder alone"* && $rc -eq 1 ]] && ok "--script without wf-recorder running is a FAIL" || bad "backend: $out rc=$rc"
+printf '#!/bin/sh\n[ "$1" = --status ] && exit 0\n' >"$b/omarchy-capture-screenrecording"; run c --script
+[[ $out == *"SKIP a recording is already running"* ]] && ok "running recording is a SKIP, no toggle" || bad "toggle: $out"
 run a --bogus; [[ $rc -eq 2 ]] && ok "unknown argument exits 2" || bad "bogus rc=$rc"
 exit $fail

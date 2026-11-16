@@ -16,7 +16,7 @@ Parity target: Asahi M1/M2 Bluetooth audio (A2DP and HFP through bluez and PipeW
 | Paired devices | none |
 
 Not done offline: `btvirt` (a virtual controller) is not packaged on this system, so profile enumeration against a
-virtual peer was not run. Whether the controller reports mSBC (eSCO) capability shows only once a headset connects.
+virtual peer was not run. WirePlumber's default A2DP codec priority was not checked either (pending; the codec plugins above are installed, the order they are chosen in is unverified). Whether the controller reports mSBC (eSCO) capability shows only once a headset connects.
 
 ## Owner steps
 

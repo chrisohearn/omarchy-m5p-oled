@@ -37,19 +37,20 @@ What the replica run shows:
 - Rule 93 matches a two-digit saved value only, so a saved 100 is a no-op there; rule 94 calls the
   restore script on `add`. `udevadm verify` accepts both rules. They were syntax-checked, never
   executed.
-- The boot restore is expected to fail on this kernel (agent-run). `udevadm info -p
+- On the earlier kernel without #1615 (before r3a; evidence from that boot, superseded by the #52
+  section below) the boot restore was expected to fail (agent-run). `udevadm info -p
   /class/power_supply/macsmc-battery` lists only DEVPATH and SUBSYSTEM: no tags, no properties, no
   `SYSTEMD_WANTS` (macsmc-ac has a full record). The kernel log twice shows `macsmc-battery: uevent:
   failed to send synthetic uevent: -95` at boot. That is the #1615 uevent defect: udev never handles
   the battery, so rules 93 and 94 never ran. The path unit
   `macsmc-battery-charge-control-end-threshold.path` belongs to asahi-scripts, is static and inactive
-  on this boot, and was never pulled in. It is not needed to save a limit:
+  on that boot, and was never pulled in. It is not needed to save a limit:
   `omarchy-battery-charge-limit` writes the saved file itself. On a kernel without #1615 a
   saved 80 is not restored at boot; do not blame the SMC for that.
 - Not tested: whether the SMC accepts 80 and derives start 75, whether charging stops on AC at 80,
   and the boot restore (which depends on #1615). Owner step: `sudo
   tests/hardware/k114s-charge-limit-test.sh run` on AC, then `omarchy battery charge limit 80`,
-  reboot, `k114s-charge-limit-test.sh status` (on a kernel that carries #1615 expect 80 restored; on one without it, 100. Whether the SMC itself keeps the end threshold across a reboot is untested, so note what you see), then
+  reboot, `k114s-charge-limit-test.sh status` (on a kernel that carries #1615, such as r3a, expect 80 restored; on one without it, 100. Whether the SMC itself keeps the end threshold across a reboot is untested, so note what you see), then
   `omarchy battery charge limit 100`.
 
 ## #52 battery status
@@ -69,8 +70,8 @@ which carries sleep-lid/0007 = #1615).** Read-only checks on the booted r3a:
 - Charging at 71 %: sysfs `Charging` / 71 and UPower `charging` / 70.18 % agree.
 
 Not yet proven: UPower against sysfs during a discharge. Owner step: unplug AC and run
-`tests/hardware/k114s-battery-log.sh 30 > battery.log` for a few minutes, plug back in, and confirm
-no `MISMATCH` line. The #1615 PR is still an open draft upstream, so r3a carries it as a patch.
+`tests/hardware/k114s-battery-log.sh 30 10 > battery.log` (10 samples, 30 s apart, then it stops),
+plug back in, and confirm no `MISMATCH` line. The #1615 PR is still an open draft upstream, so r3a carries it as a patch.
 
 ## #56 why the profile is `performance`, and what it is on battery
 
@@ -120,13 +121,17 @@ Power, AC Input Power, 3.8 V Rail, Heatpipe), fan1 and fan2 at 0 RPM (min 2000, 
 others (Tz11 to Tz18, Tz1j, TNLc, TNSz, TNVn) read 0. The logger lists these once as absent and
 leaves them out of the hottest list. The hottest channels at idle were TVDM, TVDC, TVD0, TCMb at
 about 51 °C. No CPU thermal zone (only `thermal_zone0`, the battery). Masking the TAO keys needs the
-ADT key list and a dts change: not done. The #1944 property is ported as an off-by-default macro in `dts/t6050-k114s-fan.dtsi` (see `docs/r3b-kernel.md`).
+ADT key list and a dts change: not done. The #1944 property is ported as an off-by-default macro
+in `dts/t6050-k114s-fan.dtsi` (see `docs/r3b-kernel.md`).
 
-Update 2026-11-15 (agent-run, r3a kernel on the GPU desktop, no load generated): the fans now spin. Three samples
-10 s apart with `tests/hardware/k114s-thermal-log.sh 10 3` read fan1 2198 to 2201 RPM and fan2 2370 to 2379 RPM
-(min 2000, max 8400 and 9072; `fanN_target` 2200 and 2376, read only) at 22 to 26 W total system power with the
-hottest channels TVDM, TVDC, TVD0 and TCMb at 68 to 69 C (one TCMb spike to 82.8 C). So a fan reading above its
-minimum is now logged, but at desktop load, not a sustained load. Absent channels at this boot: TfCB, TAOC, TAOI,
-TAOJ, TAOP, Tz11 to Tz18, Tz1j, TNLc, TNSz, TNVn (-127 or 0); the logger already keeps them out of the hottest list.
-Still open: a sustained-load run with the logger (owner), the ADT key list for the TAO* keys, and CPU thermal zones.
+Update 2026-11-15 (agent-run, r3a kernel on the GPU desktop, no load generated): the fans now
+spin. Three samples 10 s apart with `tests/hardware/k114s-thermal-log.sh 10 3` read fan1 2198 to
+2201 RPM and fan2 2370 to 2379 RPM (min 2000, max 8400 and 9072) at 22 to 26 W total system power
+with the hottest channels TVDM, TVDC, TVD0 and TCMb at 68 to 69 °C (one TCMb spike to 82.8 °C).
+The `fanN_target` values (2200 and 2376) were read separately, read only: the logger does not
+print them. So a fan reading above its minimum is now logged, but at desktop load, not a
+sustained load. Absent channels at this boot: TfCB, TAOC, TAOI, TAOJ, TAOP, Tz11 to Tz18, Tz1j,
+TNLc, TNSz, TNVn (-127 or 0); the logger already keeps them out of the hottest list.
+Still open: a sustained-load run with the logger (owner), the ADT key list for the TAO* keys, and
+CPU thermal zones.
 

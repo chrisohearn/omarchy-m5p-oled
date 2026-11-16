@@ -69,6 +69,8 @@ expect "adt: show finds a node by name" $tool --adt "$W/k114s.adt" show audio-co
 refuse "adt: a missing ADT is an error, not an empty file" $tool --adt "$W/none.adt" pmp-dtsi --names-from "$A/t6050-j714s-pmp-tunables.dtsi" -o "$W/none.dtsi"
 [ ! -e "$W/wrong.dtsi" ] && [ ! -e "$W/none.dtsi" ] && ok "adt: a refusal writes no file" || no "adt: a refusal left a file"
 expect "adt: the sound fact checker (tests/k114s-adt-sound-facts.py) passes its self-test" python3 -I "$here/tests/k114s-adt-sound-facts.py" --self-test
+expect "adt: the kiwi (touchscreen) fact checker passes its self-test" python3 -I "$here/tests/k114s-adt-kiwi-facts.py" --self-test
+expect "adt: the HDMI fact checker (tests/k114s-adt-hdmi-facts.py) passes its self-test" python3 -I "$here/tests/k114s-adt-hdmi-facts.py" --self-test
 
 # --- 2-4. compile and lint ---------------------------------------------------------------------------------
 # the kernel's dtc warning switches; a newer dtc no longer knows some of them

@@ -6,7 +6,7 @@ Evidence labels: agent-run (read on the Mac, 2026-11-15, kernel r3a), upstream-r
 
 Read from `/proc/bus/input/devices` with `tests/hardware/k114s-input-capture.sh status`, and `dmesg`:
 
-- Device `Apple MTP multi-touch`, HID product 0x0361, `hid-magicmouse` built from the #1568 path (log line `multi-touch: clamping Report Size 524288 to 16384`).
+- Device `Apple MTP multi-touch`, HID product 0x0361, `hid-magicmouse` on the #1568 path. Evidence: the MTP firmware `Personality: K2C1` line, and HID product 0x0361, not the 0x0362 that selects the TP26 path in the dispatch guard. The log line `multi-touch: clamping Report Size 524288 to 16384` is only the report-size clamp workaround (same idea as #1830's `dchid_clamp_report_size`), not proof of the 0x5a parser.
 - ABS codes: slots, X, Y, TOUCH_MAJOR/MINOR, WIDTH_MAJOR/MINOR, ORIENTATION, PRESSURE. `ABS_MT_TOOL_TYPE` (55) is **not** advertised.
 - Properties: POINTER, BUTTONPAD, PRESSUREPAD (bits 0, 2, 7). Not DIRECT, so libinput treats it as a touchpad.
 - Keys: BTN_LEFT, BTN_TOOL_FINGER, DOUBLETAP, TRIPLETAP, QUADTAP, BTN_TOUCH. Force feedback bit 79.
@@ -18,10 +18,10 @@ Read from `/proc/bus/input/devices` with `tests/hardware/k114s-input-capture.sh 
 |---|---|---|---|
 | #636 (T6041, merged) | MTP 0x75 records | Contact id and class in words 1 and 2 of each record (class 1 thumb, 2 and 3 finger, 6 and up palm), plus tool area over 2200, or over 1400 with a palm class; sticky until lift | yes, when `mtp_palms` |
 | #1510 (J616s, merged) | same | same class test, no size rule (fingers reach 2475) | yes |
-| #1830 (K116s 0x0362, merged) | Trackpad26 frames (0x5a 0x01) | `tp26_contact.class` (byte 3 of the 48-byte record: 1 thumb, 2/3 finger, 7 palm) sets `MT_TOOL_PALM` | yes (`mtp_palms \|\| mtp_tp26`) |
-| #1568 (K114c, draft, **what the K114s runs**) | report 0x5a, section at byte 48, 48-byte records | none: it reads id, phase, x, y, major, minor, force and always reports `MT_TOOL_FINGER` | **no** |
+| #1830 (K116s 0x0362, merged) | Trackpad26 frames (0x5a 0x01) | `tp26_contact.class` (offset 2 of the 48-byte `tp26_contact`: 1 thumb, 2/3 finger, 7 palm) sets `MT_TOOL_PALM` | yes (`mtp_palms \|\| mtp_tp26`) |
+| #1568 (K114c, draft, **what the K114s runs**) | report 0x5a, section at byte 48, 48-byte records | none: it reads phase, x, y, major, minor, force (the id byte is documented but unused; slots come from position) and always reports `MT_TOOL_FINGER` | **no** |
 
-Reading: the #1568 record is the same 48-byte layout as the Trackpad26 contact (id, phase/state, then a byte that #1830 names `class`, then floats). #1568 skips that byte and reports no tool type, so on the K114s libinput has only size, pressure and edge heuristics for palms. Whether the K114s controller fills the class byte like the K116s does is not known: no frames were captured on this board (#1568 comment says so too).
+Reading: the #1568 record is the same 48-byte layout as the Trackpad26 contact, but #1568 counts offsets one byte later than #1830: id +1, phase +2, x +5, major +21, force +41 in #1568; id 0, state 1, class 2, x 4, major 20, force 40 in #1830's `tp26_contact`. So the class candidate is rec[+3] in #1568's terms (between phase at +2, which #1568 already reads, and the first float at +5). #1568 skips that byte and reports no tool type, so on the K114s libinput has only size, pressure and edge heuristics for palms. Whether the K114s controller fills the class byte like the K116s does is not known: no frames were captured on this board (#1568 comment says so too).
 
 ## Gap and proposal
 
@@ -40,4 +40,4 @@ To judge gestures after that, uncomment the `hl.gesture` workspace line in the u
 
 ## Done when
 
-A capture shows contacts, and either palm rejection works or the missing class/tool type is filed upstream (draft below).
+A capture shows contacts, and either palm rejection works or the missing class/tool type is filed upstream (see "Gap and proposal" above).

@@ -33,10 +33,11 @@ need_param() {
 case ${1:-} in
   status) status ;;
   set)
-    [[ ${2:-} =~ ^[0-9]+$ && ${3:-} =~ ^[0-9]+$ ]] || { echo "usage: set PRESS RELEASE (1-255)" >&2; exit 2; }
-    (( $2 >= 1 && $2 <= 255 && $3 >= 1 && $3 <= 255 )) || { echo "refused: values must be 1-255" >&2; exit 2; }
+    [[ ${2:-} =~ ^[0-9]{1,5}$ && ${3:-} =~ ^[0-9]{1,5}$ ]] || { echo "usage: set PRESS RELEASE (1-255)" >&2; exit 2; }
+    p=$((10#$2)) r=$((10#$3)) # base 10: a leading zero is not octal
+    (( p >= 1 && p <= 255 && r >= 1 && r <= 255 )) || { echo "refused: values must be 1-255" >&2; exit 2; }
     need_param
-    echo "$2,$3" >"$param" && echo "click_strength now $(cat "$param"); press the pad and judge it" ;;
+    echo "$p,$r" >"$param" && echo "click_strength now $(cat "$param"); press the pad and judge it" ;;
   clear)
     need_param
     echo "0,0" >"$param" && echo "click_strength now $(cat "$param")" ;;

@@ -63,18 +63,18 @@ def report(results, out=sys.stdout):
     return bad
 
 
-def _made_up(reset_pin=25):
+def _made_up(reset_pin=25, kiwi_node=True, display_sync_ctrl=2, power_fourcc=GPIO):
     w = lambda *a: struct.pack("<%dI" % len(a), *a)
     ph = lambda n: ("AAPL,phandle", w(n))
     gp = lambda c, pin, f: w(c, GPIO, pin, f)
     kiwi = sf._node("kiwi", [("function-clock_24MHz_enable", gp(1, 22, 0x2000101)),
-                             ("function-display_sync", gp(2, 11, 0x2000101)),
-                             ("function-power", gp(1, 26, 0x101)),
+                             ("function-display_sync", gp(display_sync_ctrl, 11, 0x2000101)),
+                             ("function-power", w(1, power_fourcc, 26, 0x101)),
                              ("function-reset", gp(1, reset_pin, 0x10001)),
                              ("function-power_refcnt", w(3, struct.unpack("<I", b"4WKp")[0], 0x7243494F, 0x20000)),
                              ("image-tag", b"fsat\0"), ("bootloader-type", b"CBOR\0"),
                              ("fdr-classes", b"MADE-UP-CALIBRATION\0")])
-    tr = sf._node("mtp-transport", [], [kiwi])
+    tr = sf._node("mtp-transport", [], [kiwi] if kiwi_node else [])
     dc = sf._node("dockchannel-mtp", [], [tr])
     io_ = sf._node("arm-io", [("ranges", w(0, 0, 0, 0, 0, 0))],
                    [dc, sf._node("nub-gpio0", [ph(1)]), sf._node("gpio0", [ph(2)]), sf._node("smc-pmu", [ph(3)])])
@@ -95,6 +95,12 @@ def self_test():
     bad = facts(sf.Tree(_made_up(reset_pin=24)))
     failed = [w for _, w, e, f in bad if e != f]
     check("a reset on another pin fails exactly that fact", failed == ["touch reset pin"])
+    nok = facts(sf.Tree(_made_up(kiwi_node=False)))
+    check("an ADT with no kiwi node fails the one fact", [w for _, w, e, f in nok if e != f] == ["the ADT has a kiwi interface under the MTP transport"])
+    wc = [w for _, w, e, f in facts(sf.Tree(_made_up(display_sync_ctrl=1))) if e != f]
+    check("a display-sync line on the wrong controller fails its controller fact", wc == ["display-sync pad controller"])
+    nf = [w for _, w, e, f in facts(sf.Tree(_made_up(power_fourcc=0))) if e != f]
+    check("a non-GPIO function property fails its controller and pin facts", nf == ["touch power enable controller", "touch power enable pin"])
     check("the calibration property is not in the output", "CALIBRATION" not in sink.getvalue())
     return 0 if ok else 1
 

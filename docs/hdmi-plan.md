@@ -45,6 +45,9 @@ It has not been compiled: this machine has no kernel tree. Points to settle at t
 2. Whether the K114-K116 base reserves AOP GPIO 14 (the J714s base does, and the file frees it).
 3. `apple,t6050-dp-phy`, the `dcpext3` HDMI properties and the converter forwarder exist only in betizzel's v272
    series (r3b, v272-11, and later; not r3a).
+4. The draft's reg windows are checked against the ADT's `atc-phy3` addresses (agent-run); the power-domain labels
+   (`ps_atc3_usb_aon`, `ps_atc3_common`, `ps_atc3_phymxwrap`) and `usb_drd3` are J714s names, not checked against
+   the K114-K116 base until the first compile.
 
 ## What it needs, in order
 
@@ -63,7 +66,7 @@ It has not been compiled: this machine has no kernel tree. Points to settle at t
 
 ## Owner steps (only after the hand-off works and an HDMI tree exists)
 
-1. With nothing in the HDMI port: `bash tests/hardware/k114s-hdmi-check.sh` (expect "no HDMI connector" until then).
+1. With nothing in the HDMI port: `bash tests/hardware/k114s-hdmi-check.sh` (expect the connector present, status disconnected, "no sink seen"; "no HDMI connector" means this boot has no HDMI tree).
 2. Plug a monitor or TV into the HDMI port; run the script again; note whether a picture appears, the monitor
    model, the cable, and whether the monitor was asleep when plugged.
 3. Unplug and plug again; run the script again.

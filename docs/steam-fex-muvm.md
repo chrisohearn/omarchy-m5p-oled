@@ -21,7 +21,7 @@ node whose uAPI virglrenderer understands.
 | `CONFIG_KVM=y`, `CONFIG_KVM_GUEST_MEMFD=y`, `CONFIG_VHOST_VSOCK=m` | set | ok |
 | `CONFIG_DRM_ASAHI=y`, `DRM_ASAHI_M5` not set, `DRM_ASAHI_G18` not set | host driver is the aurora driver; `/dev/dri/renderD128` is the render node | see Blockers |
 | `CONFIG_DRM_VIRTIO_GPU` | not set | host side does not need it; the guest kernel is libkrunfw's |
-| Packages (`pacman -Si`) | `omarchy-steam-fex 1.0.0-4`, `steam 1.0.0.87-2` (omarchy); `muvm 0.7.0-1`, `FEX-Emu 2604-1`, `fex-emu-rootfs-arch`, `mesa-fex-emu-overlay-{x86_64,i386}` (asahi-alarm); `libkrun 1.19.8`, `libkrunfw 5.6.2`, `virglrenderer 1.3.0` (extra); all aarch64 | all installable |
+| Packages (`pacman -Si`) | `omarchy-steam-fex 1.0.0-4`, `steam 1.0.0.87-2` (omarchy; `steam` 20241231-4 (any) is also in asahi-alarm, and pacman takes the omarchy one because `[omarchy]` is listed before `[asahi-alarm]` in pacman.conf; the owner trial must confirm with `pacman -Si steam`); `muvm 0.7.0-1`, `FEX-Emu 2604-1`, `fex-emu-rootfs-arch`, `mesa-fex-emu-overlay-{x86_64,i386}` (asahi-alarm); `libkrun 1.19.8`, `libkrunfw 5.6.2`, `virglrenderer 1.3.0` (extra); all aarch64 | all installable |
 | Installed now | none of steam, muvm, FEX, libkrun | nothing to remove |
 | Host Mesa | `mesa-aurora 26.3.0_devel.20261109.j714s2`, needs `ASAHI_M5_BRINGUP=1`; Vulkan device `Apple M5 Pro (G17S B1)` (docs/r3-gpu-result.md) | Vulkan on host is only an off-screen probe |
 
@@ -46,6 +46,6 @@ native-context GPU access works against the aurora render node. Prerequisites in
 
 ## Owner trial (stages, stop at the first failure)
 
-Run `bash tests/hardware/k114s-steam-fex-probe.sh` first; it is read-only and needs no install.
+Run `bash tests/hardware/k114s-steam-fex-probe.sh` first; it is read-only and needs no install. It reads the kernel log with plain `dmesg` and falls back to `sudo -n dmesg`.
 Stage 2 (install `muvm`, `FEX-Emu`, `omarchy-steam-fex`, hold them) and stage 3 (launch Steam) wait for a go
 and for Vulkan proof.

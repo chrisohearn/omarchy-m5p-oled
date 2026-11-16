@@ -25,8 +25,9 @@ haptic HID device's parent node, which is `mtp_hid` (`input@8000`). The referenc
         };
     };
 
-For the K114s the same child node has to be added to the T6050 `mtp_hid` node in the tree we build
-(see `tests/linux/mkfdt.py`). The values stay open until the owner has judged them. Do not copy
+For the K114s the same child node has to be added to the T6050 `&mtp_hid` override in
+`dts/t6050-k114s-common.dtsi` (`&mtp_hid { actuator { apple,click-strength = <P R>; }; };`).
+`tests/linux/mkfdt.py` only builds a fake tree for the r3 tests; touch it only if a test needs the node. The values stay open until the owner has judged them. Do not copy
 the J413 numbers: they are another actuator's tuning.
 
 ## Owner steps (needs a kernel with #1959, then the pad under a finger)

@@ -34,12 +34,17 @@ not known until the PMP-off behaviour is measured on battery. No CPU thermal zon
 
 ## What is left
 
-1. Owner, on battery, once, no reboot: `powerprofilesctl set balanced`, then
+1. Owner, on battery, once, no reboot: unplug with no saved choice and no manual set, then
    `tests/hardware/k114s-cpufreq-log.sh 2 30 > cpufreq.log` idle, then again while a load runs
-   (`yes > /dev/null &` on four cores, `kill %1` after). Expected if the daemon switches governors:
-   `schedutil`, idle near 300 MHz, load above 4 GHz. Expected failure to report: governor stays
-   `performance`, or load stays below the maximum (then the cap is the PMP-less fallback).
-   Restore with `powerprofilesctl set performance` on AC, or delete the saved choice if one was made.
+   (`yes > /dev/null &` on four cores, `kill %1` after). This records whether the shell flips to
+   `balanced` by itself on unplug ([r3-power.md](r3-power.md) item 3, the #54 done-check) and
+   whether the governor follows the daemon on battery (r3-power.md item 5). Only if the profile
+   did not flip, run `powerprofilesctl set balanced` and sample again. Expected if the daemon
+   switches governors: `schedutil`, idle near 300 MHz, load above 4 GHz. The idle=nop and
+   PMP-disabled command-line limits (r3-power.md item 7) may keep idle above 300 MHz. Expected
+   failure to report: governor stays `performance`, or load stays below the maximum (then the cap
+   is the PMP-less fallback). Restore with `powerprofilesctl set performance` on AC, or delete the
+   saved choice if one was made.
 2. Agent, offline: confirm the profile-to-governor table in the daemon source (omarchy-pkgs).
 3. Owner, boot trial (can hang): the PMP nodes and `K114S_R3B_FAST_DIE`, after the PMP tunables are
    available; shared T6050 kernel work belongs to TripleU613 and aurora-silicon (linux #481, #1324,

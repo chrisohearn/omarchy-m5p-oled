@@ -58,6 +58,12 @@ def facts(t):
         pm = t.by_phandle.get(w[0]) if w else None
         add(f"{fn} provider", "smc-pmu", pm["name"] if pm else None)
         add(f"{fn} command (a, b)", want, tuple(w[3:5]))
+        add(f"{fn} key words ('pKW8', 'pcIO')", (0x704B5738, 0x7063494F), tuple(w[1:3]))
+    # the six reg windows of dts/t6050-k114s-hdmi.dtsi (core, reset, fabric, axi2af, lioa, common-cfg)
+    regs = {t.addr("arm-io/atc-phy3", i) for i in range((len(t.prop("arm-io/atc-phy3", "reg") or b"")) // 16)}
+    for nm, a in (("core", 0x38B000000), ("reset", 0x38B200000), ("fabric", 0x38B244000),
+                  ("axi2af", 0x388000000), ("lioa", 0x388020000), ("common-cfg", 0x38B250000)):
+        add(f"atc-phy3 has the draft's {nm} window {a:#x}", True, a in regs)
     add("dcpext3 dp-switch-ufp-endpoint", 3, cell("arm-io/dcpext3", "dp-switch-ufp-endpoint"))
     add("dcpext3 dp-switch-ufp-port", 0, cell("arm-io/dcpext3", "dp-switch-ufp-port"))
     add("atc3-dpxbar compatible", "atc-dpxbar,t6050", sf.text(t.prop("arm-io/atc3-dpxbar", "compatible") or b""))
@@ -66,7 +72,7 @@ def facts(t):
     return out
 
 
-def _made_up(hpd_pin=14):
+def _made_up(hpd_pin=14, pcio=0x7063494F):
     w = lambda *a: struct.pack("<%dI" % len(a), *a)
     s = lambda x: x.encode() + b"\0"
     P, N = sf._prop, sf._node
@@ -74,12 +80,14 @@ def _made_up(hpd_pin=14):
         N("atc3-dpphy", [("AAPL,phandle", w(5)), ("compatible", s("atc-dpphy,t602x")), ("port-type", w(6)),
                          ("dp-switch-dfp-endpoint", w(3)), ("dp-switch-dfp-port", w(0)), ("dp2hdmi-gpio-parent", w(7))]),
         N("atc3-dpxbar", [("compatible", s("atc-dpxbar,t6050"))]),
+        N("atc-phy3", [("reg", b"".join(struct.pack("<QQ", a, 0x4000) for a in (
+            0x38B000000, 0x38B200000, 0x38B244000, 0x388000000, 0x388020000, 0x38B250000)))]),
         N("aop-gpio0", [("AAPL,phandle", w(1))]),
         N("smc-pmu", [("AAPL,phandle", w(2))]),
         N("dp2hdmi-gpio0", [("AAPL,phandle", w(7)), ("function-hdmi_hpd", w(1, GPIO, hpd_pin, 0x100)),
                             ("function-force-dpfu", w(1, GPIO, 15, 1)), ("interrupts", w(14, 0x05000004)),
-                            ("function-hdmi_pwr_en", w(2, 0x704B5738, 0x70634F49, 0x800000, 0xF0000)),
-                            ("function-dp2hdmi_pwr_en", w(2, 0x704B5738, 0x70634F49, 0x0, 0x1A0000))]),
+                            ("function-hdmi_pwr_en", w(2, 0x704B5738, pcio, 0x800000, 0xF0000)),
+                            ("function-dp2hdmi_pwr_en", w(2, 0x704B5738, pcio, 0x0, 0x1A0000))]),
         N("dcpext3", [("dp-switch-ufp-endpoint", w(3)), ("dp-switch-ufp-port", w(0))],
           [N("iop-dcpext3-nub", [("external-index", w(4))])]),
     ]
@@ -102,6 +110,8 @@ def self_test():
         print(sink.getvalue())
     res = facts(sf.Tree(sf.parse(_made_up(hpd_pin=13))[0]))
     bad = [wh for _, wh, e, f in res if sf.norm(e) != sf.norm(f)]
+    badk = [wh for _, wh, e, f in facts(sf.Tree(sf.parse(_made_up(pcio=0x70634F49))[0])) if sf.norm(e) != sf.norm(f)]
+    check("a converter power line on another SMC key fails the key-word facts", len(badk) == 2 and all("key words" in b for b in badk))
     check("an HPD on another pin fails exactly that fact", bad == ["hdmi_hpd pin"])
     return 0 if ok else 1
 

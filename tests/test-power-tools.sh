@@ -162,14 +162,23 @@ mkdir -p "$S/class/hwmon/hwmon3"; h=$S/class/hwmon/hwmon3
 echo macsmc_hwmon >"$h/name"; echo 4100 >"$h/fan1_input"; echo 2000 >"$h/fan1_min"; echo 8400 >"$h/fan1_max"; echo 0 >"$h/fan1_target"
 echo TAOC >"$h/temp1_label"; echo -127000 >"$h/temp1_input"; echo TCMb >"$h/temp2_label"; echo 71500 >"$h/temp2_input"
 echo "Total System Power" >"$h/power1_label"; echo 25000000 >"$h/power1_input"
+# cpufreq sampler (#54): policy0 has no cpuinfo_min_freq, to cover the unreadable header case
+for i in 0 6 12; do d=$S/devices/system/cpu/cpufreq/policy$i; mkdir -p "$d"
+  echo schedutil >"$d/scaling_governor"; echo 1200000 >"$d/cpuinfo_cur_freq"; echo 4380000 >"$d/scaling_max_freq"
+  echo 4380000 >"$d/cpuinfo_max_freq"; echo apple-cpufreq >"$d/scaling_driver"; echo "$i" >"$d/related_cpus"
+  [[ $i == 0 ]] || echo 300000 >"$d/cpuinfo_min_freq"; done
 before=$(cd "$S" && find . -type f -exec sha256sum {} + | sort | sha256sum)
+out=$(run "$hw/k114s-cpufreq-log.sh" 0 1 2>&1)
+[[ $out == *"policy0: cpus 0 range ?-4380 MHz"* && $out == *"policy6: cpus 6 range 300-4380 MHz"* && $out != *"syntax error"* ]] && ok "cpufreq header survives an unreadable min frequency" || bad "cpufreq header: $out"
+[[ $out == *"| schedutil 1200 (4380) | schedutil 1200 (4380) | schedutil 1200 (4380)"* ]] && ok "cpufreq sampler prints governor and MHz per policy" || bad "cpufreq sample: $out"
+for a in "x 1" "1 x"; do run "$hw/k114s-cpufreq-log.sh" $a >/dev/null 2>&1; is "$?" 2 "cpufreq sampler rejects arguments '$a'"; done
 out=$(run "$hw/k114s-thermal-log.sh" 0 1 2>&1)
 [[ $out == *"absent channels"*"TAOC(-127)"* && $out == *"4100(2000-8400)"* && $out == *"TCMb=71.5"* && $out == *"25.0W"* ]] && ok "thermal logger reads fan, hottest channel, absent TAOC" || bad "thermal: $out"
 [[ $out != *"| TAOC"* ]] && ok "absent channel kept out of the hottest list" || bad "TAOC in the hottest list"
 is "$(cd "$S" && find . -type f -exec sha256sum {} + | sort | sha256sum)" "$before" "the read-only loggers changed nothing in the fake tree"
 nowrite=1
-for f in k114s-battery-log k114s-plug-probe k114s-thermal-log; do grep -nE '(>|tee)[^|]*(/sys|\$sys|\$bat|\$h\b)' "$hw/$f.sh" | grep -vE '>/dev/null|2>&1|2>/dev/null' && { bad "$f.sh may write to sysfs"; nowrite=0; }; done
-[[ $nowrite == 1 ]] && ok "no write redirect to sysfs in the three loggers"
+for f in k114s-battery-log k114s-cpufreq-log k114s-plug-probe k114s-thermal-log; do grep -nE '(>|tee)[^|]*(/sys|\$sys|\$bat|\$h\b)' "$hw/$f.sh" | grep -vE '>/dev/null|2>&1|2>/dev/null' && { bad "$f.sh may write to sysfs"; nowrite=0; }; done
+[[ $nowrite == 1 ]] && ok "no write redirect to sysfs in the four loggers"
 
 [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "SOME FAILED"
 exit $fail

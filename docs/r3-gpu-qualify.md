@@ -39,11 +39,11 @@ about 72 C, fans about 2200 RPM.
 ## Owner steps (not run; they load the GPU)
 
 ```sh
-# 1. In a terminal at the Mac: record 10 minutes while you load the GPU yourself, for example
+# 1. In a terminal at the Mac (the log goes outside the checkout): record 10 minutes while you load the GPU yourself, for example
 #    by opening a WebGL demo in the browser, or switching workspaces with animations on.
-sudo bash tests/hardware/k114s-gpu-qualify.sh 5 120 | tee gpu-soak.log
+sudo bash tests/hardware/k114s-gpu-qualify.sh 5 120 | tee ~/gpu-soak.log
 # 2. Afterwards: the RESULT line and any new aurora line
-tail -1 gpu-soak.log
+tail -1 ~/gpu-soak.log
 sudo journalctl -k -b --no-pager | grep -i -E 'aurora.*(fault|timeout|hang|error)'
 ```
 
@@ -54,4 +54,4 @@ the GPU tree (`docs/r3b-kernel.md`); the attended suspend test is its own step t
 
 - `docs/matrix.md` GPU row: mailbox interrupt gate proven on the K114s (2026-11-15); frequency scaling, power and temperature
   `unsupported` by the driver; suspend with the GPU still open.
-- `docs/r3-sleep-lid.md` 0009-0010 row: the gate that kept `0010` out of r3a is met by step G; r3b may carry it.
+- `docs/r3-sleep-lid.md` 0009-0010 row: r3b already carries `0010` in its v272-11 base (`docs/r3b-kernel.md`); step G (`docs/r3-integration.md`) is the evidence, and r3b still waits for the lead's G4 acceptance (`docs/r3-display-plan.md`) before any boot on the GPU tree.
