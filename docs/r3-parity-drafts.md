@@ -43,9 +43,9 @@ tree that carries an amplifier or an enabled `spkr` channel.
 
 - **#30:** which pmgr register block the base's `psreg 4` maps to is upstream's step (#1856), not
   derivable from the ADT; the tree and ADT agree on `reg[46]` and both offsets. Decoding itself,
-  10-bit and over 1080p are untested upstream (#1995, #1936 open). Not decided: shipping the
-  omarchy-mac `mpv.conf` (`hwdec=vaapi-copy`). It should wait for a verified decode; today
-  `/etc/mpv/mpv.conf` stays `hwdec=auto-safe`.
+  10-bit and over 1080p are untested upstream (#1995, #1936 open). Decided: keep the omarchy-mac `mpv.conf`
+  (`hwdec=vaapi-copy`) as it is; it is already `/etc/mpv/mpv.conf` here, and mpv falls back to software without
+  the decoder. See [r3-avd-decode.md](r3-avd-decode.md).
 - **#62:** the reader's DART stream (iommu-map `0x200` to `dart_apcie1` stream 1) is the K114c and
   J714s value; the ADT lists streams 16 to 18 and a mapper but names none for the reader. s2idle with
   a kernel-trained SD port is linux #1647 (open) and needs an `apple,k114s` line in pcie-apple; #1998
