@@ -60,9 +60,11 @@ power_policy() { # prints the verdict, returns 1 on a problem
 bind_policy() { # Hyprland must bind no XF86Sleep, keycode 150 or suspend action; fails when hyprctl does not answer
   local json=${K114S_BINDS_JSON:-} rc
   # Lua configs report arg as an opaque number, so the Lua sources are scanned as well
-  local dirs=${K114S_HYPR_LUA_DIRS:-$HOME/.config/hypr $HOME/.config/omarchy ${OMARCHY_PATH:-/usr/share/omarchy}/default/hypr}
+  # An array, so a HOME or OMARCHY_PATH with a space stays one path. The test hook is a space-separated list.
+  local -a dirs
+  if [ -n "${K114S_HYPR_LUA_DIRS:-}" ]; then read -ra dirs <<<"$K114S_HYPR_LUA_DIRS"
   # Omarchy keeps its generated Lua (toggles, current theme) under ~/.local/state/omarchy; directories are scanned recursively
-  [ -n "${K114S_HYPR_LUA_DIRS:-}" ] || dirs+=" $HOME/.local/state/omarchy"
+  else dirs=("$HOME/.config/hypr" "$HOME/.config/omarchy" "${OMARCHY_PATH:-/usr/share/omarchy}/default/hypr" "$HOME/.local/state/omarchy"); fi
   if [ -z "$json" ]; then json=$(mktemp); hyprctl binds -j >"$json" 2>/dev/null; fi
   py '
 import json,re,sys,glob,os
@@ -75,14 +77,14 @@ for x in b:
     if x.get("key")=="XF86Sleep" or x.get("keycode")==150 or re.search(sus,text,re.I):
         bad.append("hyprland bind can suspend: %s code=%s %s %s"%(x.get("key"),x.get("keycode"),x.get("dispatcher",""),x.get("description","")))
 for d in sys.argv[2:]:
-    for f in [d] if os.path.isfile(d) else glob.glob(os.path.join(d,"**","*.lua"),recursive=True):
+    for f in glob.glob(os.path.join(d,"**","*.lua"),recursive=True):
         for n,l in enumerate(open(f,errors="replace"),1):
             if not l.lstrip().startswith("--") and re.search(sus,l,re.I):
                 bad.append("hyprland lua can suspend: %s:%d"%(os.path.basename(f),n))
 for m in bad: print(m)
 print("hyprland binds: %s"%("FAIL" if bad else "no suspend bind"))
 sys.exit(1 if bad else 0)
-' "$json" $dirs; rc=$?
+' "$json" "${dirs[@]}"; rc=$?
   [ -n "${K114S_BINDS_JSON:-}" ] || rm -f "$json"
   return $rc
 }

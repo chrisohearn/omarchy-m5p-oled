@@ -142,7 +142,10 @@ record() { # ISSUES RESULT TITLE NOTE
 }
 seen="" endlist=() gok="" finished=0
 write_summary() { [ -n "${stamp:-}" ] && summary | redact >"$state/summary-$stamp.md"; }
-note_issues() { local i; [ -z "$only" ] || [ "$only" = "$cur" ] || return 0; for i in $1; do case " $seen " in *" $i "*) ;; *) seen+=" $i" ;; esac; done; }
+note_issues() {
+  local i; [ -z "$only" ] || [ "$only" = "$cur" ] || return 0
+  for i in $1; do case " $seen " in *" $i "*) ;; *) seen+=" $i" ;; esac; done
+}
 
 cur="" quit=0
 section() { cur=$1; [ -n "$only" ] && [ "$only" != "$1" ] && return; echo; echo "=== Section $1: $2"; log "=== Section $1: $2"; }
@@ -231,7 +234,8 @@ summary() {
     printf '%s' "${LINES[$i]:-}"
   done
   echo
-  echo "Left out on purpose (suspend, speakers, NVRAM or macOS): #50, #51 lid close, #34 suspend, #58 resume, #42, #64, #66, #48 firmware, #33 firmware match, #49 phase 6."
+  echo "Left out on purpose (suspend, speakers, NVRAM or macOS): #50, #51 lid close, #34 suspend, #58 resume, #42, #64, #66," \
+       "#48 firmware, #33 firmware match, #49 phase 6."
 }
 # later ISSUES TITLE TEXT : a step that ends the desktop session. Listed now, to be done after the summary is written.
 later() {
@@ -316,7 +320,8 @@ step 38 "Mic trial" "At the prompts: silent, count aloud 30 cm from the screen, 
 step 60 "USB plug test" "Plug a flash drive, keyboard or USB Ethernet adapter (NOT a charger) into the LEFT-FRONT port when prompted, then flip and unplug as prompted. Repeat on the right port. Skip the left-back (debug) port. Say at which step the Mac hangs, if it does." -- bash $hw/k114s-usb-plug-test.sh
 
 section D "needs a reboot: listed only, folded into the display trial boots"
-active && echo "  Fold every item into the same candidate Stage 2 and one-boot trial as the display work, arm a one-boot way back first, and reboot once or twice in total. This script does not reboot."
+active && echo "  Fold every item into the same candidate Stage 2 and one-boot trial as the display work," \
+  "arm a one-boot way back first, and reboot once or twice in total. This script does not reboot."
 listed 68 "boot-loader menu check, then snapshot-check after-menu"
 listed 53 "charge-limit status after a reboot (100 until the #1615 uevent fix is booted)"
 listed 72 "ATC0 left-back port trial (trial Stage 2 with K114S_R3_USB_ATC0), then k114s-atc0-plug-test.sh 90"
