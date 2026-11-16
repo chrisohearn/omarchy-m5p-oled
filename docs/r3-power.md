@@ -109,4 +109,13 @@ Power, AC Input Power, 3.8 V Rail, Heatpipe), fan1 and fan2 at 0 RPM (min 2000, 
 others (Tz11 to Tz18, Tz1j, TNLc, TNSz, TNVn) read 0. The logger lists these once as absent and
 leaves them out of the hottest list. The hottest channels at idle were TVDM, TVDC, TVD0, TCMb at
 about 51 °C. No CPU thermal zone (only `thermal_zone0`, the battery). Masking the TAO keys needs the
-ADT key list and a dts change: not done. #1944 (fan manual control) is not ported.
+ADT key list and a dts change: not done. The #1944 property is ported as an off-by-default macro in `dts/t6050-k114s-fan.dtsi` (see `docs/r3b-kernel.md`).
+
+Update 2026-11-15 (agent-run, r3a kernel on the GPU desktop, no load generated): the fans now spin. Three samples
+10 s apart with `tests/hardware/k114s-thermal-log.sh 10 3` read fan1 2198 to 2201 RPM and fan2 2370 to 2379 RPM
+(min 2000, max 8400 and 9072; `fanN_target` 2200 and 2376, read only) at 22 to 26 W total system power with the
+hottest channels TVDM, TVDC, TVD0 and TCMb at 68 to 69 C (one TCMb spike to 82.8 C). So a fan reading above its
+minimum is now logged, but at desktop load, not a sustained load. Absent channels at this boot: TfCB, TAOC, TAOI,
+TAOJ, TAOP, Tz11 to Tz18, Tz1j, TNLc, TNSz, TNVn (-127 or 0); the logger already keeps them out of the hottest list.
+Still open: a sustained-load run with the logger (owner), the ADT key list for the TAO* keys, and CPU thermal zones.
+
