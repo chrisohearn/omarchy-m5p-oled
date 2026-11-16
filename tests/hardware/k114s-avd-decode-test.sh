@@ -18,11 +18,16 @@ for a in "$@"; do
   case $a in
     --software-only) sw_only=1 ;;
     h264|hevc|vp9) codecs+=("$a") ;;
-    *) sed -n '2,15p' "$0"; exit 2 ;;
+    *) sed -n '2,13p' "$0"; exit 2 ;;
   esac
 done
 [ ${#codecs[@]} -gt 0 ] || codecs=(h264 hevc vp9)
 for t in ffmpeg timeout md5sum mktemp; do command -v "$t" >/dev/null || { echo "FAIL missing tool: $t"; exit 2; }; done
+enclist=$(ffmpeg -hide_banner -encoders 2>/dev/null)
+for c in "${codecs[@]}"; do
+  case $c in h264) e=libx264 ;; hevc) e=libx265 ;; vp9) e=libvpx-vp9 ;; esac
+  grep -qw "$e" <<<"$enclist" || { echo "FAIL missing encoder: $e"; exit 2; }
+done
 tmp=$(mktemp -d) || exit 2
 trap 'rm -rf "$tmp"' EXIT
 fail=0
@@ -38,9 +43,9 @@ fi
 
 enc() { # codec out
   case $1 in
-    h264) ffmpeg -v error -f lavfi -i "testsrc2=size=$size:rate=30:duration=2" -c:v libx264 -preset veryfast -pix_fmt yuv420p -y "$2" ;;
-    hevc) ffmpeg -v error -f lavfi -i "testsrc2=size=$size:rate=30:duration=2" -c:v libx265 -preset veryfast -pix_fmt yuv420p -x265-params log-level=error -y "$2" ;;
-    vp9)  ffmpeg -v error -f lavfi -i "testsrc2=size=$size:rate=30:duration=2" -c:v libvpx-vp9 -deadline realtime -cpu-used 8 -pix_fmt yuv420p -y "$2" ;;
+    h264) timeout -k 5 120 ffmpeg -v error -f lavfi -i "testsrc2=size=$size:rate=30:duration=2" -c:v libx264 -preset veryfast -pix_fmt yuv420p -y "$2" ;;
+    hevc) timeout -k 5 120 ffmpeg -v error -f lavfi -i "testsrc2=size=$size:rate=30:duration=2" -c:v libx265 -preset veryfast -pix_fmt yuv420p -x265-params log-level=error -y "$2" ;;
+    vp9)  timeout -k 5 120 ffmpeg -v error -f lavfi -i "testsrc2=size=$size:rate=30:duration=2" -c:v libvpx-vp9 -deadline realtime -cpu-used 8 -pix_fmt yuv420p -y "$2" ;;
   esac
 }
 for c in "${codecs[@]}"; do

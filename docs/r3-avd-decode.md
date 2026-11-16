@@ -25,8 +25,11 @@ problem with gpu-next on Asahi; unverified on the M5).
 
 ## Owner steps (the boot trial is the owner's)
 
-1. Build a trial tree with `K114S_R3_AVD` defined, in its own worktree, as a separate trial (AVD alone). Boot it
-   once the proven way, with the way back armed (the same procedure as the r3a trials).
+1. Build a trial tree from the proven configuration P's `t6050-k114s-r3-gpu.dts` with `K114S_R3_AVD` defined (AVD
+   alone), with `build/make-stage2.sh`, in its own worktree. Boot it as one `aura-try` boot, with the checks of
+   [r3-display-plan.md](r3-display-plan.md) section 4.2 and the way back of 4.3. No standing `stage2-trial` re-arm
+   exists (4.1 rule 3). Run it only before the display window opens (D1) or after it closes (4.4), never inside it.
+   Its Stage 2 file counts against the two-trial-file ESP budget (G2).
 2. After the boot, no root needed:
    `bash tests/hardware/k114s-parity-check.sh avd` (node okay, `/dev/video*`, `/dev/media*`, driver, dmesg).
    If the module is not loaded, `sudo modprobe apple_avd` (check `modinfo` for the exact name first).
