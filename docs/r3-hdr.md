@@ -177,3 +177,30 @@ off and sRGB. After a DCP crash a reboot restores the panel; then do E4.
 What the test cannot show: the panel's real luminance (no meter), or whether the firmware tone-maps above the cap. Write
 down only what the owner saw.
 
+## 9. The EDR test, 2026-11-16: run, and HDR made the default
+
+Run on r3b.c3 with the owner watching. The boot combined E1 with the VRR way back (`docs/r3-vrr.md` section 7); the cap
+was the only new setting.
+
+| Step | Result | Label |
+| --- | --- | --- |
+| E1: `/etc/modprobe.d/k114s-edr-trial.conf` with `fw27_panel_edr_max_nits=1200`, one reboot | the desktop came back at 3024x1986@120 | owner-observed |
+| E2: kernel log | `panel peak luminance 2000 nits (ADT)`, `panel EDR capped at 1200 nits`, `panel EDR headroom up to 16.000`, and the P3 line | agent-run |
+| E2: `edid-decode` of the eDP-1 EDID | an HDR static metadata block: SDR and SMPTE ST2084, desired content maximum 147 (1207.332 cd/m²), beside the P3 primaries | agent-run |
+| E3.1: `k114s-cm-trial hdredid 20` | the trial took effect (`colorManagementPreset hdredid`). The first run went unwatched; on the second the owner saw it stay lit and look normal. Every revert was verified | owner-observed |
+| E3.2: the 10-bit PQ clip (white at 1000 nits) in a window during `k114s-cm-trial hdredid 45` | "Test looks good"; mpv `VO: [gpu-next] 1280x720 yuv420p10`; no DCP crash | owner-observed |
+
+E3.3 (the `hdr` preset) was not run, because the owner asked to keep `hdredid` on. **HDR is now the default** (the owner's
+words: "Looked good let's keep it on"):
+- `linux/display/k114s-edr-cap` installs `/etc/modprobe.d/k114s-edr-cap.conf` (the 1200-nit cap) and removes the
+  one-boot test file. It refuses while any other modprobe file sets the cap. `--check` also fails then, and on this Mac it
+  requires `modprobe -c` to read exactly one cap, 1200. `--undo` is there too.
+- The managed colour block (`dcp-colour.lua`) picks `hdredid` when appledrm's cap is above the 1000-nit SDR maximum or 0, and
+  `dp3` otherwise. It reads the cap from `/sys/module/appledrm/parameters/fw27_panel_edr_max_nits`. That works in Hyprland's
+  Lua (agent-run: `io.open` read 1200). So the same block is right on a kernel without EDR, and on r3b.b1.
+- The way back: `sudo bash linux/display/k114s-edr-cap --undo`, then a reboot. The block then falls back to `dp3` by
+  itself.
+
+Not measured: the panel's real luminance (no meter), whether the firmware tone-maps above the cap, and the power cost of
+HDR output.
+
