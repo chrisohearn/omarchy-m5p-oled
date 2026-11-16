@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s (MacBook Pro 14-inch PROLED XDR, M5 Pro, Mac17,13): the camera (Apple ISP, IMX958). DRAFT.
+ * NOT booted on a K114s. NOT included by any tree of this repository (docs/r3-camera.md, issue #33).
+ *
+ * The K116s way (aurora-silicon/linux #1648, "The camera" block of t6050-k116s.dts): include the
+ * base tree's t6050-j716c-isp.dtsi, which adds the isp/isp-dart0..2 aliases and describes isp0, its
+ * three DARTs and the camera power states, all DISABLED. The boot loader enables them only after
+ * it has read isp0's segment-ranges from the ADT, reserved the firmware and the heap, and found a
+ * row for this board in its t6050_isp_boards table. That row is patches/aura/0004: without it the
+ * loader refuses ("board or firmware not in the table") and the camera stays off, harmlessly.
+ *
+ * tests/k114s-adt-camera-facts.py reads this Mac's ADT and compares it with the values that file
+ * and the K116s block rely on: reg windows, interrupts 513 to 516 and 526, the three DARTs at
+ * 0x5828c0000, 0x5828e0000 and 0x582900000 (streams 0 and 12, remap 1/6/7/10/11), the pmgr offsets
+ * (FAB9_SOC 0x398, ISP_SYS 0x3a0, ISPSENS0 0x100), the firmware uuid, scheme 0x10 and the two
+ * segments. All equal the K116s ones (agent-run, 2026-11-15). The sensor type is 0xba, the K116s' is
+ * 0xbc and the K114c's 0xb9: the loader passes it as apple,platform-id.
+ *
+ * Open: the sensor preset in t6050-j716c-isp.dtsi (config-index 5, input 1920x2160) is the J716c
+ * and K116s one. The K114c's was config-index 6, input 3040x2880, crop 320 765 2400 1350
+ * (linux #1756). Which the K114s needs is unknown until the driver runs on it.
+ *
+ * Nothing here is enabled unless the including tree defines K114S_R3_ISP. Include it after
+ * t6050-k114s-common.dtsi. It needs the kernel's apple-isp driver (VIDEO_APPLE_ISP=m is in the
+ * running kernel), the ISP firmware files in /lib/firmware/apple, the loader row of patches/aura/0004
+ * and linux #1831 (the 27.2 firmware version parser; without it the driver reads UNKNOWN and sends the
+ * 12.x set-file record).
+ */
+#ifdef K114S_R3_ISP
+#include "t6050-j716c-isp.dtsi"
+#endif
