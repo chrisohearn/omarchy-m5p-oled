@@ -19,13 +19,8 @@ root=${MEDIA_SMOKE_ROOT:-}
 capture=1 vkcube=0
 for a in "$@"; do
   case $a in
-<<<<<<< HEAD
     --no-capture) capture=0 ;; --vkcube) vkcube=1 ;;
-    *) sed -n '2,18p' "$0"; exit 2 ;;
-=======
-    --no-capture) capture=0 ;; --vkcube) vkcube=1 ;; --chromium) chromium=1 ;;
     *) sed -n '2,16p' "$0"; exit 2 ;;
->>>>>>> origin/main
   esac
 done
 tmp=$(mktemp -d) || exit 2
