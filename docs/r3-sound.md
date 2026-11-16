@@ -264,10 +264,10 @@ If the microphone card breaks the boot or the jack, use the `-nomics` tree. If t
 does, `rollback stage2` returns to the tree without sound; the kernel patches and the user-space
 files are inert without the `/sound` node.
 
-## Tests run (agent-run, 2026-11-14, on this Mac as an unprivileged user)
+## Tests run (agent-run, 2026-11-14; count repaired 2026-11-15, on this Mac as an unprivileged user)
 
 - `tests/test-sound.sh` against the base tree with dtc 1.8.1 and gcc's preprocessor: 57 of 57.
-  It covers the ADT reader on a made-up ADT (9), compile and lint of both trees (4), a build that
+  The itemised breakdown that follows is the 2026-11-14 run and adds up to 40; the 17 checks the 2026-11-15 repair added are not itemised here. It covers the ADT reader on a made-up ADT (9), compile and lint of both trees (4), a build that
   must fail without the PMP file (1), ten unsafe trees the lint must refuse (10), the UCM
   profiles through `alsaucm` (4), the installer in a fake root (10), and the installed
   speakerguardd v2 reader on the compiled tree (2).

@@ -9,7 +9,7 @@ script run against a made-up sysfs tree), **owner-observed**, **upstream-reporte
 | Script | Needs | Writes | Issue |
 |---|---|---|---|
 | `k114s-charge-limit-test.sh status` | nothing | nothing | #53 |
-| `sudo k114s-charge-limit-test.sh run` | **owner, sudo, on AC** | **SMC end threshold (80, then 100) and `/etc/udev/macsmc-battery.conf`**; 100 is restored on every exit | #53 |
+| `sudo k114s-charge-limit-test.sh run` | **owner, sudo, on AC** | **SMC end threshold (80, then 100) and `/etc/udev/macsmc-battery.conf`**; the starting end threshold and saved file are restored on every exit (the file is removed if there was none) | #53 |
 | `k114s-battery-log.sh [secs [n]]` | unplug AC for the discharge part | nothing | #52, #56 |
 | `k114s-plug-probe.sh [secs [label]]` | owner plugs and unplugs | nothing | #57, #71 |
 | `k114s-thermal-log.sh [secs [n]]` | owner starts a load to spin the fans | nothing | #55 |
@@ -17,7 +17,7 @@ script run against a made-up sysfs tree), **owner-observed**, **upstream-reporte
 `tests/test-power-tools.sh` runs all of them, plus the installed `omarchy-battery-charge-limit`,
 `/usr/lib/omarchy-mac/battery-charge-limit-restore`, the two udev rules and
 `omarchy-powerprofiles-set`, against fake sysfs trees and stub `sudo`, `upower`, `busctl` and
-`powerprofilesctl` (replica; 41 checks). It proves script logic, not that the T6050 SMC honours a
+`powerprofilesctl` (replica; 42 checks). It proves script logic, not that the T6050 SMC honours a
 threshold.
 
 ## #53 charge limit
@@ -49,7 +49,7 @@ What the replica run shows:
 - Not tested: whether the SMC accepts 80 and derives start 75, whether charging stops on AC at 80,
   and the boot restore (which depends on #1615). Owner step: `sudo
   tests/hardware/k114s-charge-limit-test.sh run` on AC, then `omarchy battery charge limit 80`,
-  reboot, `k114s-charge-limit-test.sh status` (expect 100 until #1615 is booted), then
+  reboot, `k114s-charge-limit-test.sh status` (expect 100 until #1615 is booted, if the SMC does not keep the end threshold across a reboot; that is untested, so note what you see), then
   `omarchy battery charge limit 100`.
 
 ## #52 battery status
@@ -63,7 +63,7 @@ boot (agent-run: one review saw the count go from 43 to 60).
 
 ## #56 why the profile is `performance`, and what it is on battery
 
-Source: `omarchy-powerprofiles-init`, `-set`, `-list`, `-floor` (omarchy-mac 4.5.0).
+Source: `omarchy-powerprofiles-init`, `-set`, `-list`, `-floor` (omarchy-dev 4.0.0.r7859.g9ac0883; the installed omarchy-mac 0.2.3-2 ships only the charge-limit pieces).
 
 1. Hyprland autostart runs `omarchy-powerprofiles-init`, which is `omarchy-powerprofiles-set autodetect`.
    The shell battery service runs `omarchy-powerprofiles-set ac|battery` whenever UPower's
@@ -94,8 +94,8 @@ Source: `omarchy-powerprofiles-init`, `-set`, `-list`, `-floor` (omarchy-mac 4.5
 
 Agent-run: `macsmc-ac` online, `input_power_limit` **59 800 000 µW (59.8 W)**. `typec` port0 and
 port1: `power_operation_mode` default, no `portN-partner`, role `[sink]` selectable as source,
-data `host [device]`, PD revision 2.0. Both `tps6598x-source-psy-*` supplies are `online` 0. There is
-no `usb_power_delivery` class. So the charger is not on a described USB-C port: it is on MagSafe or
+data `host [device]`, PD revision 2.0. Both `tps6598x-source-psy-*` supplies are `online` 0. `/sys/class/usb_power_delivery` exists but is
+empty. So the charger is not on a described USB-C port: it is on MagSafe or
 the undescribed left-back port. The 59.8 W is the SMC's input limit for whatever is plugged in, not a
 PD contract. `k114s-plug-probe.sh` records all of this and its changes during a plug cycle; the
 owner names the connector and the LED colour. The MagSafe controller (hpm5) has no node; this

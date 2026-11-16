@@ -51,6 +51,9 @@ free() { df -B1 --output=avail "$esp" | tail -n 1 | tr -d ' '; }
 if [ -n "$restore" ]; then
   [ -f "$restore/SHA256SUMS" ] && [ -d "$restore/files" ] || stop "$restore is not a backup made by this tool"
   (cd "$restore/files" && sha256sum -c --quiet ../SHA256SUMS) || stop "the backup does not match its SHA256SUMS; nothing was restored"
+  listed=$(awk '{ sub(/^[0-9a-f]+ [ *]/, ""); sub(/^\.\//, ""); print }' "$restore/SHA256SUMS" | sort)
+  present=$(cd "$restore/files" && find . -type f | sed 's#^\./##' | sort)
+  [ "$listed" = "$present" ] || stop "the backup holds files that SHA256SUMS does not list (or lists files that are missing); nothing was restored"
   n=0
   while IFS= read -r f; do # only the paths this tool can back up
     case $f in .Spotlight-V100/* | .Trashes/* | .fseventsd/* | m1n1/boot.bin.old) ;; *) stop "the backup holds a path this tool never saves ($f); nothing was restored" ;; esac

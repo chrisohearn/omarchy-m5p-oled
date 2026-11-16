@@ -27,6 +27,7 @@ deny=${K114S_PUBLISH_DENY:-${XDG_CONFIG_HOME:-$HOME/.config}/omarchy-m5p-oled/pu
 if [ -r "$deny" ]; then
   while IFS= read -r p; do
     case "$p" in ''|'#'*) continue ;; esac
+    echo | grep -E -e "$p" >/dev/null 2>&1; [ $? -le 1 ] || { flag "the local deny list has a line that is not a valid extended regex: ${p:0:20}"; continue; }
     h=$(echo "$files" | tr '\n' '\0' | xargs -0 grep -l -I -E -e "$p" 2>/dev/null || true)
     [ -z "$h" ] || { echo "$h"; flag "a term from the local deny list is in the files above"; }
   done < "$deny"
