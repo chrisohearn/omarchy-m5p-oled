@@ -10,7 +10,10 @@
 # gesture on the same fingers and direction, so install refuses while an unmarked line sets one of them.
 set -u
 here=$(cd "$(dirname "$0")" && pwd); snip=$here/mac-swipes.lua
-f=${K114S_HYPR_DIR:-$HOME/.config/hypr}/input.lua; bak=$f.k114s-mac-swipes.bak
+f=${K114S_HYPR_DIR:-$HOME/.config/hypr}/input.lua
+# a dotfile manager may link input.lua: edit the file it points at, so the link stays a link
+[ -L "$f" ] && { f=$(readlink -f -- "$f") || exit 1; }
+bak=$f.k114s-mac-swipes.bak
 B='-- k114s-mac-swipes begin'; E='-- k114s-mac-swipes end'
 die() { echo "k114s-mac-swipes: $*" >&2; exit 1; }
 [ -s "$snip" ] || die "no $snip"
@@ -18,12 +21,24 @@ die() { echo "k114s-mac-swipes: $*" >&2; exit 1; }
 block() { awk -v b="$B" -v e="$E" 'index($0, b) == 1 { p = 1 } p { print } p && index($0, e) == 1 { p = 0 }' "$1"; }
 strip() { awk -v b="$B" -v e="$E" 'index($0, b) == 1 { p = 1 } !p { print } p && index($0, e) == 1 { p = 0 }' "$1"; }
 installed() { [ -n "$(block "$f")" ] && [ "$(block "$f")" = "$(cat "$snip")" ]; }
+# zero or one complete block, begin before end; anything else (a half-deleted block) is left alone
+balanced() {
+  awk -v b="$B" -v e="$E" 'index($0, b) == 1 { if (p) bad = 1; p = 1; n++ } index($0, e) == 1 { if (!p) bad = 1; p = 0 }
+    END { exit (bad || p || n > 1) }' "$1"
+}
+# an active gesture outside the block on 3 or 4 fingers, left, right or horizontal, in any field order or over several lines
+clash() {
+  strip "$1" | sed 's/--.*$//' | tr '\n' ' ' | sed 's/hl\.gesture(/\n&/g' | grep '^hl\.gesture(' | sed 's/}).*$//' |
+    grep -E 'fingers *= *[34]([^0-9]|$)' | grep -q -E 'direction *= *"(left|right|horizontal)"'
+}
 put() { t=$(mktemp "$f.XXXXXX") || exit 1; cat > "$t" && chmod --reference="$f" "$t" && mv "$t" "$f" || { rm -f "$t"; die "cannot write $f"; }; }
+case ${1:---install} in --check | --install | --undo) balanced "$f" ||
+  die "$f has an unmatched or repeated '$B' / '$E' line: fix it by hand (nothing was changed)" ;; esac
 case ${1:---install} in
   --check) installed && echo "k114s-mac-swipes: installed in $f" || die "not installed in $f" ;;
   --install)
     installed && { echo "k114s-mac-swipes: already installed"; exit 0; }
-    strip "$f" | grep -v '^[[:space:]]*--' | grep -q -E 'hl\.gesture\(\{ *fingers = [34], *direction = "(left|right)"' &&
+    clash "$f" &&
       die "$f already sets a 3- or 4-finger left or right gesture outside the marked block: remove those lines first (Hyprland rejects a duplicate)"
     [ -e "$bak" ] || cp -p "$f" "$bak" || die "cannot keep a backup"
     { strip "$f"; cat "$snip"; } | put; installed || die "the block is not in $f after the write"

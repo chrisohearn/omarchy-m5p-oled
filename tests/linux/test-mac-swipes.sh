@@ -18,7 +18,20 @@ bash "$S" --undo >/dev/null 2>&1; ok "undo restores the original bytes" "$(sum "
 out=$(bash "$S" --undo 2>&1); ok "undo twice is a no-op" "$? $(sum "$M")" "0 $orig"
 printf 'hl.gesture({ fingers = 3, direction = "left", action = function() end })\n' >> "$M"; d=$(sum "$M")
 out=$(bash "$S" 2>&1); ok "install refuses a hand-written 3-finger left gesture and changes nothing" "$? $(sum "$M") $(echo "$out" | grep -c 'outside the marked block')" "1 $d 1"
-rm "$M"; bash "$S" >/dev/null 2>&1; ok "no input.lua: refuses, creates nothing" "$? $(ls "$H" | wc -l)" "1 1"
+printf -- '-- input\n' > "$M"; printf 'hl.gesture({ direction = "right", fingers = 4, action = "fullscreen" })\n' >> "$M"; d=$(sum "$M")
+out=$(bash "$S" 2>&1); ok "install refuses a clashing gesture written with direction before fingers" "$? $(sum "$M")" "1 $d"
+printf -- '-- input\nhl.gesture({\n  fingers = 3,\n  direction = "horizontal",\n  action = "workspace",\n})\n' > "$M"; d=$(sum "$M")
+out=$(bash "$S" 2>&1); ok "install refuses a clashing gesture spread over several lines (horizontal)" "$? $(sum "$M")" "1 $d"
+printf -- '-- input\nhl.gesture({ fingers = 2, direction = "left", action = "workspace" })\nhl.gesture({ fingers = 3, direction = "up", action = "special" })\n' > "$M"
+out=$(bash "$S" 2>&1); ok "install accepts gestures that do not clash (2 fingers left, 3 fingers up)" "$? $(bash "$S" --check >/dev/null 2>&1; echo $?)" "0 0"
+bash "$S" --undo >/dev/null 2>&1
+printf -- '-- input\n-- k114s-mac-swipes begin (half-deleted)\nkeep = 1\nhl.config({})\n' > "$M"; d=$(sum "$M")
+out=$(bash "$S" 2>&1); r1=$?; out2=$(bash "$S" --undo 2>&1); r2=$?
+ok "a begin line with no end line: install and undo refuse and the lines below it stay" "$r1 $r2 $(sum "$M") $(grep -c 'keep = 1' "$M")" "1 1 $d 1"
+T=$BASE/dotfiles; mkdir -p "$T"; printf -- '-- input\n' > "$T/input.lua"; rm -f "$M" "$M.k114s-mac-swipes.bak"; ln -s "$T/input.lua" "$M"
+out=$(bash "$S" 2>&1); ok "a symlinked input.lua stays a link and its target gets the block" "$? $(test -L "$M"; echo $?) $(grep -c 'k114s-mac-swipes begin' "$T/input.lua")" "0 0 1"
+bash "$S" --undo >/dev/null 2>&1; ok "undo through the link too" "$(test -L "$M"; echo $?) $(grep -c 'k114s-mac-swipes begin' "$T/input.lua")" "0 0"
+rm -f "$M"; bash "$S" >/dev/null 2>&1; ok "no input.lua: refuses, creates nothing" "$? $(test -e "$M"; echo $?)" "1 1"
 bash "$S" --bogus >/dev/null 2>&1; ok "an unknown option fails" $? 1
 if command -v lua >/dev/null; then
   r=$(lua -e 'hl = { gesture = function(t) local a = type(t.action) == "function" and "fn" or t.action; io.write(t.fingers, t.direction, ":", a, " ") end, dispatch = function() end, dsp = {} }' "$L/input/mac-swipes.lua" 2>&1)
