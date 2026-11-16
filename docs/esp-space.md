@@ -124,7 +124,7 @@ What it checks before it deletes: root, `/boot/efi` is a mount point (a delete o
 is on root with room for the files plus 50 MiB, the backup is byte-identical to the live files (`sha256sum -c`), and the item-specific refusals above.
 A stop at any point leaves the ESP as it was. Evidence: `tests/linux/test-esp-trim.sh`, 32 checks on a replica of the layout (agent-run, replica): the dry run changes
 nothing byte for byte, unknown names and paths are refused, kernels, firmware, Stage 2 files, repair bundle and `limine.conf` stay untouched,
-apply then restore returns the files byte for byte, a restore never overwrites, a tampered backup restores nothing, an unmounted folder is refused, and failed rm, sync, cp and free-space STOPs report the undo command.
+apply then restore returns the files byte for byte, a restore never overwrites, a tampered backup restores nothing, an unmounted folder is refused, and failure handling is checked for each stop: a failed rm or apply-sync stops and prints the `--restore` undo command, a failed restore cp removes the partial file and says to run `--restore` again, a failed restore sync says to check the ESP, and a restore refused for too little room says nothing was restored.
 **It has not been run on the Mac** and this branch does not run it. The replica cannot show how vfat behaves on the real partition or that
 macOS tolerates the missing folders (it recreates them).
 

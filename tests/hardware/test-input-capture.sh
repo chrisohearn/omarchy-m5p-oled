@@ -108,6 +108,11 @@ mkdir -p "$t/h/.local/state/omarchy/toggles/hypr" "$t/o/default/hypr"
 echo 'hl.bind("F12", hl.dsp.exec_cmd("systemctl suspend"))' >"$t/h/.local/state/omarchy/toggles/hypr/t.lua"
 out=$(HOME=$t/h OMARCHY_PATH=$t/o K114S_HYPR_LUA_DIRS= cap keypolicy); rc=$?
 [[ $rc -eq 1 && $out == *"lua can suspend: t.lua:1"* ]] && ok "keypolicy default dirs scan the Omarchy state tree" || { bad "default dirs (rc=$rc)"; echo "$out"; }
+# a HOME with a space stays one path (the scan must not be skipped by word splitting)
+mkdir -p "$t/h s/.local/state/omarchy"
+echo 'hl.bind("F12", hl.dsp.exec_cmd("systemctl suspend"))' >"$t/h s/.local/state/omarchy/s.lua"
+out=$(HOME="$t/h s" OMARCHY_PATH=$t/o K114S_HYPR_LUA_DIRS= cap keypolicy); rc=$?
+[[ $rc -eq 1 && $out == *"lua can suspend: s.lua:1"* ]] && ok "keypolicy default dirs scan a HOME with a space" || { bad "space in HOME (rc=$rc)"; echo "$out"; }
 echo 'not json' >"$t/binds.json"
 out=$(cap keypolicy); rc=$?
 [[ $rc -eq 1 && $out == *"binds: unavailable"* ]] && ok "keypolicy fails when hyprctl gives no binds" || { bad "no binds (rc=$rc)"; echo "$out"; }
