@@ -1,0 +1,31 @@
+# K114s r3b.c2 kernel (aurora-silicon/linux#1615): r3b.c1 plus the battery manufacture-date fix.
+#
+# Same base, release suffix and configuration as r3b.c1 (patches/linux/r3b-c1.series): the release stays
+# 7.3.0-17.v272-11-k114s-r3b-ARCH and the package stays linux-k114s-r3b (version 7.3.0.r3b.c2-1), so it upgrades the
+# installed r3b.c1 package in place and replaces its UKI (omarchy_linux-k114s-r3b.efi). macsmc-power is built in
+# (CONFIG_MACSMC_POWER=y), so only the Image differs; every module is the same.
+# Build: K114S_LABEL=K114S-R3B-C2 (uname -v), output $K114S_BUILD_ROOT/build/r3b-c2, package K114S_CAND=r3b-c2.
+# Why (seen on hardware, 2026-11-16, docs/r3b-kernel.md "r3b.c2"): r3b to r3b.c1 lack sleep-lid/0007, so every boot
+# logs `failed to report 'manufacture_year' property: -95`, the battery's uevent fails, udev never handles
+# macsmc-battery and a saved charge limit (/etc/udev/macsmc-battery.conf) is not restored at boot.
+#
+# 1. the r3b.b1 series (patches/linux/r3b-b1.series), unchanged and in its order
+r3b/0001-HID-dockchannel-hid-clamp-Report-Size-items-where-th.patch
+r3b/0002-HID-dockchannel-hid-pad-short-reports-to-the-clamped.patch
+r3b/0003-HID-magicmouse-drop-the-GD-Mouse-usages-on-dockchann.patch
+r3b/0004-HID-magicmouse-parse-the-0x5a-MTP-report-of-the-K114.patch
+sound/0004-ASoC-apple-macaudio-Add-K114-with-the-speakers-off.patch
+r3b/0005-PCI-apple-qualify-the-K114s-for-suspend-to-idle-over.patch
+# 2. localversion.10-pkgrel  -17.v272-11-k114s-r3b   (as r3b; not a patch file)
+brightness/0001-drm-apple-answer-the-PMU-temperature-for-every-panel.patch
+brightness/0002-drm-apple-apply-the-syslog-debug-filter-to-the-inter.patch
+brightness/0003-drm-apple-take-the-27.2-D590-notification-as-a-no-op.patch
+brightness/0005-dt-bindings-display-apple-dcp-optional-panel-brightn.patch
+brightness/0006-drm-apple-hold-brightness-requests-at-the-panel-s-fl.patch
+# 3. the HDR series (docs/r3-hdr.md), applied with `git am` on top of 1 and 2. 0001 and 0002 are offered upstream
+#    (aurora-silicon/linux#2060); 0003 is K114s-only (the 500-nit default of the cap).
+hdr/0001-drm-apple-describe-an-internal-panel-without-a-known.patch
+hdr/0002-drm-apple-cap-the-panel-peak-a-firmware-27-panel-s-E.patch
+hdr/0003-drm-apple-K114s-no-panel-EDR-above-500-nits-by-defau.patch
+# 4. the battery fix, as r3a carries it (r3a.series), applied with `git am` on top of 1 to 3
+sleep-lid/0007-power-supply-macsmc-skip-an-unreadable-manufacture-d.patch
