@@ -19,9 +19,13 @@
 # hook rebuilds omarchy_linux-k114s-r3b.efi in place. It adds no package, preset, entry or UKI: the ESP holds the r3a
 # and r3b images in the display window and has no room for a third kernel image (section 3.1, G2).
 #
+# r3b-c1 (docs/r3-hdr.md, issue #92) is r3b-b1 plus the HDR series (patches/linux/r3b-c1.series): the same package name
+# and release again, version 7.3.0.r3b.c1-1, so it upgrades r3b.b1 in place the same way.
+#
 # This file does not compile anything. It packages a finished build:
-#   K114S_CAND  the candidate, r3a, r3b or r3b-b1   (default r3a, the one the runbook docs/r3-integration.md names;
-#               r3b: docs/r3b-kernel.md, K114S_CAND=r3b makepkg ...; r3b-b1: D5a, K114S_CAND=r3b-b1 makepkg ...)
+#   K114S_CAND  the candidate, r3a, r3b, r3b-b1 or r3b-c1   (default r3a, the one the runbook docs/r3-integration.md names;
+#               r3b: docs/r3b-kernel.md, K114S_CAND=r3b makepkg ...; r3b-b1: D5a, K114S_CAND=r3b-b1 makepkg ...;
+#               r3b-c1: docs/r3-hdr.md, K114S_CAND=r3b-c1 makepkg ...)
 #   K114S_SRC   the kernel source tree      (default $K114S_BUILD_ROOT/src/<candidate>)
 #   K114S_OUT   its output directory        (default $K114S_BUILD_ROOT/build/<candidate>)
 # with the toolchain of $K114S_BUILD_ROOT (default ~/k114s-build; env.sh and bin/kmake there).
@@ -34,7 +38,8 @@ case $_cand in
   r3a) pkgname=linux-k114s; _kcand=r3a; _ver=r3a; _rel=2 ;;
   r3b) pkgname=linux-k114s-r3b; _kcand=r3b; _ver=r3b; _rel=1 ;;
   r3b-b1) pkgname=linux-k114s-r3b; _kcand=r3b; _ver=r3b.b1; _rel=1 ;;   # vercmp: 7.3.0.r3b.b1-1 is newer than 7.3.0.r3b-1
-  *) echo "K114S_CAND must be r3a, r3b or r3b-b1" >&2; exit 1 ;;
+  r3b-c1) pkgname=linux-k114s-r3b; _kcand=r3b; _ver=r3b.c1; _rel=1 ;;   # vercmp: 7.3.0.r3b.c1-1 is newer than 7.3.0.r3b.b1-1
+  *) echo "K114S_CAND must be r3a, r3b, r3b-b1 or r3b-c1" >&2; exit 1 ;;
 esac
 pkgbase=$pkgname
 pkgver=7.3.0.$_ver
@@ -61,9 +66,15 @@ package() {
   [[ $_kcand != r3b || $kernel_release != 7.3.0-17.v272-4-k114s-r3a-ARCH ]] || { echo "r3b release equals r3a's" >&2; return 1; }
   [[ $kernel_release == *-k114s-${_kcand}-ARCH ]] || { echo "release '$kernel_release' is not a $_kcand release (missing the k114s release suffix?)" >&2; return 1; }
   # r3b-b1 must be built from a tree with the brightness floor (patches/linux/brightness 0006), never from plain r3b
-  if [[ $_cand == r3b-b1 ]]; then
+  if [[ $_cand == r3b-b1 || $_cand == r3b-c1 ]]; then
     grep -q 'dcp_bl_set_minimum' "$_src/drivers/gpu/drm/apple/dcp_backlight.h" ||
       { echo "$_src has no brightness series (patches/linux/r3b-b1.series)" >&2; return 1; }
+  fi
+  # r3b-c1 must carry the HDR series (patches/linux/r3b-c1.series) with the K114s 500-nit EDR cap
+  if [[ $_cand == r3b-c1 ]]; then
+    grep -q 'fw27_panel_edr_max_nits = 500;' "$_src/drivers/gpu/drm/apple/dcp.c" &&
+      grep -q 'dcp_panel_color_target' "$_src/drivers/gpu/drm/apple/dcp-display-metadata.c" ||
+      { echo "$_src has no HDR series with the 500-nit cap (patches/linux/r3b-c1.series)" >&2; return 1; }
   fi
   modpath="$pkgdir/usr/lib/modules/$kernel_release"
 

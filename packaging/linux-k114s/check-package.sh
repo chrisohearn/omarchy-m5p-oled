@@ -11,6 +11,7 @@
 #   - no file in common with an installed package of the other kernel (pacman -Qlq linux-aurora), only directories
 #   - the kernel inside vmlinuz carries the same release string
 #   - a brightness build (version ...r3b.b<N>, linux-k114s-r3b) carries the floor of patches/linux/brightness 0006 in appledrm
+#   - an HDR build (version ...r3b.c<N>) also carries the floor, and hdr 0001-0003: the Display P3 default and the 500-nit EDR cap
 # usage: check-package.sh PACKAGE.pkg.tar.zst [OTHER-KERNEL-PACKAGE=linux-aurora] [Module.symvers]
 # Run it once per other kernel (linux-aurora, and linux-k114s for an r3b package): each must be installed.
 # The symbol check needs the build's Module.symvers (default $K114S_BUILD_ROOT/build/${K114S_CAND:-r3a}/Module.symvers); without it only plain depmod -a runs.
@@ -66,8 +67,16 @@ strings -a "$m/vmlinuz" | grep -q "Linux version $rel " && ok "vmlinuz banner na
 ver=$(info pkgver); drm=$(find "$m" -name appledrm.ko | head -1)
 if [ -n "$drm" ] && strings -a "$drm" | grep -q 'brightness requests below %u nits are raised to %u nits'; then floor=yes; else floor=no; fi
 case $ver in
-  *.b[0-9]*) [ $floor = yes ] && ok "version $ver: appledrm carries the brightness floor (brightness 0006)" || no "version $ver: appledrm lacks the brightness floor (brightness 0006)" ;;
+  *.b[0-9]*|*.c[0-9]*) [ $floor = yes ] && ok "version $ver: appledrm carries the brightness floor (brightness 0006)" || no "version $ver: appledrm lacks the brightness floor (brightness 0006)" ;;
   *) echo "info version $ver: appledrm brightness floor $floor" ;;
+esac
+# The HDR build (version ...r3b.c<N>, docs/r3-hdr.md) must carry the Display P3 default and the EDR cap at 500 nits.
+case $ver in
+  *.c[0-9]*)
+    if [ -n "$drm" ] && strings -a "$drm" | grep -q 'EDID primaries default to Display P3'; then ok "version $ver: appledrm carries the Display P3 default (hdr 0001)"
+    else no "version $ver: appledrm lacks the Display P3 default (hdr 0001)"; fi
+    if [ -n "$drm" ] && modinfo -F parm "$drm" | grep -q '^fw27_panel_edr_max_nits:.*(default: 500)'; then ok "version $ver: appledrm caps panel EDR at 500 nits by default (hdr 0002, 0003)"
+    else no "version $ver: appledrm lacks the 500-nit EDR cap (hdr 0002, 0003)"; fi ;;
 esac
 if [ $fail != 0 ]; then echo "check-package: FAILED"
 elif [ $skipped != 0 ]; then echo "check-package: all run checks passed; $skipped skipped ($other is not installed)"
