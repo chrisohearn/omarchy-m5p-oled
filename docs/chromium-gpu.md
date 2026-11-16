@@ -21,8 +21,11 @@ GPU run (no `LIBGL_ALWAYS_SOFTWARE`):
 Notes:
 
 - Chromium's ANGLE reports the Mesa renderer as "AGX G13/G14", not "Apple M5 Pro" (the name `vulkaninfo` and Mesa GLES give). It is a string mapping, not a different device. Do not grep for "Apple M5 Pro" in a Chromium report; `media-smoke.sh --chromium` does, and cannot read the page anyway (see below).
-- `--dump-dom chrome://gpu`, used by `media-smoke.sh --chromium`, needs `--allow-chrome-scheme-url` in headless mode and even then returns only the unrendered page shell. Use the new script instead.
-- Software fallback (`LIBGL_ALWAYS_SOFTWARE=1`, what the omarchy-mac wrapper sets while no render node exists): Canvas, Compositing, Rasterization software only, WebGL and WebGPU disabled, no crash lines. The fallback path works.
+- `--dump-dom chrome://gpu`, used by `media-smoke.sh --chromium`, needs `--allow-chrome-scheme-url` in headless mode and even then returns only the unrendered page shell. Use the new script instead. `media-smoke.sh` no longer has a `--chromium` mode.
+- In a session the guard keeps on the CPU, the GPU run prints SKIP (exit 2) instead of a hardware FAIL; it never overrides the guard.
+- The script lets Chromium pick its own DevTools port, reads it from the profile, and still reads the user's `chromium-flags.conf` and may touch `~/.pki/nssdb`.
+- `tests/hardware/test-chromium-gpu-report.sh` tests the script's logic with stubs.
+- Software fallback (`--software`: the environment the repo's `70-k114s-gpu-desktop` guard sets, `LIBGL_ALWAYS_SOFTWARE=1 GBM_ALWAYS_SOFTWARE=1 ASAHI_M5_BRINGUP=0`; the omarchy-mac wrapper's own behaviour is not verified here): Canvas, Compositing, Rasterization software only, WebGL and WebGPU disabled, no crash lines. The fallback path works.
 - The flags file also loads the Omarchy extensions; they start fine headless.
 
 ## Left for the owner

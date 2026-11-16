@@ -82,14 +82,5 @@ rm "$d/bin/gpu-screen-recorder"
 run "$d" --no-capture
 [[ $out == *"gpu-screen-recorder absent"* ]] && ok "absent recorder is reported" || bad "gsr absent: $out"
 
-printf '#!/bin/sh\necho "    deviceName = Apple M5 Pro"\n' >"$d/bin/vulkaninfo"; chmod +x "$d"/bin/*
-# chromium: software renderer is a FAIL, the M5 Pro is a PASS; stub flags are checked
-printf '#!/bin/sh\ncase "$*" in *--enable-gpu*) ;; *) exit 9;; esac\necho "<td>GL_RENDERER: llvmpipe</td>"\n' >"$d/bin/chromium"; chmod +x "$d/bin/chromium"
-run "$d" --no-capture --chromium
-[[ $out == *"FAIL chromium used a software renderer"* ]] && ok "software renderer is a FAIL" || bad "chromium sw: $out"
-printf '#!/bin/sh\necho "<td>GL_RENDERER: Apple M5 Pro</td>"\n' >"$d/bin/chromium"; chmod +x "$d/bin/chromium"
-run "$d" --no-capture --chromium
-[[ $out == *"PASS chromium GL_RENDERER is the Apple M5 Pro"* ]] && ok "M5 Pro renderer is a PASS" || bad "chromium gpu: $out"
-
 [[ $fail -eq 0 ]] && echo "all ok" || echo "FAILURES"
 exit $fail
