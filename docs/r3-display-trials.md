@@ -1272,7 +1272,7 @@ power-off lands on P with r3a, except when the one-shot is still pending (sectio
 
 ## 6. A hang or a black screen: which boot comes next
 
-Hold the power button until the Mac is off, start it, and run block F first on an r3b boot (block C on an r3a boot),
+If the Mac still answers over T3 or ssh, use the black-T2 note below the table first (a clean reboot keeps the loader log). Otherwise hold the power button until the Mac is off, start it, and run block F first on an r3b boot (block C on an r3a boot),
 then block P, then the row:
 
 | Trial | The fallback boot is | How to tell | Then |
@@ -1286,7 +1286,7 @@ then block P, then the row:
 | D3, hang (no trial in the fallback boot) or black | r3b on P (before Limine) or r3a on P | as in the rows above | T2's failure is the loader binary, not the hand-off: record on #18; stop the trials and close the window |
 | Any boot stops at the Limine menu | the keyboard does not work there: power off | | macOS, section 5 |
 
-A black T2 panel does not mean a dead kernel. If T3 or ssh still answers, the lead runs block F and T2b remotely (the logs survive), then `journalctl --flush; sync` and `systemctl reboot` (the default r3a on P comes back). Only if nothing answers: wait more than 5 minutes first (journald syncs error lines every 5 minutes), then hold the power button. A forced power-off loses T2's loader log, so block A may send the lead to D3.
+A black T2 panel does not mean a dead kernel. If T3 or ssh still answers, the lead runs block F and T2b remotely (the logs survive), then `sudo journalctl --sync; sync` and `sudo systemctl reboot` (the default r3a on P comes back). Only if nothing answers: wait more than 5 minutes first (journald syncs error lines every 5 minutes), then hold the power button. A forced power-off loses T2's loader log, so block A may send the lead to D3.
 
 
 After a failed T2 the window stays open until the lead decides: a fixed retry (same blocks, new file hashes) or the close.

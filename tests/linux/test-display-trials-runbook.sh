@@ -52,7 +52,7 @@ cat > "$BIN/systemctl" <<'SH'
 echo "$@" >> "$FAKE_W/calls"
 case $1 in
   is-enabled) shift; for u; do echo masked; done ;;
-  show) for a; do u=$a; done; ls "$FAKE_W/systemd/$u.d" 2>/dev/null | sed "s#^#$FAKE_W/systemd/$u.d/#" | tr '\n' ' '; echo ;;
+  show) [ "$2" = -p ] && [ "$3" = ActiveState ] && { echo "${FAKE_CLEANUP:-inactive}"; exit 0; }; for a; do u=$a; done; ls "$FAKE_W/systemd/$u.d" 2>/dev/null | sed "s#^#$FAKE_W/systemd/$u.d/#" | tr '\n' ' '; echo ;;
   stop) [ "$2 $3" = "snapper-cleanup.timer limine-snapper-sync.service" ] && : > "$FAKE_W/state/sync-stopped" ;;
   start) [ "$2 $3" = "snapper-cleanup.timer limine-snapper-sync.service" ] && rm -f "$FAKE_W/state/sync-stopped" ;;
   is-active) shift; q=0; [ "$1" = -q ] && { q=1; shift; }; rc=3
