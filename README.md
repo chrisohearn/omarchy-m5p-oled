@@ -19,16 +19,16 @@ on the Mac by the AI agent). States not yet on the Mac (*integrated*, *built*, *
 | Boot from encrypted NVMe, Limine, keyboard | working (owner-observed) |
 | Trackpad | working with aurora-silicon/linux #1568 (owner-observed) |
 | Wi-Fi | working (agent-run) |
-| Bluetooth controller | up (agent-run); hands-free profiles need the r3a kernel (built, not booted) |
+| Bluetooth controller | up (agent-run); RFCOMM and BNEP verified on r3a (agent-run); HFP call audio blocked on SCO upstream; pairing and A2DP are owner-pending |
 | GPU (G17S): OpenGL, Hyprland on the GPU | working (owner-observed, agent-run); Vulkan device enumerates, Vulkan clients not tested: [docs/r3-gpu-result.md](docs/r3-gpu-result.md) |
-| Battery, voltages | reading (agent-run); the fans read 0 RPM at idle and have not been read spinning yet |
-| Updates on Omarchy's Edge channel | guarded after one bad refresh, and paused for now: the space guard refuses every package change while the EFI partition has less than 88,080,384 bytes (84 MiB) free; it has 87,683,072 (83.6 MiB, 0.4 MB short) on 2026-11-15 (agent-run): [incident](docs/incident-2026-11-14-edge-refresh.md), [what fills the partition](docs/esp-space.md) |
-| Headphone jack, microphones | integrated (on main, not installed; goes in with the r3a kernel) |
+| Battery, voltages, fans | reading (agent-run); fans read about 2200 and 2375 RPM at desktop load on r3a (agent-run); sustained-load run still open |
+| Updates on Omarchy's Edge channel | guarded after one bad refresh; updates run under the holds, and the space guard passes with 111 MB free against its 88 MB minimum (agent-run, 2026-11-15, after the r3a promotion): [incident](docs/incident-2026-11-14-edge-refresh.md), [what fills the partition](docs/esp-space.md) |
+| Headphone jack, microphones | integrated (on main); the r3a kernel has the modules, but the GPU Stage 2 tree has no sound node, so no card yet |
 | Native panel mode, 120 Hz, brightness | designed, not run (display coprocessor step: [docs/r3-display-gpu.md](docs/r3-display-gpu.md)) |
-| Suspend and lid | blocked on purpose: suspend targets are masked while the GPU runs on polled mailboxes; this needs the r3a kernel and then #1844's second commit (`sleep-lid/0010`, planned after r3a) |
+| Suspend and lid | blocked on purpose: r3a is booted and the GPU mailbox interrupt is proven (about 400/s), but the suspend targets stay masked; open are `sleep-lid/0010` (not in r3a), the PMP nodes and the first attended cycle |
 | Speakers | blocked upstream: no protection data for this model ([why](docs/r3-audio-protection.md)) |
-| USB-C data ports | in the booted device tree; both controllers bind to `dwc3-apple`, but no USB bus has appeared and no device has been plugged in yet (agent-run) |
-| Camera, touchscreen, Touch ID, video decode, SD reader, Thunderbolt, external displays | not started (sources reviewed only) |
+| USB-C data ports | in the booted device tree; both controllers bind to `dwc3-apple`, but no USB bus has appeared and no device has been plugged in yet (agent-run, re-checked on r3a 2026-11-15) |
+| Camera, touchscreen, Touch ID, video decode, SD reader, Thunderbolt, external displays | drafted or ADT-checked offline, never booted (see [docs/matrix.md](docs/matrix.md)) |
 
 Per-subsystem detail, sources and next steps are in [docs/matrix.md](docs/matrix.md).
 

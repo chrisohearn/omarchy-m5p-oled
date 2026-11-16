@@ -15,10 +15,10 @@ Versions read: `omarchy-mac` 0.2.3-2, `omarchy-mac-boot` 20261104-1, `aurora-ble
 
 | Issue | Finding | Verdict |
 | --- | --- | --- |
-| #63 first boot | setup-system ran to its last line, first boot and owner provisioning both finished, no step failed. Two effects the baseline expects are not delivered on this Mac, neither by a failure: Electron wrappers (the runtime has no helper) and the Wi-Fi resume fix (the chip test cannot match the N1). The Apple mpv default is now in place (rechecked 2026-11-15, [docs/r3-avd-decode.md](r3-avd-decode.md)). | verifier written and run; **partly done** (the `installer/` patch audit against upstream was not part of this pass) |
+| #63 first boot | setup-system ran to its last line, first boot and owner provisioning both finished, no step failed. Two effects the baseline expects are not delivered on this Mac, none by a failure: Electron wrappers (the runtime has no helper), the Wi-Fi resume fix (the chip test cannot match the N1). | **verified** (agent-run with sudo reads 2026-11-15, 0 FAIL); the remaining WARN is the Electron wrapper steps, skipped because the runtime lacks `omarchy-cmd-electron-gl-wrap` and `omarchy-cmd-desktop-exec-repair` (an omacom runtime item). The `installer/` patch audit against upstream is still not done |
 | #64 startup disk | `aurora-bless` needs `/dev/mtd/by-name/nvram`. The booted tree has no flash node and no `nvram` alias; the K114s ADT has the NVRAM region, identical to the J775D's. Not the J714s or K116s: neither carries the node in this kernel base. | cause **found**; node **drafted, not built**; the write test is **blocked on the owner** |
-| #68 snapshots | Limine has **no** snapshot entry, so no Snapshots boot is possible today. Each would cost a 77 MiB UKI on an ESP with 84 MiB free, and the pacman guard already wants 84 MiB free. `LIMIT_USAGE_PERCENT=85` is what refuses them. | a Snapshots boot is **not safe to enable** here; keep the limit at 85 |
-| #69 factory reset | `@factory` exists. The reset would replace the Limine menu with the stock template (dropping the K114s repair entry), rebuild the boot files from the image, and erase the system. Its own kernel check should refuse here first, but only after several steps. | **hide it until qualified**: patch 0003 refuses the command on the K114s; the menu row needs a one-line user extension |
+| #68 snapshots | Limine has **no** snapshot entry, so no Snapshots boot is possible today. Each would cost a 75.7 MiB UKI; the ESP has 111 MB free after the r3a promotion (the repair image is gone) and 167.5 MB is needed (one k114s UKI plus the guard). `LIMIT_USAGE_PERCENT=85` is what refuses them. | a Snapshots boot is **not safe to enable** here; keep the limit at 85 |
+| #69 factory reset | `@factory` exists. The reset would replace the Limine menu with the stock template (dropping the K114s repair entry), rebuild the boot files from the image, and erase the system. Its own kernel check should refuse here first, but only after several steps. | **hide it until qualified**: patch 0005 refuses the command on the K114s; the menu row needs a one-line user extension |
 
 ## First boot: omarchy-mac-setup-system and -setup-user (#63)
 
@@ -37,13 +37,13 @@ exits at once unless `omarchy-hw-apple-silicon` passes.
 | Script | Effect it should leave | This Mac (agent-run, root, read-only) |
 | --- | --- | --- |
 | setup-system | `options brcmfmac feature_disable=0x82000` removed from `/etc/modprobe.d/brcmfmac.conf`; migration marker `1789172112-initramfs-pending` written only if it removed it | no quirk line; file absent; marker absent |
-| setup-system | `/etc/mpv/mpv.conf`: an unedited copy of the earlier omarchy-mac default (sha256 `9e186dd8...`) is replaced by the current default (`hwdec=vaapi-copy`, `vo=gpu`, `gpu-sw=yes`) | **OK** (rechecked 2026-11-15): no package owns the file and it is the Apple default (`hwdec=vaapi-copy`, `vo=gpu`, `gpu-sw=yes`). Decision: keep it ([docs/r3-avd-decode.md](r3-avd-decode.md)). Until the AVD tree is the default boot, mpv falls back to software. The earlier WARN (an `omarchy-settings-dev` file with `hwdec=auto-safe`) no longer applies |
+| setup-system | `/etc/mpv/mpv.conf`: an unedited copy of the earlier omarchy-mac default (sha256 `9e186dd8...`) is replaced by the current default (`hwdec=vaapi-copy`, `vo=gpu`, `gpu-sw=yes`) | **OK (updated 2026-11-15, #30)**: the file now equals the Apple default (`hwdec=vaapi-copy`, `gpu-sw=yes`; cmp-identical, agent-run). The earlier WARN (the file was `omarchy-settings-dev`'s, `hwdec=auto-safe`) is outdated. mpv still decodes in software here until the decoder is on a tree |
 | setup-system | `omarchy-wifi-resume-fix.service` enabled plus marker `/var/lib/omarchy-mac/wifi-configured`, only where `wifi-supported` passes | unit disabled, no marker. `wifi-supported` matches Broadcom IDs `14e4:4425/4433/4434`; the N1 is `106b:1902`, so it can never pass here. Harmless: the unit's `ExecCondition` is the same test, and suspend is blocked anyway (docs/r3-sleep-lid.md) |
 | setup-system | `speakersafetyd.service` preset applied once, marker `/var/lib/omarchy-mac/speaker-safety-configured` | marker present, unit `enabled`, state `inactive`: a local drop-in (`90-k114s.conf`) requires `/usr/share/speakersafetyd/apple/k114.conf`, which does not exist. Intended; the speakers stay muted until protection data exists (docs/r3-audio-protection.md). Nothing here changes that |
-| setup-system | `wifi.backend=iwd` in NetworkManager (package file `20-omarchy-mac-wifi.conf`), iwd reads `/etc/iwd` then the omarchy-mac default (6 GHz joins off) | backend is iwd. iwd's environment points at `/usr/lib/omarchy-aurora/iwd-n1` instead: `omarchy-aurora-firmware`'s `30-aurora-n1-6ghz.conf` replaces the list on purpose (N1, 6 GHz on). INFO. 6 GHz is untried here (docs/matrix.md) |
+| setup-system | `wifi.backend=iwd` in NetworkManager (package file `20-omarchy-mac-wifi.conf`), iwd reads `/etc/iwd` then the omarchy-mac default (6 GHz joins off) | backend is iwd. iwd's environment points at `/usr/lib/omarchy-aurora/iwd-n1` instead: `omarchy-aurora-firmware`'s `30-aurora-n1-6ghz.conf` replaces the list on purpose (N1, 6 GHz on). INFO. 6 GHz is untried here (docs/matrix.md). The omarchy-mac 0.0 default is moot on this image; the radio offers 59 6 GHz channels and a join needs a 6 GHz AP ([docs/wifi-n1.md](wifi-n1.md), PR #96; #58) |
 | setup-system (R) | `wifi-iwd-profiles`: one iwd profile per saved NetworkManager WPA network | 1 iwd profile, 1 saved connection (R; names not read) |
 | setup-system | `omarchy-cmd-electron-gl-wrap` wrappers in `/usr/local/bin` for Chromium, 1Password and Cursor, when installed | **WARN**: the runtime has no such helper, so the install log says "Skipping Electron launchers". Chromium 157 is installed and has no wrapper; that only matters where the GPU has no render node. Same for setup-user's desktop-entry repair |
-| setup-system | Steam FEX launcher where Steam is installed (online only) | Steam not installed: N/A |
+| setup-system | Steam FEX launcher where Steam is installed (online only) | Steam not installed: N/A. Feasibility is documented ([steam-fex-muvm.md](steam-fex-muvm.md)): unsupported until the owner trial (#29) |
 | setup-system | its last output (`systemctl cat`, `NetworkManager --print-config`, `appledrm` options) | in `/var/log/omarchy-install.log` (world-readable): present, then "Completed: platform-setup.sh" |
 | first boot | `pending` gone, no `last-error`, keyring recorded, `/var/log/omarchy-mac-first-boot.log` ends in `committed` | all true (R for the log: 83 lines, no failure). `mac-first-boot/deferred-steps` is left behind: the encryption conversion token |
 | owner provisioning | `/var/log/omarchy-provision-owner.log` ends in "first-boot setup complete" | true (R). Two lines match fail/error: unit text `Restart=on-failure` and one `cat: write error: Broken pipe`; the rest is mise's offline "no versions found" noise |
@@ -153,6 +153,7 @@ Open questions before anyone builds it (none answerable offline):
 
 1. Does the **Aura** loader fill the partition (`dt_set_nvram`) the way m1n1 does? The J775D
    comment names m1n1 only. If it does not, the partition stays empty and the node does nothing.
+   **Answered 2026-11-15 (#64, agent-run strings):** the installed Stage 2 loader (`m1n1-aurora` 1.6.1.aurora24.v272-3) carries the `dt_set_nvram` fill-in for `/arm-io/qspi/spinor/anvram`. Still untested at boot.
 2. The J775D file's `flash@0` has `reg = <0>`; its comment also says the flash is "spinor's CS0
    (second cell 0x19)". The K114s `function-spi_cs0` and `spinor` reg match, but nobody has
    booted a K114s tree with the controller on.
@@ -165,6 +166,8 @@ the owner; it stays unbuilt here. Draft upstream report text is in the appendix.
 ## Snapshot boot entries (#68)
 
 ### State (agent-run, root read-only)
+
+**Update 2026-11-15 (#68):** after the r3a promotion the ESP has 111 MB free and one k114s UKI plus the guard needs 167.5 MB. The repair image is gone, so the paragraph below on deleting it no longer applies. Snapshots 3 and 4 match the installed kernels; snapshot 1 does not. The `--boot-loader-menu` request may be ignored by Limine, and the owner trial is the test. The figures below are the 2026-11-14 baseline.
 
 - `snapper` config `root`, two snapshots: #1 "K114s baseline image ... KEEP", #2 "BROKEN: mid Edge
   refresh 14:11, stock kernel, no holds: do not restore" (cleanup `number`, limit 5).
@@ -212,8 +215,7 @@ there was 87.7 MB a day earlier).
 
 The 85 percent line leaves 8,997 KiB of headroom, so a single snapshot UKI exceeds it by about 68,400 KiB.
 That is the most likely reason the sync has produced no entry (inferred, not proven: the tool was
-not run). Holding one snapshot **and** the pacman guard needs 163,412 KiB free, 77,784 KiB more than
-now.
+not run). Holding one snapshot **and** the pacman guard needs 163,412 KiB free (2026-11-14 baseline; 167.5 MB on 2026-11-15 against 111 MB free).
 
 ### Is a Snapshots boot safe here?
 
@@ -233,13 +235,10 @@ boot one by mistake.
 
 **`LIMIT_USAGE_PERCENT`: keep 85.** It is the thing refusing entries. Do not raise it: the
 arithmetic above shows any value that admits one UKI (above 98.4) leaves 8 MiB free and breaks every
-update. To make Snapshots usable, raise free space to about 163 MiB (163,412 KiB), that is about
-76 MiB (77,784 KiB) more than now. That is an owner decision, not made here. Do not free it from
+update. To make Snapshots usable, raise free space to about 167.5 MB, about 54 MiB more than the 111 MB free on 2026-11-15. That is an owner decision, not made here. Do not free it from
 `vendorfw`: it holds `firmware.cpio`, `firmware.tar`, `manifest.txt` and a `u-boot` directory, the
 Linux vendor-firmware bundle the initramfs uses (Wi-Fi, Bluetooth and others), not macOS data.
-Deleting `omarchy_linux-aurora-k114s.efi` (109,204 KiB) would be enough on size alone, but it is
-the kernel the `### K114s repair` Limine entry boots, this Mac's recovery route (see #69), so offer
-that only once another recovery route exists.
+The repair image `omarchy_linux-aurora-k114s.efi` (109,204 KiB) has since come off the ESP in the r3a promotion (copies stay in the macOS bundle folder and on the Linux disk), which is where the 111 MB comes from.
 
 ### Replica or QEMU test
 
@@ -299,8 +298,8 @@ How, in the style of docs/omarchy-patches.md:
 - **The gate holds only while the patch still fits.** `linux/omarchy-patches-apply` prints "does not
   fit this Omarchy build ... Nothing was written" and exits 0 when an `omarchy-dev` update moves the
   lines around it. The command is then stock again, and the menu row would run the real reset. So
-  the menu-row user extension below is a required companion step, not an optional one, and 0003
-  should be re-checked after every Omarchy update (the verifier has no 0003 check; read the
+  the menu-row user extension below is a required companion step, not an optional one, and 0005
+  should be re-checked after every Omarchy update (the verifier has no 0005 check; read the
   `sudo bash linux/omarchy-patches-install` output for "applied", or run
   `grep -q 'K114s local change: a factory reset' /usr/bin/omarchy-system-factory-reset`).
 - **The menu row cannot be patched**, because the mechanism refuses files owned by
@@ -311,12 +310,12 @@ How, in the style of docs/omarchy-patches.md:
   "setup.reset": {"when": "false"}
   ```
 
-  Without it the row stays visible; it prints the refusal only while 0003 fits.
+  Without it the row stays visible; it prints the refusal only while 0005 fits.
 - **Test** `tests/linux/test-factory-reset-gate.sh` (10 checks, replica: the patched copy of the
   installed command, with the device-tree and marker paths pointed at fixtures; the gate sits before
   sudo, a K114s without the marker stops with exit 1 and the message, with the marker or on another
   Mac or with no device tree it falls through to the next check). Also checked by hand in a fake
-  root: `linux/omarchy-patches-install` installs 0003 as "applied" and `--undo` gives back the
+  root: `linux/omarchy-patches-install` installs 0005 as "applied" and `--undo` gives back the
   shipped file byte for byte (agent-run); `tests/linux/test-omarchy-patches.sh linux` passes (67).
 
 Install is the owner's usual command (`sudo bash linux/omarchy-patches-install`), unchanged. It was

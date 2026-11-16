@@ -20,9 +20,9 @@ connector-name prefix and an exact mode (4 px of slack), and `top` is physical r
   present. Hyprland calls it `Unknown-1` at scale 2. None of the four shipped entries match.
 - **agent-run, not available:** the ADT carries no panel node and no notch height. `/product` has
   `partially-occluded-display = 1` (there is a notch) and `/arm-io/disp0` has `dot-pitch-float` = 254.6 ppi
-  (also the K116s's). `display-timing-info` is timing, not geometry. So the height cannot be read; it is
+  (agent-run; matches the figure joshuaswarren derived for the K114c, and the K116s's; a pixel density is not a notch measurement). `display-timing-info` is timing, not geometry. So the height cannot be read; it is
   derived.
-- **derived:** `top = 96`. The K116s has the same pixel density and a 96-pixel notch (**upstream-reported**,
+- **derived:** `top = 96`. This is the shown-minus-hidden band and probably overstates the floor against omarchy-mac's `top` convention (64 for the 14-inch M1). The K116s has the same pixel density and a 96-pixel notch (**upstream-reported**,
   docs/r3-display-gpu.md: 3472x2266 with the notch shown, 3472x2170 with it hidden: 2266 - 2170 = 96), and
   the K114s and K116s are "identical node for node". The other plausible model (the M1-era 64 rows plus the
   22 extra rows of 1986 over 1964, i.e. 86) agrees with the K116s only by coincidence of its 32 extra rows;
@@ -126,3 +126,10 @@ a pop at headphone start and stop, the panel names, a headset record/unplug/repl
 
 The patch to send is `patches/omarchy/0004-...` and the `eDP` line of `0003-...`, rebased onto
 omarchy-mac's own tree layout (`/usr/share/...` paths are the package's `usr/share/...`).
+
+## Display audio nodes in the ADT (#42)
+
+**agent-run (read-only):** `dp-audio0..4` are power, clock and reset nodes only, with no `reg`. The display
+ADMACs are `admac,t6050` at `0x48a140000` and `dispext0..3` at `0x2b2140000`, `0x392140000`, `0x302140000` and
+`0x306140000`. No T6050 `dpaudio` or per-display ADMAC driver exists yet (docs/r3-audio-dp.md, PR #108, not merged).
+
