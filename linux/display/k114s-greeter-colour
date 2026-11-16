@@ -13,8 +13,12 @@ die() { echo "k114s-greeter-colour: $*" >&2; exit 1; }
 want() { cat "$stock"; printf '\n-- K114s DCP boots: Hyprland colour management blanks the OLED (betizzel/omarchy-m5#21)\nif os.getenv("ASAHI_M5_BRINGUP") == "1" then hl.config({ render = { cm_enabled = false } }) end\n'; }
 pointed() { grep -q -F -- "--config $M" "$conf" 2>/dev/null; }
 installed() { [ -f "$mine" ] && [ "$(want 2>/dev/null | sha256sum)" = "$(sha256sum < "$mine")" ] && pointed && ! grep -q -F -- "--config $S" "$conf"; }
-put() { # put FILE: stdin becomes FILE, same mode, atomically
-  local t; t=$(mktemp "$1.XXXXXX") || exit 1; cat > "$t" && chmod --reference="$1" "$t" 2>/dev/null || chmod 644 "$t"; mv "$t" "$1" || { rm -f "$t"; die "cannot write $1"; }; }
+put() { # put FILE: stdin becomes FILE, same mode (644 for a new file), atomically; a failed staging write leaves FILE as it was
+  local t; t=$(mktemp "$1.XXXXXX") || exit 1
+  cat > "$t" || { rm -f "$t"; die "cannot stage $1 (it is unchanged)"; }
+  chmod --reference="$1" "$t" 2>/dev/null || chmod 644 "$t" || { rm -f "$t"; die "cannot set the mode for $1 (it is unchanged)"; }
+  mv "$t" "$1" || { rm -f "$t"; die "cannot write $1"; }
+}
 case ${1:---install} in
   --check) installed && echo "k114s-greeter-colour: installed ($mine, $conf)" || die "not installed (or the stock $S changed): sudo bash $0" ;;
   --install)
