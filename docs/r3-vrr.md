@@ -113,3 +113,24 @@ only the runtime toggle crashed. So install and arm, then reboot once:
   A449, parameters 3 and 6, A453). That trace is from an external display.
 - **Containment upstream:** offer VRR on LCD boards only, or refuse it on OLED panels (`supports-apt` with
   `oled-display`). Suggested on betizzel/omarchy-m5#25.
+
+## 7. V1 and V2, 2026-11-16: 48 Hz crashes the same way
+
+Run with the owner watching, on r3b.c3, through V1:
+- `fw27_panel_vrr=1 fw27_panel_vrr_min=48`, with a verified copy of the mask.
+- The boot was clean: `fw27_panel_vrr` Y, `fw27_panel_vrr_min` 48, `vrr_capable` 1, and the brightness ladder passed
+  (agent-run).
+
+Then `misc:vrr` on:
+- The driver logged `VRR_ENABLED 1: selecting ... again` and `IOMFBParameter_adaptive_sync Req minRR = 0x300000` (48.0).
+- 0.6 s later: `RTKit: co-processor has crashed`, with the same crashlog line `apt firmware: video_mode_main_init.c:288
+  main_init()`, then `DCP has crashed`. The panel went black and Hyprland fell back to its 1920x1080 output (agent-run; the log
+  is kept root-only as `$D/VRR48-dcp-crash-*.log`).
+
+**H2 (the 24 Hz minimum alone) is refuted for 48 Hz.** H1 is now the leading explanation: the runtime modeset that firmware 27.2
+runs to apply adaptive sync does not survive on this OLED, whatever the minimum. A real fix needs F2 (a live switch without the
+reselect) or F3 (the macOS sequence), which is driver work with one crash per try. Until then VRR stays masked.
+
+V3 ran right after: the mask was copied back and compared. The same reboot started the EDR test (`docs/r3-hdr.md` section 9).
+The `fw27_panel_vrr_min` parameter stays in r3b.c3, harmless at its default.
+
