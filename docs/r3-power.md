@@ -73,6 +73,29 @@ Not yet proven: UPower against sysfs during a discharge. Owner step: unplug AC a
 `tests/hardware/k114s-battery-log.sh 30 10 > battery.log` (10 samples, 30 s apart, then it stops),
 plug back in, and confirm no `MISMATCH` line. The #1615 PR is still an open draft upstream, so r3a carries it as a patch.
 
+### The percentage: UPower ignored the SMC's number (issue #152, fixed 2026-11-16)
+
+Seen by the owner on r3b.c2: the taskbar said 81 %, the battery panel 80 %, while the SMC said 85 %. Agent-run, at the
+same moment:
+- `capacity` read 85. The driver reads the SMC key `BUIC`: the percentage macOS shows, and the one the charge limit acts on.
+- UPower 1.91.5 said 80.7 %, which is exactly `energy / energy-full`.
+- The bar rounds UPower's value, and `omarchy-battery-status` and the panel truncate it.
+
+The cause, read from source: UPower ignores the kernel's `capacity` when the DMI product name starts with `MacBook`
+(`is_macbook()` in `src/linux/up-enumerator-udev.c`, a workaround for Intel MacBooks), and this Mac's is
+`MacBook Pro (...)`. The `upowerd` binary reads no other DMI field (`strings`).
+
+The fix: `linux/power/k114s-upower-percentage` installs a `upower.service` drop-in
+(`50-k114s-upower-percentage.conf`) that gives `upowerd` alone the product name in `/etc/omarchy-k114s/upower-product-name`,
+through `BindReadOnlyPaths`. The rest of the system still reads the real name. Then it restarts upower. The `-` prefix
+lets `upowerd` start even if the name file is gone. Run `--check` to confirm (on this Mac it also compares UPower with the
+SMC) and `--undo` to remove it.
+
+Agent-run after the install: SMC 78 %, UPower 78 % (it said 74.5 % just before), and `omarchy-battery-status`
+`Battery 78%`. Because UPower now reports a whole number, rounding and truncation agree. Seen once, also agent-run:
+`charge-end-threshold` in `upower -i` stayed at 80 % after the limit went back to 100, even across a restart. The SMC
+reads 100.
+
 ## #56 why the profile is `performance`, and what it is on battery
 
 Source: `omarchy-powerprofiles-init`, `-set`, `-list`, `-floor` (omarchy-dev 4.0.0.r7906.g29fbc4e-1, as installed and checked with `pacman -Qo`; the installed omarchy-mac 0.2.3-2 ships only the charge-limit pieces).

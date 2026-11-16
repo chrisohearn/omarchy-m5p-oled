@@ -1,0 +1,55 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled): install, check or remove the UPower drop-in that makes it show the SMC's battery percentage
+# (issue #152; the reason is in 50-k114s-upower-percentage.conf beside this script).
+#
+#     sudo bash k114s-upower-percentage            install the drop-in and the name file, then restart upower (idempotent)
+#     bash k114s-upower-percentage --check         0 when both files are the repository's (and, on this Mac, UPower agrees)
+#     sudo bash k114s-upower-percentage --undo     remove both (only the files this script installs), then restart upower
+#
+# It writes two files under /etc and nothing else. K114S_ROOT points it at a replica root (the tests): no systemctl then.
+set -Eeuo pipefail
+ROOT=${K114S_ROOT:-}
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+CONF=50-k114s-upower-percentage.conf; NAMEF=upower-product-name
+DCONF=$ROOT/etc/systemd/system/upower.service.d/$CONF; DNAME=$ROOT/etc/omarchy-k114s/$NAMEF
+MARK='# K114s (omarchy-m5p-oled): let UPower show the SMC'"'"'s own battery percentage (issue #152).'
+die() { echo "k114s-upower-percentage: $*" >&2; exit 1; }
+restart() { [[ -n $ROOT ]] && return 0; systemctl daemon-reload && systemctl try-restart upower.service; }
+case ${1:-install} in
+  install)
+    [[ $(id -u) == 0 || -n $ROOT ]] || die "run with sudo"
+    [[ -f $HERE/$CONF && -f $HERE/$NAMEF ]] || die "$HERE/$CONF or $HERE/$NAMEF is missing"
+    case $(head -n 1 "$HERE/$NAMEF") in MacBook*) die "$HERE/$NAMEF starts with MacBook: UPower would still ignore the capacity" ;; esac
+    if cmp -s "$HERE/$CONF" "$DCONF" && cmp -s "$HERE/$NAMEF" "$DNAME"; then
+      # the files may be in place from a run whose restart failed or was cut short: restart again, it is cheap
+      restart || die "already installed, but upower did not restart (systemctl status upower)"
+      echo "k114s-upower-percentage: already installed; upower restarted"; exit 0
+    fi
+    mkdir -p "$(dirname "$DCONF")" "$(dirname "$DNAME")"
+    install -m 0644 "$HERE/$NAMEF" "$DNAME"
+    install -m 0644 "$HERE/$CONF" "$DCONF"
+    restart || die "installed, but upower did not restart (systemctl status upower)"
+    echo "k114s-upower-percentage: installed $DCONF and $DNAME; upower restarted"
+    ;;
+  --check)
+    cmp -s "$HERE/$CONF" "$DCONF" && cmp -s "$HERE/$NAMEF" "$DNAME" || die "not installed (or not the repository's files)"
+    if [[ -z $ROOT ]] && command -v upower >/dev/null && [[ -r /sys/class/power_supply/macsmc-battery/capacity ]]; then
+      cap=$(< /sys/class/power_supply/macsmc-battery/capacity)
+      up=$(upower -i /org/freedesktop/UPower/devices/battery_macsmc_battery 2>/dev/null | awk '/percentage:/ { sub("%", "", $2); printf "%d", $2 + 0.5; exit }')
+      [[ $up == "$cap" ]] || die "installed, but UPower says ${up:-nothing}% and the SMC $cap% (restart upower?)"
+      echo "k114s-upower-percentage: installed; UPower and the SMC both say $cap%"
+    else
+      echo "k114s-upower-percentage: installed"
+    fi
+    ;;
+  --undo)
+    [[ $(id -u) == 0 || -n $ROOT ]] || die "run with sudo"
+    if [[ ! -e $DCONF && ! -e $DNAME ]]; then echo "k114s-upower-percentage: nothing to undo"; exit 0; fi
+    if [[ -e $DCONF ]]; then grep -q -x -F -- "$MARK" "$DCONF" || die "$DCONF is not the file this script installs: not removed"; fi
+    if [[ -e $DNAME ]]; then cmp -s "$HERE/$NAMEF" "$DNAME" || die "$DNAME is not the file this script installs: not removed"; fi
+    rm -f "$DCONF" "$DNAME"; rmdir "$(dirname "$DCONF")" 2>/dev/null || true
+    restart || die "removed, but upower did not restart (systemctl status upower)"
+    echo "k114s-upower-percentage: removed; upower restarted"
+    ;;
+  *) die "unknown argument $1" ;;
+esac
