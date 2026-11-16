@@ -17,7 +17,7 @@ while IFS= read -r f; do
   if [ -f "$f" ] && LC_ALL=C grep -qP '\x00' "$f" 2>/dev/null; then flag "not a text file: $f"; fi
 done <<< "$files"
 # 2. no private strings
-pattern='/Users/[a-z]|/home/[a-z][a-z0-9]*/|BEGIN [A-Z ]*PRIVATE KEY|gh[opsu]_[A-Za-z0-9]{20,}|[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.(me|com|net|org|io)\b|([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}'
+pattern='/Users/[a-z]|/home/[a-z][a-z0-9]*/|BEGIN [A-Z ]*PRIVATE KEY|gh[opsu]_[A-Za-z0-9]{20,}|[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.(me|com|net|org|io)\b|([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}|HmCA-[0-9]'
 hits=$(echo "$files" | tr '\n' '\0' | xargs -0 grep -n -I -E "$pattern" 2>/dev/null |
   grep -v -E 'noreply@anthropic\.com|users\.noreply\.github\.com|@localhost|build/check-publishable\.sh|git@github\.com' || true)
 if [ -n "$hits" ]; then echo "$hits" | cut -c1-200; flag "private-looking strings (above)"; fi
