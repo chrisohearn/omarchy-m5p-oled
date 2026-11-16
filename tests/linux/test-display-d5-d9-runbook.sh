@@ -109,12 +109,12 @@ blockold() { awk -v a="$1" 'index($0, a) == 1 { f = 1 } f && $0 == "    (" { c =
 bP=$(blockold '### Block P:'); bW0=$(blockold '**W0.'); bW1=$(blockold '**W1.'); bX=$(blockold '**Block X:'); bF=$(blockold '**Block F:')
 bC=$(blockold '**Block C ('); bC4=$(blockold '**C4.'); bC5=$(blockold '**C5.')
 bD9p=$(block '**D9p.'); bI1b=$(block '**I1b.'); bS5=$(block '**S5.'); bT3a=$(block '**T3a.'); bT3b=$(block '**T3b.'); bD5=$(block '**D5.')
-bG6b=$(block '**G6b.'); bD7=$(block '**D7. DPMS'); bD7b=$(block '**D7b.'); bD8=$(block '**D8.'); bT4a=$(block '**T4a.'); bT4b=$(block '**T4b.'); bD6=$(block '**D6.')
+bG6a=$(block '**G6a.'); bG6b=$(block '**G6b.'); bD7=$(block '**D7. DPMS'); bD7b=$(block '**D7b.'); bD8=$(block '**D8.'); bT4a=$(block '**T4a.'); bT4b=$(block '**T4b.'); bD6=$(block '**D6.')
 bD9a=$(block '**D9a.'); bD9c=$(block '**D9c.'); bD9u=$(block '**Undo of D9c'); bP9=$(block '**Block P9'); bC9=$(block '**Block C9')
 bD9x=$(block '**D9x.'); bD9y=$(block '**D9y.'); bU0=$(block '**U0.'); bU1=$(block '**U1.'); bC1b=$(block '**C1b.'); bC2b=$(block '**C2b.')
-ALL=("$bD9p" "$bI1b" "$bS5" "$bT3a" "$bT3b" "$bD5" "$bD7" "$bD7b" "$bD8" "$bG6b" "$bT4a" "$bT4b" "$bD6" "$bD9a" "$bD9c" "$bD9u" "$bP9" "$bC9" "$bD9x" "$bD9y" "$bU0" "$bU1" "$bC1b" "$bC2b")
-ok "every block is found (24 here, 8 of the first runbook) and no real hash is left in the ones that write" \
-  "$(for b in "${ALL[@]}" "$bP" "$bW0" "$bW1" "$bX" "$bF" "$bC" "$bC4" "$bC5"; do [ -n "$b" ] && echo y; done | wc -l) $(printf '%s' "$bI1b$bS5$bT3a$bT3b$bD9a$bD9c$bD9u$bP9$bT4a$bT4b$bC9" | grep -c -e "$B1" -e "$B5" -e "$BT" -e "$PINL" -e "$GPU" -e "$R3A")" "32 0"
+ALL=("$bD9p" "$bI1b" "$bS5" "$bT3a" "$bT3b" "$bD5" "$bD7" "$bD7b" "$bD8" "$bG6a" "$bG6b" "$bT4a" "$bT4b" "$bD6" "$bD9a" "$bD9c" "$bD9u" "$bP9" "$bC9" "$bD9x" "$bD9y" "$bU0" "$bU1" "$bC1b" "$bC2b")
+ok "every block is found (25 here, 8 of the first runbook) and no real hash is left in the ones that write" \
+  "$(for b in "${ALL[@]}" "$bP" "$bW0" "$bW1" "$bX" "$bF" "$bC" "$bC4" "$bC5"; do [ -n "$b" ] && echo y; done | wc -l) $(printf '%s' "$bI1b$bS5$bT3a$bT3b$bD9a$bD9c$bD9u$bP9$bT4a$bT4b$bC9" | grep -c -e "$B1" -e "$B5" -e "$BT" -e "$PINL" -e "$GPU" -e "$R3A")" "33 0"
 
 fresh2() { # the Mac as window 1 left it (I0's files in place), the build area, the promotion folder; a default boot of r3a on P
   fresh; unset FAKE_UNAME_V FAKE_PKGVER; rm -rf "$W/asahi" "$W/macboot" "$W/sys" "$W/R5" "$W/RT" "$DOLD" "$W/datectr" "$W/dm" "$W/dm2" "$W/since"
@@ -127,6 +127,8 @@ fresh2() { # the Mac as window 1 left it (I0's files in place), the build area, 
   printf '#!/bin/sh\nprintf "IgnorePkg = %%s\\n" "$(tr "\\n" " " < %s/lib/holds.list)" > %s/pacman.conf\necho "k114s apply-holds: done"\n' "$W" "$W" > "$W/lib/apply-holds"; chmod +x "$W/lib/apply-holds"
   printf 'linux-aurora\nlinux-k114s\nlimine-mkinitcpio-hook\nlimine-snapper-sync\nm1n1-aurora\nuboot-aurora\n' > "$W/lib/holds.list"
   printf 'IgnorePkg = linux-aurora linux-k114s limine-mkinitcpio-hook limine-snapper-sync m1n1-aurora uboot-aurora\n' > "$W/pacman.conf"
+  mkdir -p "$W/mkinitcpio.conf.d"; cp "$REPO_DIR/linux/99-k114s-no-appledrm.conf" "$W/mkinitcpio.conf.d/"   # G6a's drop-in, installed
+  mkdir -p "$W/icroot/etc"; ln -sfn "$W/mkinitcpio.conf.d" "$W/icroot/etc/mkinitcpio.conf.d"   # the installer's K114S_ROOT view of it
   echo 'K114s: old chain' > "$W/macboot/owner-boot-chain"
   printf 'repair block\n' > "$W/esp/k114s-repair/promotion/repair-block.conf"; cp "$REPO_DIR/macos/tools/k114s_repair.py" "$W/esp/k114s-repair/promotion/k114s_repair.py"
   echo record > "$W/esp/k114s-repair/r2c/repair-uki.txt"
@@ -291,6 +293,11 @@ alld57; FAKE_REPO=$FR run <<< "$bD6"; ok "D6: refused without T4-booted" "$rc" 1
 t4boot; : > "$W/state/locked"; FAKE_REPO=$FR run <<< "$bD6"; ok "D6: a locked session stops before VRR is touched and records no D6-failed or D6-passed" "$rc $(test -e "$W/state/vrr"; echo $?) $(test -e "$D/D6-failed"; echo $?) $(test -e "$D/D6-passed"; echo $?)" "1 1 1 1"
 t3ok; FAKE_REPO=$FR run <<< "$bD5"; run <<< "$bD7"; run <<< "$bD8"; run <<< "$bG6b"
 ok "G6b: a build from the display-tree boot without appledrm writes G6b-passed and leaves no temporary folder" "$rc $(test -s "$D/G6b-passed"; echo $?) $(ls "$W/vartmp" | wc -l)" "0 0 0"
+t3ok; rm "$W/mkinitcpio.conf.d/99-k114s-no-appledrm.conf"; run <<< "$bG6b"; ok "G6b: without the drop-in installed it stops before any build and names G6a" "$rc $(echo "$out" | grep -c 'G6a') $(test -e "$D/G6b-passed"; echo $?) $(ls "$W/vartmp" | wc -l)" "1 1 1 0"
+t3ok; echo '# old' > "$W/mkinitcpio.conf.d/99-k114s-no-appledrm.conf"; run <<< "$bG6b"; ok "G6b: a drop-in that is not the repository's file stops too" "$rc $(test -e "$D/G6b-passed"; echo $?)" "1 1"
+t3ok; echo old > "$D/G6b-failed"; run <<< "$bG6b"; ok "G6b: a pass removes an earlier G6b-failed" "$rc $(test -e "$D/G6b-failed"; echo $?)" "0 1"
+rm -f "$W/mkinitcpio.conf.d/99-k114s-no-appledrm.conf"; t3ok; K114S_ROOT=$W/icroot run <<< "$bG6a"; ok "G6a: installs the repository's drop-in (through the installer script) and says so" "$rc $(cmp -s "$REPO_DIR/linux/99-k114s-no-appledrm.conf" "$W/mkinitcpio.conf.d/99-k114s-no-appledrm.conf"; echo $?) $(echo "$out" | grep -c '^G6a: ')" "0 0 1"
+K114S_ROOT=$W/icroot run <<< "$bG6a"; ok "G6a: a second run changes nothing" "$rc" 0
 t3ok; FAKE_INITRD=appledrm run <<< "$bG6b"; ok "G6b: appledrm in the test initramfs writes G6b-failed and no G6b-passed (D9 stays blocked)" "$rc $(test -s "$D/G6b-failed"; echo $?) $(test -e "$D/G6b-passed"; echo $?)" "1 0 1"
 t3ok; rm -rf "$W/sys/class/drm/card2-eDP-1"; run <<< "$bG6b"; ok "G6b: a boot with no eDP connector stops (it would prove nothing)" "$rc $(test -e "$D/G6b-passed"; echo $?)" "1 1"
 
@@ -302,6 +309,7 @@ ready; run <<< "$bD9a"
 ok "D9a: exit 0, D6 and D8 outcomes shown, D9a-passed written" "$rc $(echo "$out" | grep -c '^D6: passed') $(echo "$out" | grep -c '^D8: passed') $(test -e "$D/D9a-passed"; echo $?)" "0 1 1 0"
 ok "D9a: the real Stage 2 hook, in a throw-away root, wrote the D9 file byte for byte (that is what it checks), and wrote nothing on the fake ESP" "$(echo "$out" | grep -c '^D9a: ') $(sum "$W/esp/m1n1/boot-ctxr.bin")" "1 $(sum "$W/fake/gpu.bin")"
 ready; rm "$D/G6b-passed"; run <<< "$bD9a"; ok "D9a: without G6b-passed it stops" "$rc $(test -e "$D/D9a-passed"; echo $?)" "1 1"
+ready; rm "$W/mkinitcpio.conf.d/99-k114s-no-appledrm.conf"; run <<< "$bD9a"; ok "D9a: without the no-appledrm drop-in installed it stops" "$rc $(echo "$out" | grep -c 'G6a') $(test -e "$D/D9a-passed"; echo $?)" "1 1 1"
 ready; rm "$D/M9-passed"; run <<< "$bD9a"; ok "D9a: without M9-passed it stops" "$rc $(test -e "$D/D9a-passed"; echo $?)" "1 1"
 ready; echo "M9 passed: tool 0000" > "$D/M9-passed"; run <<< "$bD9a"; ok "D9a: an M9 record that names another tool stops" "$rc $(echo "$out" | grep -c 'name the tool now staged')" "1 1"
 ready; rm "$D/D6-passed"; run <<< "$bD9a"; ok "D9a: no outcome for D6 stops; D6-skipped is accepted" "$rc $(echo "$out" | grep -c 'no outcome recorded for D6')" "1 1"
@@ -332,6 +340,7 @@ FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"; ok "P9 (with the fake
 ok "P9: prints this boot's kernel and the ESP free space" "$(echo "$out" | grep -c '^this boot: ') $(echo "$out" | grep -c '^ESP free: ')" "1 1"
 cp "$W/esp/EFI/Linux/omarchy_linux-k114s.efi" "$W/esp/EFI/Linux/omarchy_linux-aurora.efi"; run <<< "$bP9"; ok "P9: a third image (linux-aurora's came back) stops and names U1" "$rc $(echo "$out" | grep -c 'U1')" "1 1"; rm "$W/esp/EFI/Linux/omarchy_linux-aurora.efi"
 FAKE_INITRD=appledrm FAKE_UNAME=$REL FAKE_PKGVER=7.3.0.r3b.b1-1 run <<< "$bP9"; ok "P9: appledrm in an image's initramfs stops (G6 on every image, F16)" "$rc $(echo "$out" | grep -c 'appledrm is in the initramfs')" "1 1"
+rm "$W/mkinitcpio.conf.d/99-k114s-no-appledrm.conf"; run <<< "$bP9"; ok "P9: without the no-appledrm drop-in it stops (a rebuild would put appledrm back)" "$rc $(echo "$out" | grep -c 'G6a')" "1 1"; cp "$REPO_DIR/linux/99-k114s-no-appledrm.conf" "$W/mkinitcpio.conf.d/"
 rm "$W/asahi/m1n1-ctxr.bin"; run <<< "$bP9"; ok "P9: a missing m1n1-ctxr.bin stops (a Stage 2 hook run would write the installed loader's file)" "$rc" 1; cp "$W/fake/pinldr-m1n1.bin" "$W/asahi/m1n1-ctxr.bin"
 sed -i 's/linux-k114s-r3b//' "$W/pacman.conf"; run <<< "$bP9"; ok "P9: a holds block without linux-k114s-r3b stops" "$rc" 1; printf 'IgnorePkg = linux-k114s-r3b\n' > "$W/pacman.conf"
 echo x >> "$W/esp/m1n1/boot-ctxr.bin"; run <<< "$bP9"; ok "P9: a Stage 2 that is not the D9 file stops" "$rc" 1
@@ -453,7 +462,7 @@ n=0; bad=; while IFS= read -r -d '' b; do n=$((n+1)); bash -n <<< "$b" 2>/dev/nu
     ! printf '%s' "$b" | grep -q -E 'hyprctl|omarchy-brightness-display|omarchy-toggle-nightlight|shell\.json|mkinitcpio' && bad="$bad $n(no-guard)"
   printf '%s' "$b" | grep -q 'STOP' && ! printf '%s' "$b" | grep -q 'exit 1' && bad="$bad $n(stop-without-exit)"; done < <(
   awk '$0 == "    (" { c = 1; b = ""; next } c && $0 == "    )" { printf "%s%c", b, 0; c = 0; next } c { b = b substr($0, 5) "\n" }' "$DOC")
-ok "all $n blocks of the runbook parse with bash -n, every STOP exits 1 (the user-session blocks write only records through sudo tee)" "${bad:-none} $((n >= 24))" "none 1"
+ok "all $n blocks of the runbook parse with bash -n, every STOP exits 1 (the user-session blocks write only records through sudo tee)" "${bad:-none} $((n >= 25))" "none 1"
 ok "no block of the runbook writes 0 to the backlight (no 'set 0', no 'echo 0 >' to a brightness file)" "$(awk '$0 == "    (" { c = 1; next } c && $0 == "    )" { c = 0 } c' "$DOC" | grep -c -E "set 0( |\$)|echo 0 *> *[^ ]*brightness")" 0
 ok "no block of the runbook prints a limine.conf line that could hold the command line" \
   "$(awk '$0 == "    (" { c = 1; next } c && $0 == "    )" { c = 0 } c' "$DOC" | grep -E "grep[^|]*limine\.conf|grep[^|]*\\\$c( |\$)" | grep -v -E 'grep -(c|q)|grep -[a-zA-Z]*[cq][a-zA-Z]* |default_entry|\^\[\[:blank:\]\]\*/|\^\[\[:blank:\]\]\*path:|path: boot|//Snapshots|\^\[\[:blank:\]\]\*//linux|-x -E' | grep -c .)" 0

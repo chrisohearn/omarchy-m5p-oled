@@ -20,7 +20,7 @@ rewrite() { # the block with the system paths and the real hashes of this Mac re
        s#/etc/default/update-m1n1#$W/etc/update-m1n1#g; s#/etc/systemd/system#$W/systemd#g; s#/run/lock#$W/lock#g
        s#/sys/firmware/efi/efivars#$W/efivars#g; s#/proc/device-tree/chosen#$W/chosen#g; s#/usr/lib/modules#$W/modules#g
        s#/etc/machine-id#$W/machine-id#g; s#/proc/sys/kernel/random/boot_id#$W/boot_id#g; s#/dev/mtd1ro#$W/mtd1ro#g
-       s#/etc/modprobe.d#$W/modprobe#g; s#/usr/lib/modprobe.d#$W/usrmodprobe#g; s#/var/lib/k114s-backlight#$W/klb#g
+       s#/etc/modprobe.d#$W/modprobe#g; s#/etc/mkinitcpio.conf.d#$W/mkinitcpio.conf.d#g; s#/usr/lib/modprobe.d#$W/usrmodprobe#g; s#/var/lib/k114s-backlight#$W/klb#g
        s#/usr/lib/asahi-boot#$W/asahi#g; s#/etc/pacman.conf#$W/pacman.conf#g; s#/etc/omarchy-mac-boot#$W/macboot#g
        s#/etc/pacman.d/hooks#$W/hooks-etc#g; s#/usr/share/libalpm/hooks#$W/hooks-usr#g; s#/usr/share/omarchy/migrations#$W/migrations#g
        s#/sys/class#$W/sys/class#g; s#/sys/module#$W/sys/module#g; s#/var/tmp#$W/vartmp#g
@@ -123,7 +123,7 @@ chmod +x "$BIN"/*
 for f in gpu.bin:4001 gpu.dtb:301 r3a.efi:2000 aurora.efi:1900 r3b.pkg:500 oldldr.bin:4100 pinldr.bin:4200 gpinldr.bin:4150; do head -c "${f#*:}" /dev/urandom > "$W/fake/${f%%:*}"; done
 fresh() { # the Mac as the promotion left it, on a default boot of r3a
   rm -rf "$W/rootdirs" "$W/hooks-etc" "$W/hooks-usr" "$W/esp" "$W/etc" "$W/lib" "$W/rec" "$W/lock" "$W/efivars" "$W/chosen" "$W/calls" "$W/home" "$W/modules" "$W/systemd" \
-    "$W/modprobe" "$W/usrmodprobe" "$W/klb" "$W/state" "$W/R"; unset FAKE_UNAME
+    "$W/modprobe" "$W/usrmodprobe" "$W/mkinitcpio.conf.d" "$W/klb" "$W/state" "$W/R"; unset FAKE_UNAME
   echo 00000000000000000000000000000000 > "$W/machine-id"; echo boot-0 > "$W/boot_id"
   printf '[0.1] FDT: GPU: firmware 26B8125\n[0.2] the device tree does not describe the internal display: no handoff\n' > "$W/mtd1ro"
   mkdir -p "$W/esp/EFI/Linux" "$W/esp/m1n1" "$W/esp/k114s-repair" "$W/etc" "$W/lib" "$W/rec" "$W/lock" "$W/efivars" "$W/chosen" \
