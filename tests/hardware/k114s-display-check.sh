@@ -1,13 +1,15 @@
 #!/bin/bash
 # Read-only report for the K114s display trial boots (docs/r3-display-trials.md). Changes nothing: it never writes to
 # sysfs, the backlight, the ESP or a DRM device. Prints "ok", "BAD" or "info" lines and a last summary line.
-#   tests/hardware/k114s-display-check.sh --expect refused|published|none [--loader-log FILE] [--wait SECONDS] [--hypr]
+#   tests/hardware/k114s-display-check.sh --expect refused|published|none [--loader-log FILE] [--wait SECONDS] [--hypr] [--vrr on|off] [--floor]
 #     refused    the display tree on the installed loader (trial T1): the loader must refuse the hand-off
 #     published  the display tree on the loader with the K114s pin (trial T2): the hand-off must be published
 #     none       a tree without the display section (P, or the conditional loader-only boot D3)
 #   --loader-log FILE   this boot's loader log, saved first thing (sudo cat /dev/mtd1ro | tr -d '\0' > FILE)
 #   --wait SECONDS      the gap between the two GPU mailbox samples (default 10)
 #   --hypr              also read Hyprland's monitors (run it as the desktop user, in the session)
+#   --vrr on|off        published only: whether this boot offers VRR (D6: fw27_panel_vrr Y and vrr_capable 1); default off
+#   --floor             published only: this boot carries the brightness build (D5: the floor line in the kernel log, apple,min-brightness 10)
 # Root makes the kernel-log lines complete (dmesg is root-only here); the rest needs none.
 # It never prints the kernel command line: every kernel-log line it shows has passed a filter that drops it.
 # Test hooks: K114S_DT K114S_SYS K114S_DEV K114S_DMESG_FILE K114S_INTERRUPTS K114S_HYPRCTL K114S_SYSTEMCTL K114S_BACKLIGHT_STATE
@@ -15,14 +17,17 @@ set -u
 DT=${K114S_DT:-/proc/device-tree}; SYS=${K114S_SYS:-/sys}; DEV=${K114S_DEV:-/dev}
 IRQ=${K114S_INTERRUPTS:-/proc/interrupts}; HYPRCTL=${K114S_HYPRCTL:-hyprctl}; SYSTEMCTL=${K114S_SYSTEMCTL:-systemctl}
 BLSTATE=${K114S_BACKLIGHT_STATE:-/var/lib/systemd/backlight}
-expect=; log=; wait_s=10; hypr=0
+expect=; log=; wait_s=10; hypr=0; vrr=off; floor=0
 while [ $# -gt 0 ]; do
   case $1 in
     --expect) expect=${2:-}; shift ;; --loader-log) log=${2:-}; shift ;; --wait) wait_s=${2:-10}; shift ;; --hypr) hypr=1 ;;
-    *) echo "usage: $0 --expect refused|published|none [--loader-log FILE] [--wait SECONDS] [--hypr]" >&2; exit 2 ;;
+    --vrr) vrr=${2:-}; shift ;; --floor) floor=1 ;;
+    *) echo "usage: $0 --expect refused|published|none [--loader-log FILE] [--wait SECONDS] [--hypr] [--vrr on|off] [--floor]" >&2; exit 2 ;;
   esac; shift
 done
 case $expect in refused | published | none) ;; *) echo "usage: $0 --expect refused|published|none ..." >&2; exit 2 ;; esac
+case $vrr in on | off) ;; *) echo "usage: $0 --vrr on|off" >&2; exit 2 ;; esac
+vcap=0; vpar=N; [ "$vrr" = on ] && { vcap=1; vpar=Y; }
 nok=0; nbad=0
 ok() { echo "ok    $*"; nok=$((nok + 1)); }; bad() { echo "BAD   $*"; nbad=$((nbad + 1)); }; info() { echo "info  $*"; }
 prop() { [ -e "$DT/$1" ] && tr -d '\0' < "$DT/$1"; }
@@ -82,15 +87,15 @@ if [ "$expect" = published ]; then
     ok "connector ${edp##*/}: $(cat "$edp/status" 2>/dev/null)"
     modes=$(sort -u "$edp/modes" 2>/dev/null | tr '\n' ' ')
     [ -n "$modes" ] && ! sort -u "$edp/modes" | grep -v -q -x -E '3024x(1986|1964)' && ok "modes: $modes(3024 wide, 1986 or 1964 high)" || bad "modes: ${modes:-none}"
-    [ -e "$edp/vrr_capable" ] && { [ "$(cat "$edp/vrr_capable")" = 0 ] && ok "vrr_capable 0" || bad "vrr_capable $(cat "$edp/vrr_capable")"; }
+    [ -e "$edp/vrr_capable" ] && { [ "$(cat "$edp/vrr_capable")" = $vcap ] && ok "vrr_capable $vcap" || bad "vrr_capable $(cat "$edp/vrr_capable"), expected $vcap (--vrr $vrr)"; }
   else bad "no eDP connector"; fi
   case $(cat "$SYS/class/graphics/fb0/name" 2>/dev/null) in *appledrm*) ok "fb0 is appledrm's" ;; *) info "fb0 is not appledrm's" ;; esac
   p=$SYS/module/appledrm/parameters/fw27_panel_vrr
-  [ "$(cat "$p" 2>/dev/null)" = N ] && ok "appledrm.fw27_panel_vrr = N (the /etc/modprobe.d file masks the J714s default)" || bad "appledrm.fw27_panel_vrr is '$(cat "$p" 2>/dev/null)', not N"
+  [ "$(cat "$p" 2>/dev/null)" = $vpar ] && ok "appledrm.fw27_panel_vrr = $vpar (--vrr $vrr)" || bad "appledrm.fw27_panel_vrr is '$(cat "$p" 2>/dev/null)', not $vpar (--vrr $vrr)"
   bl=$SYS/class/backlight/apple-panel-bl
   if [ -d "$bl" ]; then
     [ "$(cat "$bl/max_brightness" 2>/dev/null)" = 1000 ] && ok "apple-panel-bl max_brightness 1000" || bad "apple-panel-bl max_brightness $(cat "$bl/max_brightness" 2>/dev/null)"
-    info "apple-panel-bl brightness $(cat "$bl/brightness" 2>/dev/null), actual_brightness $(cat "$bl/actual_brightness" 2>/dev/null) (read only: no write until D5)"
+    info "apple-panel-bl brightness $(cat "$bl/brightness" 2>/dev/null), actual_brightness $(cat "$bl/actual_brightness" 2>/dev/null) (read only)"
   else bad "no apple-panel-bl backlight"; fi
 else
   [ -e "$dsc" ] && bad "a DCP card exists: the panel left simpledrm" || ok "no DCP card"
@@ -116,6 +121,12 @@ else
     sed 's/^\[ *\([0-9.]*\)\] /\1 /' | cut -c1-160 | head -20 | sed 's/^/info  kernel: /'
   if [ "$expect" = published ]; then
     printf '%s\n' "$klog" | grep -q 'Initialized apple .* for display-subsystem' && ok "kernel: [drm] Initialized apple for display-subsystem" || bad "kernel: no '[drm] Initialized apple ... for display-subsystem' line"
+    if [ "$floor" = 1 ]; then
+      printf '%s\n' "$klog" | grep -q 'brightness requests below 10 nits are raised to 10 nits' && ok "kernel: brightness requests below 10 nits are raised to 10 nits (the floor, patch 0006)" || bad "kernel: no 'brightness requests below 10 nits are raised to 10 nits' line (not the brightness build or tree)"
+      printf '%s\n' "$klog" | grep -q 'brightness floor .* ignored' && bad "kernel: the brightness floor was dropped after probe"
+      printf '%s\n' "$klog" | grep -q 'unqualified IOMFB callback 590' && bad "kernel: unqualified IOMFB callback 590 (brightness 0003 is the first patch to drop)"
+      [ "$(od -An -tu4 --endian=big "$DT/$dcp/panel/apple,min-brightness" 2>/dev/null | tr -d ' ')" = 10 ] && ok "$dcp/panel apple,min-brightness 10" || bad "$dcp/panel apple,min-brightness is not 10 (not the brightness tree)"
+    fi
   fi
 fi
 
@@ -139,19 +150,19 @@ import json, sys
 for m in json.load(sys.stdin):
     print("info  hyprland: %s %dx%d@%.2f scale %s vrr %s format %s" % (m.get("name"), m.get("width", 0), m.get("height", 0),
           m.get("refreshRate", 0), m.get("scale"), m.get("vrr"), m.get("currentFormat")))'
-    verdict=$(printf '%s' "$j" | EXPECT=$expect python3 -I -c '
+    verdict=$(printf '%s' "$j" | EXPECT=$expect VRR=$vrr python3 -I -c '
 import json, os, sys
 ms = json.load(sys.stdin)
 if os.environ["EXPECT"] == "published":
     m = [m for m in ms if str(m.get("name", "")).startswith("eDP-")]
     good = len(m) == 1 and m[0].get("width") == 3024 and m[0].get("height") in (1986, 1964) \
-        and 119 <= m[0].get("refreshRate", 0) <= 121 and float(m[0].get("scale", 0)) == 2 and not m[0].get("vrr")
+        and 119 <= m[0].get("refreshRate", 0) <= 121 and float(m[0].get("scale", 0)) == 2 and (os.environ["VRR"] == "on" or not m[0].get("vrr"))
     print("ok" if good else "bad", m[0]["name"] if m else "no eDP monitor")
 else:
     m = [m for m in ms if m.get("name") == "Unknown-1"]
     print("ok" if len(m) == 1 and float(m[0].get("scale", 0)) == 2 else "bad", "Unknown-1" if m else "no Unknown-1 monitor")')
     case $verdict in
-      ok*) ok "hyprland: ${verdict#ok } as expected (published: 3024x1986 or 1964, about 120 Hz, scale 2, vrr off; else Unknown-1 at scale 2)" ;;
+      ok*) ok "hyprland: ${verdict#ok } as expected (published: 3024x1986 or 1964, about 120 Hz, scale 2, vrr off unless --vrr on; else Unknown-1 at scale 2)" ;;
       *) bad "hyprland: ${verdict#bad }: not as expected for '$expect'" ;;
     esac
   fi

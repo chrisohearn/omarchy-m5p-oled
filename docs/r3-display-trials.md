@@ -871,8 +871,12 @@ desktop.
 and D1 alone: the second line expects `refused` on the T1 file and `none` on P.
 
     timeout 300 mpv --no-config --vo=gpu --hwdec=no --ao=null --no-audio --fs --loop-file=inf 'av://lavfi:mandelbrot=size=1512x982:rate=60'; echo "mpv exit $? (124 = the five minutes ran out: expected)"
-    e=none; grep -q -s disp-oldldr /proc/device-tree/chosen/aurora,trial && e=refused; "$REPO/tests/hardware/k114s-display-check.sh" --expect $e --wait 10 --hypr | grep -E '^(ok|BAD)|hyprland|display-check'
+    e=none; tr -d '\0' < /proc/device-tree/chosen/aurora,trial 2>/dev/null | grep -q disp-oldldr && e=refused; "$REPO/tests/hardware/k114s-display-check.sh" --expect $e --wait 10 --hypr | grep -E '^(ok|BAD)|hyprland|display-check'
     sudo dmesg | grep -i -E 'aurora .*(fault|timeout|hang|error)|GPU fault|drm.*(hang|timeout)' | grep -v -i 'command line' | head
+
+(`/proc/device-tree/chosen/aurora,trial` ends in a NUL byte, so a plain `grep -q -s` on it fails to match; the first line
+strips it with `tr -d '\0'` first. With the plain grep T1c passed `--expect none` on the T1 boot and printed two false
+`BAD` lines.)
 
 Expected: a moving fractal full screen for five minutes and `mpv exit 124`; then `2302600000.mailbox-recv rises`,
 `hyprland: Unknown-1 ... scale 2`, no `BAD`; the last command prints nothing. (No audio device is opened: `--ao=null`.)
@@ -1156,6 +1160,11 @@ E11.
 Expected: `Boot usage limit reached ...`, `Stopping boot entry creation: Boot partition usage from 78.8% to 109.3% (+152.3
 MiB) will exceed the 85.0% limit.` (the figures of the day), then the last line. Record it.
 
+C5 can stop with `no sync run since C4 yet: run C5 again after the next one`. That is benign: the timer's run had not
+happened yet (it ran about a minute after C4 on the first window, and C5 passed on the second try). Nothing was changed
+by the stop. Wait for the sync (`systemctl list-timers snapper-cleanup.timer`) and run C5 again; do not start the sync
+by hand.
+
 ### D3 (conditional): the pin loader on P's exact tree
 
 Only after a T2 failure before the kernel (the fallback boot was r3b on P with no `aurora,trial`), a GPU-side failure in
@@ -1291,7 +1300,7 @@ A black T2 panel does not mean a dead kernel. If T3 or ssh still answers, the le
 
 After a failed T2 the window stays open until the lead decides: a fixed retry (same blocks, new file hashes) or the close.
 
-## 7. Next: D5 brightness (briefly)
+## 7. Next: D5 brightness (briefly; the runbook is now `docs/r3-display-d5-d9.md`)
 
 A second window under the same rules (W0, W1, then the D5a package instead of I1's): `linux-k114s-r3b` version
 `r3b.b1` with `patches/linux/brightness` 0001-0003, 0005, 0006 (0004 is in v272-11), built from the kept r3b tree and

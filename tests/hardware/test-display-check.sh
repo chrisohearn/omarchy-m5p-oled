@@ -80,6 +80,24 @@ mk f none; printf '#!/bin/sh\nexit 0\n' > "$W/f/bin/sleep"; run f none; ok "a GP
 mk h published; printf '#!/bin/sh\necho %s\n' "'[{\"name\":\"eDP-1\",\"width\":3024,\"height\":1986,\"refreshRate\":60.0,\"scale\":2.0,\"vrr\":false}]'" > "$W/h/hyprctl"; run h published
 ok "published: Hyprland at 60 Hz is BAD" "$rc $(printf '%s\n' "$out" | grep -c '^BAD   hyprland: eDP-1')" "1 1"
 mk j none; printf '#!/bin/sh\necho "HYPRLAND_INSTANCE_SIGNATURE not set"\n' > "$W/j/hyprctl"; run j none; ok "hyprctl without a session (sudo) is BAD, not a crash" "$rc $(printf '%s\n' "$out" | grep -c 'gave no JSON') $(printf '%s\n' "$out" | grep -c Traceback)" "1 1 0"
+# D5 and D6 options: --floor (the brightness build) and --vrr on (the boot without the mask)
+mk fl published; mkdir -p "$W/fl/dt/soc/dcp@48ae00000/panel"; printf '\000\000\000\012' > "$W/fl/dt/soc/dcp@48ae00000/panel/apple,min-brightness"
+printf '[    2.20] apple-drm display-subsystem: brightness requests below 10 nits are raised to 10 nits\n' >> "$W/fl/dmesg"
+run fl published --floor; ok "--floor on the brightness build: exit 0, the floor line and the tree property are ok" "$rc $(printf '%s\n' "$out" | grep -c '^ok    kernel: brightness requests below') $(printf '%s\n' "$out" | grep -c 'apple,min-brightness 10')" "0 1 1"
+mk f0 published; run f0 published --floor; ok "--floor on the D4 build and tree is BAD twice" "$rc $(printf '%s\n' "$out" | grep -c '^BAD   kernel: no .brightness requests') $(printf '%s\n' "$out" | grep -c '^BAD   .*apple,min-brightness is not 10')" "1 1 1"
+mk fi published; mkdir -p "$W/fi/dt/soc/dcp@48ae00000/panel"; printf '\000\000\000\012' > "$W/fi/dt/soc/dcp@48ae00000/panel/apple,min-brightness"
+printf '[    2.20] apple-drm x: brightness requests below 10 nits are raised to 10 nits\n[    2.30] apple-drm x: brightness floor 10 ignored for a ceiling of 5\n[    2.40] dcp: unqualified IOMFB callback 590\n' >> "$W/fi/dmesg"
+run fi published --floor; ok "--floor: a dropped floor and callback 590 are BAD" "$rc $(printf '%s\n' "$out" | grep -c '^BAD   kernel: the brightness floor was dropped') $(printf '%s\n' "$out" | grep -c '^BAD   kernel: unqualified IOMFB callback 590')" "1 1 1"
+mk nf published; run nf published; ok "without --floor the floor line is not looked for" "$rc $(printf '%s\n' "$out" | grep -c 'brightness requests below')" "0 0"
+mk vo published; echo Y > "$W/vo/sys/module/appledrm/parameters/fw27_panel_vrr"; echo 1 > "$W/vo/sys/class/drm/card2-eDP-1/vrr_capable"
+run vo published --vrr on; ok "--vrr on: fw27_panel_vrr Y and vrr_capable 1 are ok" "$rc $(printf '%s\n' "$out" | grep -c 'ok    vrr_capable 1') $(printf '%s\n' "$out" | grep -c 'fw27_panel_vrr = Y')" "0 1 1"
+run vo published; ok "the default (--vrr off) calls that same boot BAD twice" "$rc $(printf '%s\n' "$out" | grep -c '^BAD   vrr_capable 1, expected 0') $(printf '%s\n' "$out" | grep -c '^BAD   appledrm.fw27_panel_vrr is .Y.')" "1 1 1"
+mk vm published; run vm published --vrr on; ok "--vrr on on a masked boot is BAD twice" "$rc $(printf '%s\n' "$out" | grep -c '^BAD   vrr_capable 0, expected 1') $(printf '%s\n' "$out" | grep -c '^BAD   appledrm.fw27_panel_vrr is .N.')" "1 1 1"
+mk vh published; printf '#!/bin/sh\necho %s\n' "'[{\"name\":\"eDP-1\",\"width\":3024,\"height\":1986,\"refreshRate\":120.0,\"scale\":2.0,\"vrr\":true,\"currentFormat\":\"XRGB8888\"}]'" > "$W/vh/hyprctl"
+echo Y > "$W/vh/sys/module/appledrm/parameters/fw27_panel_vrr"; echo 1 > "$W/vh/sys/class/drm/card2-eDP-1/vrr_capable"
+run vh published --vrr on; ok "--vrr on: Hyprland with vrr true is ok" "$rc $(printf '%s\n' "$out" | grep -c '^ok    hyprland: eDP-1')" "0 1"
+mk vk published; cp "$W/vh/hyprctl" "$W/vk/hyprctl"; run vk published; ok "--vrr off: Hyprland with vrr true is BAD" "$rc $(printf '%s\n' "$out" | grep -c '^BAD   hyprland: eDP-1')" "1 1"
+bash "$here/k114s-display-check.sh" --expect published --vrr maybe >/dev/null 2>&1; ok "an unknown --vrr value is refused" "$?" 2
 bash "$here/k114s-display-check.sh" --expect maybe >/dev/null 2>&1; ok "an unknown expectation is refused" "$?" 2
 echo "display-check test: $pass passed, $fail failed"
 [ "$fail" = 0 ]

@@ -12,7 +12,9 @@ Linux-side files go to k114s-repair/r2c.
               step by step, write nothing
   apply       check, then back up and write (asks for one typed confirmation)
   kernel V    after apply: swap the repair kernel: r1 (trackpad fix B) | r1a (trackpad fix A)
-  stage2 V    after apply: switch only the Stage 2 device tree: r1 | wifi | gp1c | trial1
+  stage2 V    after apply: switch only the Stage 2 device tree: r1 | wifi | gp1c | trial1; or r3-gpu, the proven
+              Stage 2 of the r3a promotion, from the bundle's promotion/ folder (docs/r3-display-d5-d9.md D9): the way
+              back from the display Stage 2, whose loader differs (the whole file is written, loader bytes included)
   default V   after apply: which boot entry starts by default: repair | original, or after the r3a
               promotion (docs/r3a-promotion.md): k114s | aurora (written as an entry path)
   rollback    restore from the ESP backup:  rollback stage2  (device tree only)
@@ -64,7 +66,18 @@ K114S_UKI = "EFI/Linux/omarchy_linux-k114s.efi"
 PATH_DEFAULTS = {"k114s": ("Omarchy/linux-k114s", K114S_UKI), "aurora": ("Omarchy/linux-aurora", UKI)}
 # Stage 2 files built on this Mac outside the bundle (docs/r3-gpu-result.md, docs/r3-integration.md), named in status.
 LOCAL_STAGE2 = {"9825a10317866865b49d26bc1df2d0d04a818d385ca62c1a3ce81d96f3d6b8fc": "r3-gpu (GPU tree, not in this bundle)",
-                "5164bb1e1be1fba39aee64229863b2f835828edd8b4f90e8cfa91e71a6fd8cd9": "r3a (r3a tree, not in this bundle)"}
+                "5164bb1e1be1fba39aee64229863b2f835828edd8b4f90e8cfa91e71a6fd8cd9": "r3a (r3a tree, not in this bundle)",
+                "90b351377d6fcbad00ddc4c2fb74fce4313dd7fa5f4978ba895a7c41be523e30": "r3-display (pin loader + brightness tree, not in this bundle)"}
+# A Stage 2 is  <loader> <device tree> <gzip U-Boot>  and the tree starts where the loader ends, so each loader has its
+# own prefix length: the bundle's installed loader (manifest.json) and the K114s-pin loader of the display Stage 2
+# (betizzel/omarchy-m5#18, docs/r3-display-d5-d9.md D9): 4,063,232 bytes, the sha256 of that loader file.
+PIN_LOADER = (4063232, "beceb683b63a6d421ce58061a55c14a6d09e0381a23c1a543df55f4cc8007392")
+# Stage 2 files kept in the bundle's promotion/ folder (copied from the ESP's k114s-repair/promotion/ by the owner's macOS
+# agent, D9): choice -> (file, tree file, sha256 of the file, sha256 of the tree, loader). Checked here, not in manifest.json,
+# because the manifest belongs to the bundle and these files do not.
+PROMOTED_STAGE2 = {"r3-gpu": ("boot-ctxr-gpu.bin", "k114s.dtb.gpu",
+                              "9825a10317866865b49d26bc1df2d0d04a818d385ca62c1a3ce81d96f3d6b8fc",
+                              "2c870ba9f5963f5ae1ed18a7effa520daa234583997470d9552a795b4aafcda5", "installed")}
 # The one repair kernel image. Whichever variant is installed lives at this path.
 REPAIR_UKI = "EFI/Linux/omarchy_linux-aurora-k114s.efi"
 # Paths bundles r1 and r2 would have used (never applied on this Mac); recognised and removed by rollback.
@@ -287,6 +300,19 @@ class Esp:
 
 # --- reading the live state --------------------------------------------------
 
+def split_known(data, m):
+    """(loader name, prefix, trees, trailer) of a Stage 2 that carries one of the known loaders and the bundle's U-Boot
+    tail, else None. The loader is named "installed" (the manifest's) or "pin"."""
+    for name, (size, digest) in (("installed", (m["aura_prefix_bytes"], m["aura_prefix_sha256"])), ("pin", PIN_LOADER)):
+        try:
+            prefix, trees, trailer = tool.stage2_split(data, size)
+        except (SystemExit, Exception):   # a damaged file (a short tree, a bad gzip tail) is not a known Stage 2
+            continue
+        if sha(prefix) == digest and sha(trailer) == m["uboot_trailer_sha256"]:
+            return name, prefix, trees, trailer
+    return None
+
+
 def stage2_state(data, m):
     known = {v: k for k, v in m["stage2_sha256"].items()}
     digest = sha(data)
@@ -294,13 +320,10 @@ def stage2_state(data, m):
         return known[digest]
     if digest in LOCAL_STAGE2:
         return LOCAL_STAGE2[digest]
-    try:
-        prefix, trees, trailer = tool.stage2_split(data, m["aura_prefix_bytes"])
-    except SystemExit:
+    hit = split_known(data, m)
+    if hit is None:
         return "unknown"
-    if sha(prefix) == m["aura_prefix_sha256"] and sha(trailer) == m["uboot_trailer_sha256"]:
-        return "same-loader-other-trees(%d)" % len(trees)
-    return "unknown"
+    return ("same-loader-other-trees(%d)" if hit[0] == "installed" else "pin-loader-other-trees(%d)") % len(hit[2])
 
 
 def tar_files(data):
@@ -473,6 +496,22 @@ def stage2_payload(choice, m):
             or sha(trees[0]) != m["payload"][STAGE2_FILES[choice][1]]:
         raise Stop("the bundle's Stage 2 is not a K114s-only image of the installed loader")
     return data
+
+
+def promoted_payload(choice, m):
+    """(Stage 2 bytes, tree bytes) of a choice kept in the bundle's promotion/ folder, checked against this tool's hashes."""
+    name, tree, want, want_tree, loader = PROMOTED_STAGE2[choice]
+    try:
+        data = read(os.path.join(BUNDLE, BUNDLE_PROMOTION, name))
+        dtb = read(os.path.join(BUNDLE, BUNDLE_PROMOTION, tree))
+    except OSError as error:
+        raise Stop("the bundle's %s/ has no %s (%s): copy it from the ESP's %s/ first (docs/r3-display-d5-d9.md M9)"
+                   % (BUNDLE_PROMOTION, os.path.basename(error.filename or name), error.strerror, PROMOTION_DIR))
+    hit = split_known(data, m)
+    if sha(data) != want or sha(dtb) != want_tree or hit is None or hit[0] != loader or len(hit[2]) != 1 or sha(hit[2][0]) != want_tree:
+        raise Stop("%s/%s and %s are not the %s Stage 2 and tree this tool knows (sha256 %s...)"
+                   % (BUNDLE_PROMOTION, name, tree, choice, want[:8]))
+    return data, dtb
 
 
 def linux_files(m, variant, record):
@@ -697,9 +736,12 @@ def rollback(esp, m, what):
 
 
 def switch_stage2(esp, m, choice):
-    if choice not in STAGE2_FILES:
-        raise Stop("stage2 must be one of: " + ", ".join(STAGE2_FILES))
-    data = stage2_payload(choice, m)
+    if choice in PROMOTED_STAGE2:
+        data, dtb = promoted_payload(choice, m)
+    elif choice in STAGE2_FILES:
+        data, dtb = stage2_payload(choice, m), payload(STAGE2_FILES[choice][1], m)
+    else:
+        raise Stop("stage2 must be one of: " + ", ".join(list(STAGE2_FILES) + list(PROMOTED_STAGE2)))
     esp.open(True)
     try:
         if not esp.has(BACKUP_DIR + "/backup.json"):
@@ -707,7 +749,7 @@ def switch_stage2(esp, m, choice):
         if stage2_state(esp.get(STAGE2), m) == "unknown":
             raise Stop("the live Stage 2 is not one this bundle knows; not replacing it")
         esp.put(STAGE2, data)
-        esp.put(REPAIR_DIR + "/k114s.dtb", payload(STAGE2_FILES[choice][1], m))
+        esp.put(REPAIR_DIR + "/k114s.dtb", dtb)
         if sha(esp.get(STAGE2)) != sha(data):
             raise Stop("Stage 2 did not verify after writing: run  rollback stage2")
         state = live_state(esp, m)
