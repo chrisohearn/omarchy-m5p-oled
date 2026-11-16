@@ -5,6 +5,7 @@
 #
 #   sudo install.sh 'PATH/omarchy-hyprland-titlebars-1:0.4.0+m5-1-aarch64.pkg.tar.xz' [EXPECTED-SHA256]
 #
+#   0. the package is read and, with EXPECTED-SHA256, checked first; a refusal installs nothing;
 #   1. the guard script and both pacman hooks (00 stops a transaction that would change the plugin
 #      or hyprland-m5 without the owner's marker; 02 moves a mismatched plugin aside afterwards);
 #   2. a permit /run/omarchy-k114s/permit ("install omarchy-hyprland-titlebars", the narrow permit
@@ -29,6 +30,11 @@ pkg=$1 expect=${2:-}
 info=$("$pacman" -Qp "$pkg") || die "pacman cannot read $pkg"
 [[ $info == "omarchy-hyprland-titlebars "*+m5-* ]] || die "$pkg is '$info', not the M5 rebuild (omarchy-hyprland-titlebars <epoch>:<ver>+m5-<rel>)"
 
+sum=$(sha256sum "$pkg"); echo "$sum"
+if [[ -n $expect ]]; then
+  [[ ${sum%% *} == "${expect,,}" ]] || die "sha256 of $pkg is ${sum%% *}, not the expected ${expect,,}"
+fi
+
 lib=$root/usr/local/lib/omarchy-k114s etc=$root/etc/omarchy-k114s hooks=$root/etc/pacman.d/hooks
 install -d "$lib" "$etc" "$hooks"
 install -m755 "$here/titlebars-abi-check" "$lib/titlebars-abi-check"
@@ -36,10 +42,6 @@ install -m644 "$here/00-k114s-titlebars-guard.hook" "$hooks/00-k114s-titlebars-g
 install -m644 "$here/02-k114s-titlebars-abi.hook" "$hooks/02-k114s-titlebars-abi.hook"
 
 [[ ! -e $root/var/lib/pacman/db.lck ]] || die "pacman's database is locked (another transaction runs); try again when it is done"
-sum=$(sha256sum "$pkg"); echo "$sum"
-if [[ -n $expect ]]; then
-  [[ ${sum%% *} == "${expect,,}" ]] || die "sha256 of $pkg is ${sum%% *}, not the expected ${expect,,}"
-fi
 permit=$root/run/omarchy-k114s/permit
 [[ ! -e $permit ]] || die "$permit exists (a release is in progress); not touching it"
 made=()

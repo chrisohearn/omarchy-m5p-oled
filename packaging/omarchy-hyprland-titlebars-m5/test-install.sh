@@ -66,6 +66,6 @@ r=$BASE/s1; mkdir -p $r
 ok "expected sha256 that matches: install passes" "$(mkdir -p $r/usr/bin; : > $r/usr/bin/Hyprland; K114S_ROOT=$r PACMAN=$BASE/pacman K114S_HYPRLAND_OWNER=hyprland "$HERE/install.sh" "$BASE/pkg" $E3B0 >/dev/null 2>&1; echo $?)" 0
 r=$BASE/s2; mkdir -p $r/usr/bin; : > $r/usr/bin/Hyprland
 ok "expected sha256 that differs: install refuses" "$(K114S_ROOT=$r PACMAN=$BASE/pacman K114S_HYPRLAND_OWNER=hyprland "$HERE/install.sh" "$BASE/pkg" "$(printf '0%.0s' {1..64})" >/dev/null 2>&1; echo $?)" 1
-ok "... before pacman -U or any marker" "$(find $r/seen $r/$E $r/run -type f 2>/dev/null | wc -l)" 0
+ok "... before pacman -U, any marker or any hook" "$(find $r -type f ! -path "$r/usr/bin/Hyprland" 2>/dev/null | wc -l)" 0
 echo "titlebars install/guard tests: $pass passed, $fail failed"
 [ "$fail" = 0 ]
