@@ -1,0 +1,49 @@
+#!/bin/bash
+# A watched, self-reverting colour-management trial on the K114s panel (issue #20, docs/r3-hdr.md section 6).
+#   usage: k114s-cm-trial PRESET [SECONDS]      PRESET: srgb, dp3, edid or wide; SECONDS: 5 to 120, default 20
+# For a session with the owner looking at the panel. It turns Hyprland colour management on at runtime with the eDP-1
+# preset PRESET, then turns it back off after SECONDS: render:cm_enabled false and eDP-1 cm = "srgb", the managed
+# default of linux/display/k114s-dcp-colour. The way back is scheduled FIRST, as its own transient systemd user unit,
+# so it runs even if this shell, the terminal or T3 goes away while the panel is black. Nothing is written to a file:
+# the next Hyprland start or config reload reads monitors.lua as before. User session only, no sudo.
+#   Environment: HYPRLAND_INSTANCE_SIGNATURE (default: the newest instance); for the tests K114S_HYPRCTL, K114S_SYSTEMD_RUN
+#   and K114S_CM_TRIAL_WAIT (seconds to wait before the check, default SECONDS + 3).
+# Exit 0 when the revert was verified, 1 on a refusal or when the revert could not be verified.
+set -u
+die() { echo "k114s-cm-trial: $*" >&2; exit 1; }
+preset=${1:-}; secs=${2:-20}
+case $preset in srgb|dp3|edid|wide) ;; *) die "usage: k114s-cm-trial srgb|dp3|edid|wide [SECONDS]" ;; esac
+case $secs in ''|*[!0-9]*) die "SECONDS must be a whole number" ;; esac
+[ "$secs" -ge 5 ] && [ "$secs" -le 120 ] || die "SECONDS must be 5 to 120"
+hyprctl=${K114S_HYPRCTL:-hyprctl}; srun=${K114S_SYSTEMD_RUN:-systemd-run}
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+  HYPRLAND_INSTANCE_SIGNATURE=$(ls -t "$XDG_RUNTIME_DIR/hypr" 2>/dev/null | head -1)
+  [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ] || die "no Hyprland instance under $XDG_RUNTIME_DIR/hypr"
+fi
+export HYPRLAND_INSTANCE_SIGNATURE
+rule='output = "eDP-1", mode = "preferred", position = "auto", scale = 2'
+back="hl.config({ render = { cm_enabled = false } }); hl.monitor({ $rule, cm = \"srgb\" })"
+try="hl.monitor({ $rule, cm = \"$preset\" }); hl.config({ render = { cm_enabled = true } })"
+"$hyprctl" monitors 2>/dev/null | grep -q '^Monitor eDP-1 ' || die "no eDP-1 monitor in this Hyprland session"
+# 1. the way back, before anything changes
+unit=k114s-cm-trial-revert-$$
+"$srun" --user --quiet --collect --unit="$unit" --on-active="${secs}s" \
+  -E XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" -E HYPRLAND_INSTANCE_SIGNATURE="$HYPRLAND_INSTANCE_SIGNATURE" \
+  "$(command -v "$hyprctl" || echo "$hyprctl")" eval "$back" >/dev/null 2>&1 ||
+  die "could not schedule the revert (systemd-run --user); nothing changed"
+echo "k114s-cm-trial: revert scheduled in ${secs} s (unit $unit.timer)"
+# 2. the trial
+"$hyprctl" eval "$try" >/dev/null 2>&1 || echo "k114s-cm-trial: the trial command failed; the revert still runs"
+echo "k114s-cm-trial: colour management ON, eDP-1 preset $preset. Owner: is the panel lit, and how do colours look?"
+"$hyprctl" monitors 2>/dev/null | grep -E 'colorManagementPreset' | sed 's/^[[:space:]]*/  now: /'
+# 3. wait for the revert, then check it
+sleep "${K114S_CM_TRIAL_WAIT:-$((secs + 3))}"
+cm=$("$hyprctl" getoption render:cm_enabled 2>/dev/null | head -1)
+pr=$("$hyprctl" monitors 2>/dev/null | grep -E 'colorManagementPreset' | head -1 | sed 's/.*: *//')
+if [ "$cm" = "bool: false" ] && [ "$pr" = srgb ]; then
+  echo "k114s-cm-trial: reverted: render:cm_enabled false, eDP-1 preset srgb"
+else
+  echo "k114s-cm-trial: REVERT NOT VERIFIED (cm_enabled: ${cm:-?}, preset: ${pr:-?}); run: $hyprctl eval '$back'" >&2
+  exit 1
+fi
