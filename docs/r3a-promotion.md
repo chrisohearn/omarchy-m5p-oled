@@ -59,8 +59,8 @@ rebuild. What proves the path form:
   The source also shows that Limine keeps a value's trailing blanks, so every write below is checked with `grep -x`.
 - Agent-run: the entry lines on the Mac are exactly `/+Omarchy` and `  //linux-k114s`, with no trailing blank (`cat -A`).
 - `limine-entry-tool` (a compiled binary) and `limine-snapper-sync` are observed, not proven, to keep a path default; the
-  P6d check is what covers both. `limine-entry-tool` was observed to leave the header of `limine.conf`, `default_entry: 1` included,
-  unchanged across `--remove-uki`, the r3a install and the 2026-11-14 rebuild. It writes `default_entry` only when it
+  P6d check is what covers both. `limine-entry-tool` was observed to leave the header of `limine.conf`, `default_entry: 1`
+  included, unchanged across `--remove-uki`, the r3a install and the 2026-11-14 rebuild. It writes `default_entry` only when it
   generates a new file. Its own template carries `#default_entry: <OS name>/<kernel name>`, which is the path form
   (`strings` of `/usr/lib/limine/limine-entry-tool`). That this holds for a path value is **not proven by source**. Step P5b
   is the first observed rebuild with the path in place, and every later transaction is followed by a check (P6d).
@@ -139,7 +139,8 @@ space guard does not run; the P6d after-block is what catches a bad result befor
 is the way back if it is missed.
 
 **D8. `update-m1n1` is turned off while `linux-k114s` is installed** (`M1N1_UPDATE_DISABLED=1`, as `docs/r3b-kernel.md`
-asks). It has been on since trial step D4 of `docs/r3-integration.md` restored it, and P6c turns it off. Its trees sort above `linux-aurora`'s, so a run would rebuild `m1n1/boot.bin` from the r3a package's preliminary
+asks). It has been on since trial step D4 of `docs/r3-integration.md` restored it, and P6c turns it off. Its trees sort
+above `linux-aurora`'s, so a run would rebuild `m1n1/boot.bin` from the r3a package's preliminary
 trees (and add about 10 MB). The Stage 2 hook reads only the U-Boot tail of that file, and every package that ships
 `dtbs/` or `asahi-boot/` is held, so this is a precaution, not a fix.
 
@@ -585,6 +586,10 @@ Expected from `restore-repair --check` (it changes nothing):
 `limine.conf:    the repair entry is in it now and is exactly the saved block (restore-repair is for after P5)`, a space
 line, then `restore-repair check passed.` That proves the copy kept on this Mac is the image that boots and the block is
 the entry that boots it.
+A change to `macos/tools/k114s_repair.py` after this text (the `restore-repair` refusal-before-write fix, issue #89) means
+the next promotion must copy the new tool to macOS first, as a fresh macOS step (M9 in `docs/r3-display-d5-d9.md`):
+P0e/D9p print its sha256 (the new one is `66eed0721eed06dc81460e3cd8c495a0daa534341bbb7c2fb6d268cd8352e1ec`) and
+the macOS copy must print the same value.
 If either command prints `STOPPED`, or the image's sha256 differs, P5 must not run: put `tools/k114s_repair.py.r3a`
 back and report the message. Then restart. The Mac starts Linux as usual (if it does not, use Startup Options and pick
 the Omarchy volume), and the lead runs block C.
@@ -956,13 +961,15 @@ Each step's undo is next to it. When Linux does not come up, hold the power butt
       sudo cat $E/limine.conf | awk -v b=promotion/repair-block.conf '!d && /^\// { while ((getline l < b) > 0) print l; d = 1 } { print }' |
         sed 's#^default_entry: .*#default_entry: 1#' > promotion/limine.conf.new
       grep -c '' promotion/limine.conf.new; grep -n -e '^default_entry' -e '^/' promotion/limine.conf.new   # the repair title is the first '/' line
-      shasum -a 256 $E/EFI/Linux/omarchy_linux-aurora-k114s.efi | grep -q '^51148ff7005d2986' &&   # no limine.conf write unless the image is whole
+      # no limine.conf write unless the image is whole
+      shasum -a 256 $E/EFI/Linux/omarchy_linux-aurora-k114s.efi | grep -q '^51148ff7005d2986' &&
         sudo cp promotion/limine.conf.new $E/limine.conf && sync && diskutil unmount $E
 
   In the r3b window the r3b image (`omarchy_linux-k114s-r3b.efi`) must come off first (the commented line before the
   `df` line), or the free-space check stops the copy, and the `limine.conf` write is skipped unless the image's `shasum`
-  matches. The `awk` puts the saved block before the first top-level entry, which is where P5a cut it from. Check the `grep`
-  output before the `cp`: one `default_entry: 1` line, and `/Omarchy K114s repair r1 (trackpad fix B)` as the first entry.
+  matches. On `STOP`, the volume is still mounted read-write: remove the r3b image if it is present and paste the block
+  again, or otherwise run `diskutil unmount $E` and report. The `awk` puts the saved block before the first top-level
+  entry, which is where P5a cut it from. Check the `grep` output before the `cp`: one `default_entry: 1` line, and `/Omarchy K114s repair r1 (trackpad fix B)` as the first entry.
 - **Never from macOS:** `rollback all` (it now stops once the repair entry is gone; before that it would restore the
   pre-repair menu), `rollback stage2` (it restores trial1, not r1), `kernel`, `apply`, `default original`.
 

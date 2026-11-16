@@ -965,6 +965,10 @@ def restore_repair(esp, m, image_path, check_only):
         have_image = esp.has(REPAIR_UKI) and sha(esp.get(REPAIR_UKI)) == digest
         need = 0 if have_image else clusters(size, cluster) + RESERVE
         make_room = free < need
+        new = None
+        if not present:   # the menu is built before any write (and in --check), so a refusal leaves the ESP as it was
+            new = text if esp.has(UKI) and not make_room else drop_sub_entry(text, "linux-aurora")
+            new = with_repair_block(new, block)
         if check_only:
             say("restore-repair check (nothing written):")
             say("  repair image:   %s matches the ESP's record (%d bytes, sha256 %s...)" % (image_path, size, digest[:16]))
@@ -997,8 +1001,6 @@ def restore_repair(esp, m, image_path, check_only):
             esp.put(REPAIR_UKI, image)
             if sha(esp.get(REPAIR_UKI)) != digest:
                 raise Stop("%s does not verify after writing; limine.conf is unchanged. Run this again" % REPAIR_UKI)
-        new = text if esp.has(UKI) else drop_sub_entry(text, "linux-aurora")
-        new = with_repair_block(new, block)
         esp.put(LIMINE, new.encode("utf-8"))
         if esp.get(LIMINE).decode("utf-8") != new:
             raise Stop("limine.conf does not read back as written: run this again")
