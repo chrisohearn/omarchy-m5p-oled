@@ -69,14 +69,20 @@ only the runtime toggle crashed. So install and arm, then reboot once:
    `K114S_CAND=r3b-c3` against `linux-aurora` and `linux-k114s`, `pacman -U`. Expect exactly one `Building UKI for
    linux-k114s-r3b` line, `boot-ctxr.bin` still the display file, the r3a image unchanged.
 3. Block P9 again.
-4. Arm:
+4. Arm (a subshell: any STOP leaves the mask in place and changes nothing):
    ```
-   m=/etc/modprobe.d/aurora-m5-vrr.conf
-   grep -q -x 'options appledrm fw27_panel_vrr=0' $m && sudo cp -p $m "$D/aurora-m5-vrr.conf.masked"
+   (
+   m=/etc/modprobe.d/aurora-m5-vrr.conf; c="$D/aurora-m5-vrr.conf.masked"
+   stop() { echo "STOP: $*"; exit 1; }
+   grep -q -x 'options appledrm fw27_panel_vrr=0' $m || stop "$m is not the mask (read it); nothing changed"
+   sudo cp -p $m "$c" && sudo cmp -s $m "$c" || stop "no verified copy of the mask in $c; nothing changed"
    printf '%s\n' '# K114s VRR test (docs/r3-vrr.md V1): one boot, the owner watching' 'options appledrm fw27_panel_vrr=1 fw27_panel_vrr_min=48' | sudo tee $m >/dev/null
-   modprobe -c | grep -E '^options appledrm fw27_panel_vrr'
+   [ "$(modprobe -c | grep -c -E '^options appledrm fw27_panel_vrr=1 fw27_panel_vrr_min=48$')" = 1 ] && [ "$(modprobe -c | grep -c -E '^options appledrm fw27_panel_vrr=0')" = 0 ] ||
+     { sudo cp -p "$c" $m; stop "modprobe does not read the test options: the mask is back"; }
+   echo "V1 armed: the next boot offers VRR with a 48 Hz minimum; the way back is V3"
+   )
    ```
-   Expect `fw27_panel_vrr=1 fw27_panel_vrr_min=48` and no `=0`.
+   Expect the last line.
 5. Reboot with the owner watching.
 
 **V2. After the boot.**
