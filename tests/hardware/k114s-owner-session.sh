@@ -12,8 +12,8 @@
 # It NEVER suspends, plays audio, pairs, reboots or touches NVRAM or macOS. Pairing, audio playback on a headset,
 # installs and Git are done by you, by hand, when a step says so. Reboot items (section D) are only listed: they
 # are folded into the display trial boots. Steps that end the desktop session are listed after the summary is
-# written. The log is private (directory 0700, file 0600) and redacted: MAC and
-# IP addresses, e-mails, serials, labelled network names, UUIDs, hashes, home paths, host and user names.
+# written. The log is private (directory 0700, file 0600) and redacted: MAC and IP addresses, e-mails,
+# serials, network names, UUIDs, hashes, home paths, host and user names.
 set -u
 cd "$(dirname "$0")/../.." || exit 2
 umask 077
@@ -24,7 +24,7 @@ while [ $# -gt 0 ]; do
     --dry-run) dry=1 ;;
     --self-test) selftest=1 ;;
     --section) shift; only=${1:-}; case $only in A|B|C|D|E) ;; *) echo "--section needs A, B, C, D or E" >&2; exit 2 ;; esac ;;
-    -h|--help) sed -n 2,14p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n 2,16p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -49,6 +49,8 @@ redact() {
     -e 's/\b[0-9a-fA-F]{32,}\b/HASH/g' \
     -e 's#(/home|/Users)/[^/ ]+#\1/USER#g' \
     -e 's/(serial|ssid)[^:=]*[:=] *.*/\1 REDACTED/I' \
+    -e 's/(serial|ssid)[[:space:]].*/\1 REDACTED/I' \
+    -e 's/(Connected network)[[:space:]].*/\1 REDACTED/I' \
     -e 's/[A-Za-z0-9_.-]*([Cc]alib|[Tt]uning)[A-Za-z0-9_.-]*\.(bin|dat|plist)/CALFILE/g' \
     "${lit[@]}"
 }
@@ -66,26 +68,36 @@ selftest_run() {
   # 1. redactor, with sensitive-looking values built from pieces so this file stays publishable
   mac=$(printf '%s:%s:%s:%s:%s:%s' aa 0b 1c 2d 3e 4f); ip=$(printf '%s.%s.%s.%s' 192 168 1 77)
   mail=$(printf '%s@%s.%s' someone example com); hp=$(printf '/%s/%s/x' home alice)
-  s=$(printf 'dev %s ip %s mail %s path %s\nSerial Number: C02ABC\nSSID: MyNet\nid 3f2504e0-4f89-11d3-9a0c-0305e82c3301\nID_SERIAL_SHORT=SN77Z\nSerial Number (system): SYS55\ninet6 fe80::a8bb:ccff:fedd:eeff\n' "$mac" "$ip" "$mail" "$hp" | redact)
-  for leak in "$mac" "$ip" "$mail" alice C02ABC MyNet 3f2504e0 SN77Z SYS55 a8bb; do
+  s=$(printf '%s\n' "dev $mac ip $ip mail $mail path $hp" 'Serial Number: C02ABC' 'SSID: MyNet' \
+    'id 3f2504e0-4f89-11d3-9a0c-0305e82c3301' 'ID_SERIAL_SHORT=SN77Z' 'Serial Number (system): SYS55' \
+    'inet6 fe80::a8bb:ccff:fedd:eeff' 'ssid HomeNet5' '  Connected network   CafeNet' \
+    'iSerial 3 USB9Q' 'Serial C02XYZ  Rev 2' | redact)
+  for leak in "$mac" "$ip" "$mail" alice C02ABC MyNet 3f2504e0 SN77Z SYS55 a8bb HomeNet5 CafeNet USB9Q C02XYZ; do
     case $s in *"$leak"*) no "redactor leaked: ${leak:0:4}..." ;; esac
   done
   s=$(printf '/usr/lib/omarchy-mac/x at 10:15:30\n' | redact)
   [ "$s" = '/usr/lib/omarchy-mac/x at 10:15:30' ] || no "redactor changed a path or a time"
   s=$(printf '/usr/lib/testhost/x\n' | redact); [ "$s" = /usr/lib/testhost/x ] || no "redactor changed a host-named path"
-  s=$(printf 'testhost testhost end\n1 testuser testuser 12 x\nTESTHOST up\n/var/lib/testuser/x\n' | redact)
+  s=$(printf 'testhost testhost end\n1 testuser testuser 12 x\nTESTHOST up\n/var/lib/testuser/x\n' \
+    | redact)
   case $s in *testhost*|*testuser*|*TESTHOST*) no "redactor left a repeated or upper-case name: $s" ;; esac
   [ "$bad" = 0 ] && ok "redactor removes address, IPv6, mail, path, serial, network name, UUID"
   # 2. no forbidden command in any step line (suspend, reboot, NVRAM, audio playback, pairing, macOS)
-  if grep -nE "^((KEY|NEED)=[a-z]+ )*(step|load|later) .*(systemctl (suspend|reboot|hibernate)|rtcwake|pm-test|nvram|aurora-bless|pw-play|aplay|paplay|speaker-test|bluetoothctl .*pair|shutdown|poweroff)" "$0" >"$t/forbidden"; then
+  bans='systemctl (suspend|reboot|hibernate)|rtcwake|pm-test|nvram|aurora-bless|pw-play|aplay|paplay|speaker-test'
+  bans+='|bluetoothctl .*pair|shutdown|poweroff'
+  if grep -nE "^((KEY|NEED)=[a-z]+ )*(step|load|later) .*($bans)" "$0" >"$t/forbidden"; then
     no "forbidden command in a step line"; cat "$t/forbidden"
   else ok "no suspend, reboot, NVRAM, playback or pairing command in any step"; fi
   # 2b. every capture that prompts for keys must be gated on the key policy, and the one after it must not name the moon key
-  if grep -nE 'input-capture\.sh keys' "$0" | grep -vE '^[0-9]+:(NEED=moon step|  # |.*grep -)' | grep -vE '^[0-9]+:#|\$0'; then no "a keys capture is not gated on NEED=moon"; else ok "every keys capture is gated on the key policy"; fi
+  # the [k] keeps this line from matching its own pattern
+  if grep -nE 'input-capture\.sh [k]eys' "$0" | grep -vE '^[0-9]+:NEED=moon step '; then
+    no "a keys capture is not gated on NEED=moon"; else ok "every keys capture is gated on the key policy"; fi
   # 2c. the gate's SKIP path, interactive, with a policy that would suspend; every other step is skipped by answer
-  out=$(printf '\n\n\n%.0s' 1 >"$t/in"; printf 's\ns\n\n\n\n' >>"$t/in"; yes s | head -60 >>"$t/in"
+  out=$(printf '\n\n\n%.0s' 1 >"$t/in"; printf 's\ns\n\n\n' >>"$t/in"; yes s | head -60 >>"$t/in"
     K114S_OWNER_STATE=$t/state2 K114S_LOGIND_VALUE=suspend K114S_SUSPEND_VALUE=hibernate bash "$0" --section B <"$t/in" 2>&1)
-  [ "$(echo "$out" | grep -c 'SKIPPED: the')" = 3 ] && ok "failed key policy skips the power press and both key captures" || { no "gate SKIP path"; echo "$out" | grep -E 'SKIPPED|^---' | head -20; }
+  # no later step may run a command: only the three policy steps may be recorded as run
+  [ "$(echo "$out" | grep -c 'SKIPPED: the')" = 3 ] && ! echo "$out" | grep -qE '^  - (PASS|DONE|OK): ' \
+    && ok "failed key policy skips the power press and both key captures, and no later step runs" || { no "gate SKIP path"; echo "$out" | grep -E 'SKIPPED|^---' | head -20; }
   # 3. dry run in a scratch state dir: exit 0, runs nothing, covers every issue of the checklist, log is private
   out=$(K114S_OWNER_STATE=$t/state bash "$0" --dry-run </dev/null 2>&1); rc=$?
   [ "$rc" = 0 ] && ok "dry run exits 0" || { no "dry run exit $rc"; echo "$out" | tail -5; }
@@ -103,6 +115,7 @@ selftest_run() {
 [ "$selftest" = 1 ] && { selftest_run; exit $?; }
 
 mkdir -p "$state" && chmod 700 "$state" || { echo "cannot create $state" >&2; exit 2; }
+rm -f "$state"/.raw.*   # leftovers of a session killed before its EXIT trap ran
 stamp=$(date +%Y%m%d-%H%M%S)
 LOG=$state/session-$stamp.log
 : >"$LOG"; chmod 600 "$LOG"
@@ -257,7 +270,7 @@ KEY=power step 70 "Power-key policy" "Expect POWER-KEY POLICY: ok. The next step
 NEED=power step 70 "Power button, one short press" "Press the power button ONCE, briefly, within 30 s. Do NOT hold it: a long press asks the SMC to restart. Say what appeared: the Omarchy power menu, a lock, or nothing. If the power menu opens, #70 can close." -- bash $hw/k114s-input-capture.sh power 30
 step 46 "Input status" "" -- bash $hw/k114s-input-capture.sh status
 step 46 "Gestures and palm rejection" "For 60 s: rest a palm on the pad while typing a sentence, then 2-, 3- and 4-finger swipes, a pinch and one click. Judge palm rejection by feel. For workspace swipes, uncomment the hl.gesture workspace line in the user input.lua first." -- bash $hw/k114s-input-capture.sh gestures 60
-KEY=moon step "43 44" "Key policy (suspend and power keys)" "logind HandleSuspendKey, HandleSuspendKeyLongPress and HandlePowerKey must all be ignore. Both key-capture steps below are offered only if they are." -- bash $hw/k114s-input-capture.sh keypolicy
+KEY=moon step "43 44" "Key policy (suspend and power keys)" "logind HandleSuspendKey, HandleSuspendKeyLongPress, HandlePowerKey and HandlePowerKeyLongPress must all be ignore, Hyprland must bind no XF86Sleep or suspend action, and hyprctl must answer. Both key-capture steps below are offered only if they are." -- bash $hw/k114s-input-capture.sh keypolicy
 NEED=moon step 43 "Top-row keys" "Press mute, volume down, previous, next and the moon key." -- bash $hw/k114s-input-capture.sh keys 60
 NEED=moon step 44 "Keyboard backlight keys" "Do NOT press the moon key. Press Ctrl+Brightness Up and Ctrl+Brightness Down and watch whether the light steps (the capture records the key presses). Then lock the screen, unlock, and confirm it blanks and restores." -- env K114S_NO_MOON=1 bash $hw/k114s-input-capture.sh keys 30
 step 31 "Widevine probe" "Opens a Chromium window for a few seconds. If it fails: chromium --enable-logging=stderr --v=1 2>&1 | grep -i -E 'cdm|widevine'. If it passes: open a DRM page (headphones or a headset as the output, or the sink muted; never the speakers) and say whether video plays or is blank." -- bash $hw/k114s-widevine-probe.sh --headed
