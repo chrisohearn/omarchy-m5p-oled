@@ -189,6 +189,44 @@ The r1 tree files are unchanged.
 If the log shows `apple-spmi` errors during the test, boot `t6050-k114s-r3-usb-faults` once: the
 SPMI driver then logs the controller's fault record after a failed command.
 
+## State on r3a (2026-11-15, agent-run) and the plug test script
+
+Re-read on the promoted r3a kernel (`uname -v` contains `K114S-R3A`) on the GPU Stage 2, without
+root: both `dwc3-apple` devices, both `sn201202x` controllers and both PHYs are bound, both typec
+ports exist, `tests/k114s-usb-check.sh` says `IDLE` for both ("partner no", data device, power
+sink), `/sys/bus/usb/devices` is empty, and the kernel log has no Type-C, dwc3, xHCI, tipd or
+SPMI line. **Port numbering moved:** on r3a `port0` is "USB-C Right" (controller 2-0c) and `port1`
+is "USB-C Left-front" (1-0a); on r1 it was the other way round. Go by the label, not the number.
+The tipd asynchronous probe (`218e3f85`, `patches/linux/usb/0001`) is in r3a and both controllers
+still bind with no error, but that is not a plug test: no attach has happened since it went in.
+Still untested, as before.
+
+**Owner plug test in one command** (no root, read-only, about five minutes):
+
+```
+bash tests/hardware/k114s-usb-plug-test.sh
+```
+
+It prompts for each port in turn (left-front, then right): plug, watch 60 s, flip the plug,
+unplug. It prints the verdict, the Type-C partner and roles, every enumerated device with speed
+(no serial numbers) and the attach's kernel-log lines (addresses masked). Paste the output into
+#60. Use a device that is a USB device (flash drive, keyboard, USB Ethernet adapter), not a
+charger. A suspend or forced power-off is not expected; if the Mac hangs, say at which step.
+`bash tests/test-usb-plug-test.sh` tests the script against a made-up sysfs tree.
+
+## Upstream candidates reviewed for r3a (aurora-silicon/linux, 2026-11-15)
+
+| PR | State | Verdict for K114s |
+| --- | --- | --- |
+| #1648, #1714 | merged | In r3a already (section above) |
+| #1671 (`218e3f85`, `1a774eee`) | merged | Async probe carried (optional); the renegotiation is J575c-keyed, not applicable |
+| #1721 tipd: no `LDCM` to a dry port | open | **Candidate, not a blocker.** Changes only `drivers/usb/typec/tipd/spmi.c` and `tps6598x.h`. macOS sends no `LDCM` to a dry port; the driver today sends one at each probe and reset and waits up to 5 s. Both K114s controllers bind with no error today, so it fixes no observed fault. Take it after the plug test, only if the attach log shows a delay or a liquid-detection (contaminant) report. Not applied. |
+| #1889 tipd: idle sleep on T6041 | open | **Not applicable.** Keyed to T6041 (M4 Max); the K114s is T6050, the controllers stay awake. |
+| #1947 dwc3-apple: PM notifier teardown | merged (after r3a was cut) | Concerns suspend (blocked here by masked targets). Pick up with the next integration rebase, with the suspend work (`r3-sleep-lid.md`), not for USB host. |
+
+Nothing here changes the r3a contents; the decision is "no USB patch joins r3a before the plug
+test".
+
 ## Root steps for the lead
 
 None are needed for USB host. Optional, read-only, to settle two things the agent could not read:
