@@ -91,7 +91,7 @@ source-read.
 | G0 | The root confirms with the owner, or through Jarvis, that the 16:06 decline does not withdraw the D0-D4 authorisation. The window decision (4.4) is sent with its default | the answer, recorded in the recovery log and on the ledger row |
 | G1 | P is recorded (section 2): configured file `9825a103…`, tree `2c870ba9…` (`t6050-k114s-r3-gpu.dts`) in both pins, the r3a UKI's sha256 `a15fa01a…` and its full `#hash` from the `path:` line, `default_entry: Omarchy/linux-k114s`. Already met: the path-aware `k114s-boot-once` is installed (P0b) and block C is clean on it; the macOS tool `3bfa3d11…` passed `status` and `restore-repair --check` on the Mac (P4b). Still to do: the window replica case and the Mac check of 4.3 | the record; 4.2 checks |
 | G2 | The ESP budget below holds on the **measured** window layout | `df -B1 /boot/efi` before D1 and before D5a |
-| G3 | r3b installed beside r3a: `pacman -U --print` names only `linux-k114s-r3b`; the hook prints `Building UKI for linux-k114s-r3b` and no other; `pacman -Qo` gives `linux-k114s` for r3a's module directory and `linux-k114s-r3b` for r3b's; `packaging/linux-k114s/check-package.sh` passes against both other kernels; both UKIs in `limine.conf` with matching `#hash`; `k114s-boot-once check` clean; the r3a UKI's sha256 still equals G1 | before D1 is armed |
+| G3 | r3b installed beside r3a: `pacman -U --print` names only `linux-k114s-r3b`; the hook prints `Building UKI for linux-k114s-r3b (7.3.0-17.v272-11-k114s-r3b-ARCH)` and no other; the `96-omarchy-j714s-boot-ctxr` hook rewrites `m1n1/boot-ctxr.bin` byte for byte from the pinned tree (`update-boot-ctxr-k114s: wrote ... K114s device tree 2c870ba9f5963f5a`; the file is `9825a103...` afterwards, and the pins unchanged); `pacman -Qo` gives `linux-k114s` for r3a's module directory and `linux-k114s-r3b` for r3b's; `packaging/linux-k114s/check-package.sh` ends `check-package: all passed` against both other kernels (it now says `SKIP` when the other kernel is not installed); both UKIs in `limine.conf` with matching `#hash`; `k114s-boot-once check` clean; the r3a UKI's sha256 still equals G1 | before D1 is armed (`docs/r3-display-trials.md` I1) |
 | G4 | **The lead accepts the interrupt-only GPU mailbox on r3b** (`788441e089`, which r3b-kernel.md asks to decide before r3b runs on the GPU tree), citing step G (385-421/s on r3a, no storm guard message) and the J714s figure (#14). Recorded before D1. P is the GPU tree now, so D1 and every fallback that lands on a pending one-shot run r3b on it, and D2-D4 do anyway. Without acceptance, D1 uses P7's alternative (`aura-try` of `k114s-repair/known-good/boot-ctxr.bin` with the one-shot), and D2 does not start | the record; then D1 clean, with a GPU-desktop session |
 | G5 | `tests/k114s-adt-display-facts.py --dtb` on the **built display tree** reports no failed comparison. It is extended to compare the `dcp_mbox` **interrupts** with the ADT (1043-1046). The register is already checked (tool line 319, and the loader) | D0 |
 | G6 | `appledrm` absent from the r3b UKI's initramfs, so the screens before the root filesystem stay on simpledrm | `lsinitcpio` of the `.initrd` section (D0, and after every UKI rebuild) |
@@ -151,6 +151,11 @@ The r3 loader adds our three, `patches/aura/0001`-`0003`:
 - 0002: #230, the GPU firmware hint;
 - 0003: the host-stub fix (tests only).
 
+**Superseded for D3 and D4 by the lead's decision** (`docs/r3-display-trials.md`, E2): the trials use the loader of
+`betizzel/omarchy-m5#18` (Aura 0008: the #226 pin for `3D6C8857` beside 0005's J714s pin, internal panel only), sha256
+`beceb683...`, so the K114s trial validates what TripleU613 will ship. It lacks #230 (0002), which only spares the GPU
+driver one refused build at probe; today's loader lacks it too and the GPU runs. The r3 loader below stays for reference.
+
 The build at `$K114S_BUILD_ROOT/display-gpu/src/aura/build/aura.bin` is 4,063,232 bytes, against 3,997,696 for the installed
 loader. The gate test passes 12 replica cases. source-read and agent-run build. It has never run on hardware.
 
@@ -203,9 +208,18 @@ Read-only:
 - The boot-once self-test marker exists, and `boot-once-not-durable` does not.
 - The current boot has no `/chosen/aurora,trial`, or shows the trial you expect.
 - Window state: `EFI/Linux` holds only the r3a and r3b images, free space is within 1 MB of the value recorded when the
-  window opened (less any Stage 2 file copied since), and `limine.conf` has no entry added since then (a `Snapshots`
-  sub-entry from `limine-snapper-sync` is a stop: it limits itself to 85 % use, the window sits at about 80 %, and that
-  has not been measured).
+  window opened (less any Stage 2 file copied since), and `limine.conf` has no entry added since then.
+- The snapshot sync is held off: `snapper-cleanup.timer` and `limine-snapper-sync.service` read `inactive`, and
+  `limine_history` on the ESP is as it was when the window opened. `limine-snapper-sync` runs from that timer every hour
+  and 10 minutes after each boot (and on every snapshot change), adds a `Snapshots` entry and copies each kernel's image
+  unless the ESP would pass `LIMIT_USAGE_PERCENT=85`. With two images it estimates 78.8 % to 109.3 % (+152.3 MiB) and
+  adds nothing (journal, 2026-11-15). But in the window's one-image states (after the `linux-aurora` image comes off and
+  before r3b's goes on, and again after r3b is removed and before the image goes back) 190,275,584 of 523,132,928 bytes
+  are free: 63.6 % used, +76.6 MiB for one kernel, 79.0 %, under the limit. A run there would copy about 80 MB and add
+  the entry. So the runbook stops both units (a plain `systemctl stop`, nothing disabled) in every boot of the window,
+  checks it before each step, and has a block that removes a `Snapshots` entry if one slips through
+  (`docs/r3-display-trials.md`, E12). Its hourly rewrite of `limine.conf` is byte-identical on the promoted layout
+  (measured 2026-11-15: the 18:16:44 hourly run left `limine.conf`'s sha256 unchanged).
 
 ### 4.3 Black screen or hang: the way back, in boot-chain terms
 
@@ -289,14 +303,15 @@ closes after D4. D5a-D8 open a second window later, under the same rules, with t
 ## 5. Stages
 
 Each stage is one reviewable change, one PR, and one attended trial boot. Stop at any failed check. Record the result on
-the issue named in the stage.
+the issue named in the stage. **D1-D4 run as `docs/r3-display-trials.md`**: D1 and D2 share one boot, D4 has its own, D3
+runs only if D4 fails in a way that points at the loader, and D4 and D3 use the PR #18 loader (that runbook's E1, E2).
 
 | Stage | One change | Trial (4.1) | Pass | Issue |
 | --- | --- | --- | --- | --- |
 | **D0** | Offline. Record the v272-11 / v272-12 choice (3.1). Rebuild r3b as `linux-k114s-r3b`. Add `dts/t6050-k114s-r3b-display.dts` on P's includes (3.2) and assert the display-off build is `2c870ba9…`. Extend the facts tool for the `dcp_mbox` interrupts. Add the window replica case (4.3). Build the Stage 2 files: `-disp-oldldr` (installed loader + display tree), `-gpu-newldr` (r3 loader + P's tree, byte-identical to the one in the configured file), `-disp` (r3 loader + display tree) | none | G5, G6. `tests/lint-display-gpu-dtb.py --k116s` lists only the known differences. Every file is at most 16 MiB and its prefix hash is printed. `check-package.sh` passes. The replica tests pass | #17 |
 | **D1** | Open the window (4.4). Install `linux-k114s-r3b` beside r3a (G3). Write `/etc/modprobe.d/aurora-m5-vrr.conf` (section 7). Mac check of 4.3 | one-shot `Omarchy/linux-k114s-r3b` only, P's Stage 2 | `uname -r` ends `-k114s-r3b-ARCH`. No Oops, SError or `RTKit` crash. Trackpad (`magicmouse`, pointer). `aurora … Initialized`, both `mailbox-recv` counts rise, and a **GPU-desktop session**: `touch ~/.config/k114s-gpu-desktop-r3b`, log in, a render load (`vkcube` or `glmark2`) for five minutes, the counts still rising, no GPU fault in `dmesg` | #17 (r3b) |
 | **D2** | Display tree on the **installed** loader (refusal path) | `aura-try` `-disp-oldldr` + one-shot r3b | `/chosen/asahi,t6050-dcp-handoff` = `refused`. The loader log has the five `__OS_LOG … overlaps /memreserve/` lines, `DCP: T6050: DCP image 3D6C8857-E6F1-3D2E-9DFF-587028AE0C6E is not C51FB0C8-C45D-39B0-85BC-520E600FC950` and `internal display handoff refused; the boot framebuffer keeps the panel`. DCP nodes still `disabled`. `card0` simpledrm only. GPU as D1 | #17 |
-| **D3** | The r3 loader on P's exact tree (loader change only) | `aura-try` `-gpu-newldr` + one-shot r3b | the loader version string differs from `1.0.0b13-g22b71758-dirty`. The GPU is admitted, with no `GPU firmware image not admitted` line (#230). The five `__OS_LOG` lines, then `the device tree does not describe the internal display: no handoff`. A 64 KiB larger Stage 2 loads through `aura-try` | #17 |
+| **D3** | The r3 loader on P's exact tree (loader change only) | `aura-try` `-gpu-newldr` + one-shot r3b | the loader version string differs from `1.0.0b13-g22b71758-dirty`. The GPU is admitted. With the PR #18 loader the trials use (no #230), one `GPU firmware image not admitted` line before the admitted build is expected, as on P today (`docs/r3-display-trials.md` E2). The five `__OS_LOG` lines, then `the device tree does not describe the internal display: no handoff`. A 64 KiB larger Stage 2 loads through `aura-try` | #17 |
 | **D4** | **The hand-off**: r3 loader + display tree | `aura-try` `-disp` + one-shot r3b | the section 9 list. A short attended session (section 10). Then close the window (4.4) unless the decision extends it | #17, #19, #25 |
 | **D5a** | The brightness kernel: `patches/linux/brightness` 0001-0003, 0005, 0006 on r3b (0004 is already in v272-11; each applies alone, agent-run `git apply --check`), as `linux-k114s-r3b` version `r3b.b1`, replacing the r3b UKI in place (window open, G2 recomputed; the D1 package kept in `/var/lib/k114s-recovery/`) | one-shot `Omarchy/linux-k114s-r3b` only, P's Stage 2 | D1's list, GPU-desktop session included | #2 |
 | **D5** | Brightness tree: `#include "t6050-k114s-brightness.dtsi"` (`apple,min-brightness = <10>`), plus the systemd-backlight first-boot drop-in **before** the boot | `aura-try` display + brightness tree + one-shot r3b | D4's list on the new kernel, then `k114s-backlight-check --read-only`, then the stepped check (r3-brightness.md, owner steps 1-7). `max_brightness` 1000. The floor line is in the kernel log | #2 |
@@ -345,6 +360,10 @@ Where the inputs came from:
 | Window replica case (4.3), `tests/macos/test-promoted-esp.sh` | 103 pass (19 new, 84 before). Covered: `status`; `restore-repair --check` short of space, with `NOT ENOUGH, and no omarchy_linux-aurora.efi to remove`; `restore-repair` refusing and writing nothing; `default aurora` stopping; `stage2 r1`; the manual edit of the default to r3b; and, once the r3b image is removed with its entry left dangling, `restore-repair` succeeding with `status` reading the repair entry | emulator/replica |
 | `tests/linux/run-r3.sh` | 1,053 pass, 0 fail | emulator/replica |
 | r3 loader: `tests/aura/test-t6050-image-gate.py`, aura's `run-t8122-display-handoff.sh` | 12 cases pass; every scenario passes | emulator/replica |
+
+`release-display-d0/aura-k114s-pin/` (the PR's loader, `beceb683...`) sits in the same folder but is **not a D0 output**:
+D0's `SHA256SUMS` does not list it. The trial Stage 2 files built from it are in `release-display-trials/`
+(`docs/r3-display-trials.md`).
 
 Not done in D0:
 
@@ -526,7 +545,7 @@ For aurora-silicon upstream:
 | --- | --- | --- |
 | Installing r3b under the shared name replaces r3a, the default, and its UKI | rebuild as `linux-k114s-r3b`; G3 before D1 | source-read |
 | A full rebuild in the window writes three images on an ESP that holds two; the 88 MB guard passes and does not stop it | the window rule (4.1 rule 4, 4.4); the window check of 4.2 | source-read |
-| `limine-snapper-sync` copies an image into a snapshot entry in the window | its 85 % limit should skip it (unmeasured); a new entry is a stop (4.2) | unknown |
+| `limine-snapper-sync` copies an image into a snapshot entry in the window | its 85 % limit does **not** skip it in the one-image states (63.6 % used, 79.0 % after one kernel's +76.6 MiB); its timer (hourly, and 10 min after each boot) and watcher are stopped in every boot of the window, checked before each step, and a `Snapshots` entry has its own undo (4.2; trials runbook E12, block Xs) | source-read; usage measured |
 | Updates pause for the window, overriding P6 | the owner decision in 4.4; default D1-D4 only | source-read |
 | `default aurora` is gone and `restore-repair` stops for lack of space in the window | the r3b image comes off first (4.3); replica case and Mac `--check` before D1 | source-read |
 | The display section does not build on P's includes | the r3b includes, with D2 also the first r3b boot on the new base ranges (3.2) | unknown |

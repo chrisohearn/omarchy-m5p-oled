@@ -109,6 +109,18 @@ def build(dtb, uuid=facts.R3_IMAGE, vm_size=0x300_0000_0000, drop_nits=False, sw
                                 ("#size-cells", cells(2)), ("serial-number", SECRET_SERIAL)], children)
 
 
+def patch_mbox_cell(dtb, entry, cell, value):
+    """The tree with one cell of the dcp mailbox's interrupts changed in place (same length, still valid)."""
+    nodes = facts.parse_fdt(dtb)
+    aliases = {k: v.split(b"\0", 1)[0].decode() for k, v in nodes["/aliases"].items()}
+    by_phandle = {facts.fdt_cells(p["phandle"])[0]: n for n, p in nodes.items() if "phandle" in p}
+    raw = nodes[by_phandle[facts.fdt_cells(nodes[aliases["dcp"]]["mboxes"])[0]]]["interrupts"]
+    assert dtb.count(raw) == 1, "the mailbox's interrupts value is not unique in the tree"
+    values = list(struct.unpack(">%dI" % (len(raw) // 4), raw))
+    values[4 * entry + cell] = value
+    return dtb.replace(raw, struct.pack(">%dI" % len(values), *values))
+
+
 def run(adt, dtb_path, extra=()):
     with tempfile.NamedTemporaryFile(suffix=".adt") as handle:
         handle.write(adt)
@@ -155,6 +167,16 @@ def main():
     expect("swapped dcp mailbox interrupts: one comparison fails, exit 1",
            code == 1 and text.count("  FAIL  ") == 1 and "FAIL  dcp mailbox interrupts" in text, text)
 
+    # the right numbers in the wrong cells: the dcp mailbox's first interrupt on die 1, then as a FIQ
+    for cell, what in ((1, "die 1"), (0, "type 1 (FIQ)")):
+        bad = patch_mbox_cell(dtb, 0, cell, 1)
+        with tempfile.NamedTemporaryFile(suffix=".dtb") as handle:
+            handle.write(bad)
+            handle.flush()
+            code, text = run(build(dtb), handle.name)
+        expect("dcp mailbox interrupt on %s: one comparison fails, exit 1" % what,
+               code == 1 and text.count("  FAIL  ") == 1 and "not AIC_IRQ on die 0" in text, text)
+
     code, text = run(build(dtb, drop_nits=True), dtb_path)
     expect("no brightness scale: said so", "the loader refuses the hand-off without it" in text, text)
 
@@ -168,7 +190,7 @@ def main():
     code, text = run(broken, dtb_path)
     expect("unparsable ADT: falls back to a UUID scan", code == 1 and facts.R3_IMAGE in text, text)
 
-    print("ADT reader replica test:", "FAILED" if failures else "passed", "(%d checks)" % 15)
+    print("ADT reader replica test:", "FAILED" if failures else "passed", "(%d checks)" % 17)
     return 1 if failures else 0
 
 

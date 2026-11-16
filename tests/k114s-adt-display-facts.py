@@ -329,17 +329,22 @@ def report(root, dtb, out):
         # The loader checks the mailbox's register but not its interrupts, so a wrong number here would
         # only show as a DCP that never answers. The ADT lists the ASC's four mailbox interrupts first,
         # in the order the GPU mailboxes show (gfx-asc above): [send-not-empty, send-empty,
-        # recv-not-empty, recv-empty]. The tree names each one; compare by name.
+        # recv-not-empty, recv-empty]. The tree names each one; compare by name. Each tree entry is
+        # <type die number flags> (AIC2, #interrupt-cells = 4). The ADT numbers are die-0 AIC lines, so
+        # the type cell must be 0 (AIC_IRQ, not AIC_FIQ) and the die cell 0: the right number on the
+        # wrong die or as a FIQ is the wrong interrupt.
         names = strs_of(nodes.get(mbox, {}).get("interrupt-names")) if mbox else []
         tree = fdt_cells(nodes.get(mbox, {}).get("interrupts")) if mbox else []
-        tree_by_name = {n: tree[4 * i + 2] for i, n in enumerate(names) if 4 * i + 3 < len(tree)} \
-            if len(tree) == 4 * len(names) else {}
+        entries = [tree[4 * i:4 * i + 4] for i in range(len(names))] if len(tree) == 4 * len(names) else []
+        tree_by_name = {n: e[2] for n, e in zip(names, entries)}
+        bad_cells = ["%s type %d die %d" % (n, e[0], e[1]) for n, e in zip(names, entries) if e[0] != 0 or e[1] != 0]
         adt_by_name = dict(zip(("send-not-empty", "send-empty", "recv-not-empty", "recv-empty"), dcp_irqs[:4])) \
             if len(dcp_irqs) >= 4 else {}
-        ok = bool(adt_by_name) and len(tree_by_name) == 4 and tree_by_name == adt_by_name
-        out.check(ok, "dcp mailbox interrupts: tree %s, ADT %s" % (
+        ok = bool(adt_by_name) and len(tree_by_name) == 4 and tree_by_name == adt_by_name and not bad_cells
+        out.check(ok, "dcp mailbox interrupts: tree %s, ADT %s%s" % (
             ", ".join("%s %s" % (n, tree_by_name[n]) for n in sorted(tree_by_name)) or "missing",
-            ", ".join("%s %s" % (n, adt_by_name[n]) for n in sorted(adt_by_name)) or "missing"))
+            ", ".join("%s %s" % (n, adt_by_name[n]) for n in sorted(adt_by_name)) or "missing",
+            "; not AIC_IRQ on die 0: " + ", ".join(bad_cells) if bad_cells else ""))
     else:
         print("  the tree has no dcp alias: no panel hand-off is described")
     gpu = aliases.get("gpu")

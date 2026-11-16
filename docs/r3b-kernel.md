@@ -292,8 +292,9 @@ Names and hashes to replace (the runbook, `docs/r3-integration.md` sections 1 to
 
 | r3a | r3b |
 | --- | --- |
-| `7.3.0-17.v272-4-k114s-r3a-ARCH` (release, `uname -r`, "Building UKI for linux-k114s (...)", vermagic) | `7.3.0-17.v272-11-k114s-r3b-ARCH` |
-| `linux-k114s-7.3.0.r3a-2-aarch64.pkg.tar.zst`, sha256 `122fdcf8...` | `linux-k114s-7.3.0.r3b-1-aarch64.pkg.tar.zst`, `2859267b...` |
+| `7.3.0-17.v272-4-k114s-r3a-ARCH` (release, `uname -r`, vermagic) | `7.3.0-17.v272-11-k114s-r3b-ARCH` |
+| package `linux-k114s` (Limine entry `Omarchy/linux-k114s`, image `omarchy_linux-k114s.efi`, the hook's line "Building UKI for linux-k114s (...)") | package `linux-k114s-r3b`, installed **beside** r3a (r3a-promotion.md P7): entry `Omarchy/linux-k114s-r3b`, image `omarchy_linux-k114s-r3b.efi`, "Building UKI for linux-k114s-r3b (7.3.0-17.v272-11-k114s-r3b-ARCH)" |
+| `linux-k114s-7.3.0.r3a-2-aarch64.pkg.tar.zst`, sha256 `122fdcf8...` | `linux-k114s-r3b-7.3.0.r3b-1-aarch64.pkg.tar.zst`, `438c4efe03d5271f...` (the D0 repackage, `docs/r3-display-plan.md` 5.1). The earlier shared-name build `linux-k114s-7.3.0.r3b-1` (`2859267b...`) would replace r3a: never install it; `check-package.sh` now fails it |
 | `vmlinuz` sha256 `bbf5ad5e...` | `279ee5cb...` |
 | `boot-ctxr-r3a.bin`, `5164bb1e...`, tree `154568fe...` (also in `aura-try`: `armed\nm1n1/boot-ctxr-r3a.bin`, and the hash literal in the STOP check of step F) | `boot-ctxr-r3b.bin`, `54fcff9e...`, tree `7b12883b...` |
 | `dts/t6050-k114s-r3a.dts`, `build-r3a-dtb.sh` | unchanged files (the tree name stays `r3a`); only the hashes move |
@@ -311,15 +312,17 @@ Scripts that matched only the string `k114s-r3a-ARCH` and so did not recognise a
   boot**, and keep the GPU tree out of r3b trials (section 3, risk 1) until the lead decides on the mailbox interrupt, or carry a revert of
   `788441e089` so that receive polls until the interrupt is proven.
 - **Done:** `tests/hardware/k114s-r3a-check.sh` and `k114s-r3a-audio-check.sh` (and the audio test) accept an r3a or r3b kernel; the `Kernel version:` fixture of `tests/linux/test-boot-once.sh` is the r3b release.
-- Still true: the script names keep "r3a"; the runbook text above is still the r3a one.
+- Still true: the script names keep "r3a"; the runbook text above is still the r3a one. The runbook that installs and boots r3b
+  is `docs/r3-display-trials.md`, which carries the r3b names and hashes of this table.
 
 **`update-m1n1` after the window.** `7.3.0-17.v272-11-k114s-r3b-ARCH` sorts above every `linux-aurora` release (also a later
 `7.3.0-17.v272-11-ARCH`) in version sort (`sort -rV`, as update-m1n1 uses), and `95-m1n1-install` takes the dtbs of the highest `*-ARCH` directory. With `linux-k114s`
 installed, any later kernel transaction would therefore rebuild `boot.bin` from r3b's 46 packaged dtbs (including the preliminary
 `t6050-k114s.dtb`, `73ab156a...`) and write `boot.bin.new` and `.old` (about 20 MB transient, on an ESP with about 87.6 MB free). It does
 not change what boots (`boot-ctxr.bin`), but it can trip the ESP guard, and it was the same for r3a. For r3b: keep
-`M1N1_UPDATE_DISABLED=1` in `/etc/default/update-m1n1` for as long as `linux-k114s` is installed (D2 sets it for the install and D4
-restores it: for r3b D4 must not restore it while the package stays), or remove the package first. Fixing `update-m1n1` to skip `*-k114s-*`
+`M1N1_UPDATE_DISABLED=1` in `/etc/default/update-m1n1` for as long as **either** K114s kernel (`linux-k114s` or `linux-k114s-r3b`)
+is installed. Since the promotion (P6c) it is set for good, so the r3b install leaves it as it is; nothing restores it while
+either package stays. Fixing `update-m1n1` to skip `*-k114s-*`
 is the alternative; it is a system script and is not touched here.
 
 Behaviour that differs (section 3): the GPU mailboxes receive by interrupt (step G is the first time on a K114s; r3a's
