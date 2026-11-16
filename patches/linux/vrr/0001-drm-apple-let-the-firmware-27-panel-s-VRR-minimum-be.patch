@@ -1,0 +1,158 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: k114s-integration <integration@localhost>
+Date: Mon, 16 Nov 2026 13:28:00 -0700
+Subject: [PATCH] drm/apple: let the firmware 27 panel's VRR minimum be chosen
+
+The firmware 27 internal panel reports its 120 Hz timing with both range
+fields zero, so with fw27_panel_vrr the driver offers 24-120 Hz: a
+minimum measured on the J716s LCD only. On the K114s OLED, turning VRR
+on with that minimum crashes the DCP's APT firmware
+(video_mode_main_init.c:288) during the modeset that applies it.
+
+fw27_panel_vrr_min (read-only, default 24, so nothing changes by
+default) sets the fallback minimum instead, so another minimum can be
+tried on a panel without rebuilding. At or above the mode's rate no
+range is offered. dcp_refresh_range() takes the fallback as an argument;
+0 keeps 24 Hz for the desktop 26.6 panel.
+---
+ drivers/gpu/drm/apple/dcp-refresh.h      | 10 ++++++--
+ drivers/gpu/drm/apple/iomfb.c            | 14 +++++++++++
+ drivers/gpu/drm/apple/parser.c           |  1 +
+ drivers/gpu/drm/apple/parser.h           |  2 ++
+ drivers/gpu/drm/apple/parser_mode_test.c | 30 ++++++++++++++++++------
+ 5 files changed, 48 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/gpu/drm/apple/dcp-refresh.h b/drivers/gpu/drm/apple/dcp-refresh.h
+index 06a8d1c703..6e8100d60d 100644
+--- a/drivers/gpu/drm/apple/dcp-refresh.h
++++ b/drivers/gpu/drm/apple/dcp-refresh.h
+@@ -13,11 +13,17 @@ static inline bool dcp_refresh_is_promotion(u32 rate)
+ }
+ 
+ /* All rates are unsigned 16.16 Hz, including fractional fixed timings. */
++/*
++ * An internal ProMotion timing that reports no range gets @fallback_min (24 Hz
++ * when 0) up to its own rate.  The firmware does not report the minimum, so it
++ * is a choice the driver makes, not a fact about the panel.
++ */
+ static inline bool dcp_refresh_range(u32 rate, u32 minimum, u32 maximum,
+-				     bool internal, u32 *low, u32 *high)
++				     bool internal, u32 fallback_min,
++				     u32 *low, u32 *high)
+ {
+ 	if (!minimum && !maximum && internal && dcp_refresh_is_promotion(rate)) {
+-		minimum = 24U << 16;
++		minimum = fallback_min ?: 24U << 16;
+ 		maximum = rate;
+ 	}
+ 	/* A partial, inverted or out-of-mode range leaves a fixed timing. */
+diff --git a/drivers/gpu/drm/apple/iomfb.c b/drivers/gpu/drm/apple/iomfb.c
+index 888402c440..24ba24b946 100644
+--- a/drivers/gpu/drm/apple/iomfb.c
++++ b/drivers/gpu/drm/apple/iomfb.c
+@@ -53,6 +53,18 @@ module_param(fw27_panel_vrr, bool, 0644);
+ MODULE_PARM_DESC(fw27_panel_vrr,
+ 		 "Firmware 27 panels: offer variable refresh through vrr_capable (default: off)");
+ 
++/*
++ * The firmware 27 panel reports no refresh range, so the lowest rate offered
++ * with fw27_panel_vrr is the driver's choice.  24 Hz was measured on the
++ * J716s LCD only; other panels may need another minimum.  At or above the
++ * mode's rate no range is offered (vrr_capable stays 0).  Read when the
++ * modes are parsed.
++ */
++static unsigned int fw27_panel_vrr_min = 24;
++module_param(fw27_panel_vrr_min, uint, 0444);
++MODULE_PARM_DESC(fw27_panel_vrr_min,
++		 "Firmware 27 panels: the lowest refresh rate in Hz offered with fw27_panel_vrr (default: 24)");
++
+ /* Whether VRR_ENABLED may turn adaptive sync on for @dcp's display. */
+ bool dcp_vrr_allowed(struct apple_dcp *dcp)
+ {
+@@ -2138,6 +2150,8 @@ int dcp_modes_replace(struct apple_dcp *dcp, struct dcp_parse_ctx *ctx,
+ 	 */
+ 	ctx->zero_vrr_range_fallback = dcp->fw_compat == DCP_FIRMWARE_V_26_6_DESKTOP ||
+ 		(dcp_fw27_panel(dcp) && READ_ONCE(fw27_panel_vrr));
++	if (dcp_fw27_panel(dcp))
++		ctx->zero_vrr_range_min = min(READ_ONCE(fw27_panel_vrr_min), 65535U) << 16;
+ 	if (dcp->fixed_connector_type != DRM_MODE_CONNECTOR_eDP &&
+ 	    smp_load_acquire(&dcp->dptxport[0].tile_hint)) {
+ 		ctx->tiled_width = dcp->dptxport[0].tile_width;
+diff --git a/drivers/gpu/drm/apple/parser.c b/drivers/gpu/drm/apple/parser.c
+index 0c071f7b21..9f3ba1969e 100644
+--- a/drivers/gpu/drm/apple/parser.c
++++ b/drivers/gpu/drm/apple/parser.c
+@@ -1022,6 +1022,7 @@ static int parse_mode(struct dcp_parse_ctx *handle,
+ 	if (!external_sdr && !vrr_ambiguous)
+ 		out->vrr = dcp_refresh_range(vert.precise_sync_rate, min_vrr,
+ 					     max_vrr, internal && vrr_fallback,
++					     handle->zero_vrr_range_min,
+ 					     &out->min_vrr, &out->max_vrr);
+ 	out->needs_timestamps = out->vrr ||
+ 		(internal && dcp_refresh_is_promotion(vert.precise_sync_rate));
+diff --git a/drivers/gpu/drm/apple/parser.h b/drivers/gpu/drm/apple/parser.h
+index d827bcbf06..a3aad4772e 100644
+--- a/drivers/gpu/drm/apple/parser.h
++++ b/drivers/gpu/drm/apple/parser.h
+@@ -28,6 +28,8 @@ struct dcp_parse_ctx {
+ 	bool ambiguous_180hz;
+ 	/* Desktop 26.6 uses zero placeholders for an unreported VRR range. */
+ 	bool zero_vrr_range_fallback;
++	/* The fallback minimum for that range, 16.16 Hz; 0: 24 Hz. */
++	u32 zero_vrr_range_min;
+ 	/*
+ 	 * A desktop 26.x external processor: read the sink timing keys that
+ 	 * describe the preferred timing for the firmware-derived EDID, without
+diff --git a/drivers/gpu/drm/apple/parser_mode_test.c b/drivers/gpu/drm/apple/parser_mode_test.c
+index 877d012740..d2f28b0e51 100644
+--- a/drivers/gpu/drm/apple/parser_mode_test.c
++++ b/drivers/gpu/drm/apple/parser_mode_test.c
+@@ -46,22 +46,38 @@ static void dcp_refresh_range_test(struct kunit *test)
+ 	u32 low = 0, high = 0;
+ 
+ 	KUNIT_EXPECT_TRUE(test, dcp_refresh_range(120U << 16, 0, 0,
+-						  true, &low, &high));
++						  true, 0, &low, &high));
+ 	KUNIT_EXPECT_EQ(test, low, 24U << 16);
+ 	KUNIT_EXPECT_EQ(test, high, 120U << 16);
+ 	KUNIT_EXPECT_FALSE(test, dcp_refresh_range(60U << 16, 0, 0,
+-						   true, &low, &high));
++						   true, 0, &low, &high));
+ 	KUNIT_EXPECT_FALSE(test, dcp_refresh_range(120U << 16, 0, 0,
+-						   false, &low, &high));
++						   false, 0, &low, &high));
+ 	KUNIT_EXPECT_FALSE(test, dcp_refresh_range(120U << 16, 0, 120U << 16,
+-						   true, &low, &high));
++						   true, 0, &low, &high));
+ 	KUNIT_EXPECT_FALSE(test, dcp_refresh_range(120U << 16, 24U << 16,
+-						   144U << 16, true, &low, &high));
++						   144U << 16, true, 0, &low, &high));
+ 	KUNIT_EXPECT_FALSE(test, dcp_refresh_range(120U << 16, 120U << 16,
+-						   24U << 16, true, &low, &high));
++						   24U << 16, true, 0, &low, &high));
+ 	KUNIT_EXPECT_TRUE(test, dcp_refresh_range(120U << 16, 48U << 16,
+-						  120U << 16, true, &low, &high));
++						  120U << 16, true, 0, &low, &high));
+ 	KUNIT_EXPECT_EQ(test, low, 48U << 16);
++	/* A fallback minimum other than 24 Hz (fw27_panel_vrr_min). */
++	KUNIT_EXPECT_TRUE(test, dcp_refresh_range(120U << 16, 0, 0, true,
++						  48U << 16, &low, &high));
++	KUNIT_EXPECT_EQ(test, low, 48U << 16);
++	KUNIT_EXPECT_EQ(test, high, 120U << 16);
++	KUNIT_EXPECT_TRUE(test, dcp_refresh_range(120U << 16, 0, 0, true,
++						  1U << 16, &low, &high));
++	KUNIT_EXPECT_EQ(test, low, 1U << 16);
++	/* At the mode's own rate there is no range left. */
++	KUNIT_EXPECT_FALSE(test, dcp_refresh_range(120U << 16, 0, 0, true,
++						   120U << 16, &low, &high));
++	/* A reported range wins over the fallback. */
++	KUNIT_EXPECT_TRUE(test, dcp_refresh_range(120U << 16, 30U << 16,
++						  120U << 16, true, 48U << 16,
++						  &low, &high));
++	KUNIT_EXPECT_EQ(test, low, 30U << 16);
+ 	KUNIT_EXPECT_EQ(test, dcp_desktop_present_deadline(true, true), 120ULL);
+ 	KUNIT_EXPECT_EQ(test, dcp_desktop_present_deadline(false, true), 0ULL);
+ 	KUNIT_EXPECT_EQ(test, dcp_desktop_present_deadline(true, false), 0ULL);
+-- 
+2.56.1
+

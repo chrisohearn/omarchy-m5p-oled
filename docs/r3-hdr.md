@@ -126,3 +126,44 @@ login screen. HDR (PQ, EDR) stays off: the cap is in place and the EDID advertis
 
 Still open: EDR itself (a cap above 1000 nits, then a PQ test), and whether the firmware shows P3-tagged surfaces
 unconverted on this OLED (section 5).
+
+## 8. The next owner session: a watched EDR test (not unattended)
+
+Goal: the first HDR (PQ) picture on this OLED, with the peak held well under the panel's 2000 nits. Every step is
+watched by the owner. The way back is one file and one reboot. It runs on r3b.c2 or r3b.c3 (they carry the same cap);
+`linux/display/k114s-cm-trial` has the `hdr` and `hdredid` presets for it since r3b.c3's PR.
+
+**E1. Raise the cap to 1200 nits (one boot).**
+```
+printf '%s\n' '# K114s EDR test (docs/r3-hdr.md section 8): remove after the test' 'options appledrm fw27_panel_edr_max_nits=1200' | sudo tee /etc/modprobe.d/k114s-edr-trial.conf >/dev/null
+modprobe -c | grep fw27_panel_edr_max_nits       # options appledrm fw27_panel_edr_max_nits=1200
+```
+appledrm is not in the initramfs (G6), so this applies at the next boot. Reboot with the owner watching. SDR should look
+as before.
+
+**E2. Read-only, after the boot.**
+- `journalctl -k -b | grep -E 'panel peak|EDR capped|EDR off|EDR headroom'` should show `panel peak luminance 2000 nits
+  (ADT)` and `panel EDR capped at 1200 nits`.
+- `edid-decode` of the eDP-1 EDID should now have an HDR static metadata block (PQ, a maximum near 1200 nits) beside the
+  P3 primaries.
+- `cat /sys/module/appledrm/parameters/fw27_panel_edr_max_nits` reads 1200.
+
+**E3. Hyprland HDR, 20 s at a time, each with its revert scheduled first.**
+1. `bash linux/display/k114s-cm-trial hdredid 20`: the desktop with HDR output, using the EDID's luminance. The owner
+   watches whether the panel stays lit, whether SDR content keeps its brightness and colours, and whether there is a flash
+   or a slow ramp in brightness.
+2. If step 1 is fine, run `bash linux/display/k114s-cm-trial hdredid 60`. While it runs, play a short PQ clip in a window
+   (not full screen), for example `mpv --no-config --vo=gpu-next --target-colorspace-hint=yes --length=20
+   --vf=format=gamma=pq:primaries=bt.2020 av://lavfi:testsrc2=size=1280x720:rate=60`. The highlights should be clearly
+   brighter than SDR white, and nothing else on the panel should change.
+3. `bash linux/display/k114s-cm-trial hdr 20`, the same as step 1 with Hyprland's own HDR luminance.
+
+Stop at the first black panel, flicker, brightness pumping or `DCP has crashed`. The revert brings colour management
+off and sRGB. After a DCP crash a reboot restores the panel; then do E4.
+
+**E4. The way back:** `sudo rm /etc/modprobe.d/k114s-edr-trial.conf` and reboot. The log then says `panel EDR off: cap
+500 nits is not above the SDR maximum 1000 nits` again.
+
+What the test cannot show: the panel's real luminance (no meter), or whether the firmware tone-maps above the cap. Write
+down only what the owner saw.
+

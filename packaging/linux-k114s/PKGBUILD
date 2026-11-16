@@ -25,11 +25,14 @@
 # r3b-c2 (docs/r3b-kernel.md "r3b.c2", aurora-silicon/linux#1615) is r3b-c1 plus sleep-lid/0007, the battery
 # manufacture-date fix (patches/linux/r3b-c2.series): version 7.3.0.r3b.c2-1, upgrading r3b.c1 in place.
 #
+# r3b-c3 (docs/r3-vrr.md) is r3b-c2 plus hdr/0004 (the EDR cap as offered upstream) and vrr/0001 (fw27_panel_vrr_min,
+# default 24) (patches/linux/r3b-c3.series): version 7.3.0.r3b.c3-1, upgrading r3b.c2 in place.
+#
 # This file does not compile anything. It packages a finished build:
-#   K114S_CAND  the candidate, r3a, r3b, r3b-b1, r3b-c1 or r3b-c2   (default r3a, the one the runbook docs/r3-integration.md names;
+#   K114S_CAND  the candidate, r3a, r3b, r3b-b1, r3b-c1, r3b-c2 or r3b-c3   (default r3a, the one the runbook docs/r3-integration.md names;
 #               r3b: docs/r3b-kernel.md, K114S_CAND=r3b makepkg ...; r3b-b1: D5a, K114S_CAND=r3b-b1 makepkg ...;
 #               r3b-c1: docs/r3-hdr.md, K114S_CAND=r3b-c1 makepkg ...; r3b-c2: docs/r3b-kernel.md,
-#               K114S_CAND=r3b-c2 makepkg ...)
+#               K114S_CAND=r3b-c2 makepkg ...; r3b-c3: docs/r3-vrr.md, K114S_CAND=r3b-c3 makepkg ...)
 #   K114S_SRC   the kernel source tree      (default $K114S_BUILD_ROOT/src/<candidate>)
 #   K114S_OUT   its output directory        (default $K114S_BUILD_ROOT/build/<candidate>)
 # with the toolchain of $K114S_BUILD_ROOT (default ~/k114s-build; env.sh and bin/kmake there).
@@ -44,7 +47,8 @@ case $_cand in
   r3b-b1) pkgname=linux-k114s-r3b; _kcand=r3b; _ver=r3b.b1; _rel=1 ;;   # vercmp: 7.3.0.r3b.b1-1 is newer than 7.3.0.r3b-1
   r3b-c1) pkgname=linux-k114s-r3b; _kcand=r3b; _ver=r3b.c1; _rel=1 ;;   # vercmp: 7.3.0.r3b.c1-1 is newer than 7.3.0.r3b.b1-1
   r3b-c2) pkgname=linux-k114s-r3b; _kcand=r3b; _ver=r3b.c2; _rel=1 ;;   # vercmp: 7.3.0.r3b.c2-1 is newer than 7.3.0.r3b.c1-1
-  *) echo "K114S_CAND must be r3a, r3b, r3b-b1, r3b-c1 or r3b-c2" >&2; exit 1 ;;
+  r3b-c3) pkgname=linux-k114s-r3b; _kcand=r3b; _ver=r3b.c3; _rel=1 ;;   # vercmp: 7.3.0.r3b.c3-1 is newer than 7.3.0.r3b.c2-1
+  *) echo "K114S_CAND must be r3a, r3b, r3b-b1, r3b-c1, r3b-c2 or r3b-c3" >&2; exit 1 ;;
 esac
 pkgbase=$pkgname
 pkgver=7.3.0.$_ver
@@ -71,20 +75,26 @@ package() {
   [[ $_kcand != r3b || $kernel_release != 7.3.0-17.v272-4-k114s-r3a-ARCH ]] || { echo "r3b release equals r3a's" >&2; return 1; }
   [[ $kernel_release == *-k114s-${_kcand}-ARCH ]] || { echo "release '$kernel_release' is not a $_kcand release (missing the k114s release suffix?)" >&2; return 1; }
   # r3b-b1 must be built from a tree with the brightness floor (patches/linux/brightness 0006), never from plain r3b
-  if [[ $_cand == r3b-b1 || $_cand == r3b-c1 || $_cand == r3b-c2 ]]; then
+  if [[ $_cand == r3b-b1 || $_cand == r3b-c[1-3] ]]; then
     grep -q 'dcp_bl_set_minimum' "$_src/drivers/gpu/drm/apple/dcp_backlight.h" ||
       { echo "$_src has no brightness series (patches/linux/r3b-b1.series)" >&2; return 1; }
   fi
-  # r3b-c1 and r3b-c2 must carry the HDR series (patches/linux/r3b-c1.series) with the K114s 500-nit EDR cap
-  if [[ $_cand == r3b-c1 || $_cand == r3b-c2 ]]; then
+  # r3b-c1 to r3b-c3 must carry the HDR series (patches/linux/r3b-c1.series) with the K114s 500-nit EDR cap
+  if [[ $_cand == r3b-c[1-3] ]]; then
     grep -q 'fw27_panel_edr_max_nits = 500;' "$_src/drivers/gpu/drm/apple/dcp.c" &&
       grep -q 'dcp_panel_color_target' "$_src/drivers/gpu/drm/apple/dcp-display-metadata.c" ||
       { echo "$_src has no HDR series with the 500-nit cap (patches/linux/r3b-c1.series)" >&2; return 1; }
   fi
   # r3b-c2 must carry sleep-lid/0007: an unreadable manufacture date is -ENODATA, not -EOPNOTSUPP (aurora-silicon/linux#1615)
-  if [[ $_cand == r3b-c2 ]]; then
+  if [[ $_cand == r3b-c[23] ]]; then
     grep -A3 '^static int macsmc_battery_get_date' "$_src/drivers/power/supply/macsmc-power.c" | grep -q 'return -ENODATA;' ||
       { echo "$_src has no battery manufacture-date fix (patches/linux/r3b-c2.series, sleep-lid/0007)" >&2; return 1; }
+  fi
+  # r3b-c3 must carry vrr/0001 (fw27_panel_vrr_min) and hdr/0004 (no EDR with a cap and an unknown SDR maximum)
+  if [[ $_cand == r3b-c3 ]]; then
+    grep -q '^module_param(fw27_panel_vrr_min, uint, 0444);' "$_src/drivers/gpu/drm/apple/iomfb.c" &&
+      grep -q 'max_nits && !sdr_max' "$_src/drivers/gpu/drm/apple/dcp-edr.h" ||
+      { echo "$_src lacks vrr/0001 or hdr/0004 (patches/linux/r3b-c3.series)" >&2; return 1; }
   fi
   modpath="$pkgdir/usr/lib/modules/$kernel_release"
 

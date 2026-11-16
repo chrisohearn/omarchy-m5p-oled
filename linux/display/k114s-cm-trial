@@ -1,6 +1,7 @@
 #!/bin/bash
 # A watched, self-reverting colour-management trial on the K114s panel (issue #20, docs/r3-hdr.md section 6).
-#   usage: k114s-cm-trial PRESET [SECONDS]      PRESET: srgb, dp3, edid or wide; SECONDS: 5 to 120, default 20
+#   usage: k114s-cm-trial PRESET [SECONDS]      PRESET: srgb, dp3, edid, wide, hdr or hdredid; SECONDS: 5 to 120, default 20
+# hdr and hdredid ask for PQ output: only for the watched EDR test of docs/r3-hdr.md section 8, with the EDR cap raised.
 # For a session with the owner looking at the panel. It turns Hyprland colour management on at runtime with the eDP-1
 # preset PRESET, then turns it back off after SECONDS: render:cm_enabled false and eDP-1 cm = "srgb", the state that
 # is lit on every K114s kernel so far (the managed default of linux/display/k114s-dcp-colour is dp3 with colour
@@ -13,7 +14,7 @@
 set -u
 die() { echo "k114s-cm-trial: $*" >&2; exit 1; }
 preset=${1:-}; secs=${2:-20}
-case $preset in srgb|dp3|edid|wide) ;; *) die "usage: k114s-cm-trial srgb|dp3|edid|wide [SECONDS]" ;; esac
+case $preset in srgb|dp3|edid|wide|hdr|hdredid) ;; *) die "usage: k114s-cm-trial srgb|dp3|edid|wide|hdr|hdredid [SECONDS]" ;; esac
 case $secs in ''|*[!0-9]*) die "SECONDS must be a whole number" ;; esac
 [ "$secs" -ge 5 ] && [ "$secs" -le 120 ] || die "SECONDS must be 5 to 120"
 hyprctl=${K114S_HYPRCTL:-hyprctl}; srun=${K114S_SYSTEMD_RUN:-systemd-run}
