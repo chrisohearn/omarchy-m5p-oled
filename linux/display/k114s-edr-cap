@@ -14,16 +14,26 @@ HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 NAME=k114s-edr-cap.conf; SRC=$HERE/$NAME; DEST=$ROOT/etc/modprobe.d/$NAME; TRIAL=$ROOT/etc/modprobe.d/k114s-edr-trial.conf
 MARK='# K114s (omarchy-m5p-oled): panel EDR (HDR) on, capped at 1200 nits; installed by linux/display/k114s-edr-cap.'
 die() { echo "k114s-edr-cap: $*" >&2; exit 1; }
-# any other modprobe file that sets the cap (modprobe reads them all, so a later one could override 1200), except the
-# one-boot test file when it holds only the test's 1200 line, which install removes
+# any other modprobe file that sets the cap, in every directory modprobe.d(5) reads (a later one could override 1200).
+# "others install" exempts the one-boot test file when it holds only the test's 1200 line, because install removes it;
+# for --check and --undo that file counts like any other (#169).
 others() {
-  local f
-  for f in "$ROOT"/etc/modprobe.d/*.conf; do
-    [[ -e $f && $f != "$DEST" ]] || continue
-    grep -v '^[[:space:]]*#' "$f" | grep -q 'fw27_panel_edr_max_nits' || continue
-    [[ $f == "$TRIAL" && "$(grep -v '^#' "$f" | sed '/^[[:space:]]*$/d')" == 'options appledrm fw27_panel_edr_max_nits=1200' ]] && continue
-    echo "$f"
+  local f d
+  for d in etc/modprobe.d run/modprobe.d usr/local/lib/modprobe.d usr/lib/modprobe.d lib/modprobe.d; do
+    [[ $d == lib/modprobe.d && -L $ROOT/lib ]] && continue   # /lib is /usr/lib on Arch
+    for f in "$ROOT/$d"/*.conf; do
+      [[ -e $f && $f != "$DEST" ]] || continue
+      grep -v '^[[:space:]]*#' "$f" | grep -q 'fw27_panel_edr_max_nits' || continue
+      [[ ${1:-} == install && $f == "$TRIAL" && "$(grep -v '^#' "$f" | sed '/^[[:space:]]*$/d')" == 'options appledrm fw27_panel_edr_max_nits=1200' ]] && continue
+      echo "$f"
+    done
   done
+}
+# on the Mac itself: modprobe must read exactly one cap setting, 1200 (not "one value": two files with 1200 are still two)
+effective_ok() {
+  [[ -n $ROOT ]] && return 0
+  local l; l=$(modprobe -c 2>/dev/null | grep -E '^options appledrm .*fw27_panel_edr_max_nits=')
+  [[ $(printf '%s\n' "$l" | grep -c .) == 1 && $l == *fw27_panel_edr_max_nits=1200* ]]
 }
 case ${1:-install} in
   install)
@@ -31,19 +41,17 @@ case ${1:-install} in
     grep -zFxq 'apple,k114s' "${K114S_DT_COMPATIBLE:-/sys/firmware/devicetree/base/compatible}" 2>/dev/null ||
       die "this is not an apple,k114s Mac: nothing installed"
     [[ -f $SRC ]] || die "$SRC is missing"
-    o=$(others); [[ -z $o ]] || die "another modprobe file sets the cap and could override it: $(echo $o) (read it, then remove or fix it); nothing changed"
+    o=$(others install); [[ -z $o ]] || die "another modprobe file sets the cap and could override it: $(echo $o) (read it, then remove or fix it); nothing changed"
     mkdir -p "$(dirname "$DEST")"
     if cmp -s "$SRC" "$DEST"; then echo "k114s-edr-cap: already installed"; else install -m 0644 "$SRC" "$DEST"; echo "k114s-edr-cap: installed $DEST"; fi
     if [[ -e $TRIAL ]]; then rm -f "$TRIAL"; echo "k114s-edr-cap: removed the one-boot test file $TRIAL"; fi
+    effective_ok || die "installed, but modprobe does not read exactly one cap of 1200 (modprobe -c | grep fw27_panel_edr_max_nits)"
     echo "k114s-edr-cap: the cap applies at the next boot"
     ;;
   --check)
     cmp -s "$SRC" "$DEST" || die "not installed (or not the repository's file)"
     o=$(others); [[ -z $o ]] || die "installed, but another modprobe file sets the cap too: $(echo $o)"
-    if [[ -z $ROOT ]]; then
-      [[ "$(modprobe -c 2>/dev/null | grep -E '^options appledrm .*fw27_panel_edr_max_nits=' | sed -E 's/.*fw27_panel_edr_max_nits=([0-9]+).*/\1/' | sort -u | paste -sd' ')" == 1200 ]] ||
-        die "installed, but modprobe does not read exactly one cap of 1200 (modprobe -c | grep fw27_panel_edr_max_nits)"
-    fi
+    effective_ok || die "installed, but modprobe does not read exactly one cap of 1200 (modprobe -c | grep fw27_panel_edr_max_nits)"
     p=/sys/module/appledrm/parameters/fw27_panel_edr_max_nits
     if [[ -z $ROOT && -r $p ]]; then echo "k114s-edr-cap: installed; the running appledrm cap is $(<"$p") nits"; else echo "k114s-edr-cap: installed"; fi
     ;;
@@ -51,7 +59,9 @@ case ${1:-install} in
     [[ $(id -u) == 0 || -n $ROOT ]] || die "run with sudo"
     [[ -e $DEST ]] || { echo "k114s-edr-cap: nothing to undo"; exit 0; }
     grep -q -x -F -- "$MARK" "$DEST" || die "$DEST is not the file this script installs: not removed"
-    rm -f "$DEST"; echo "k114s-edr-cap: removed $DEST; EDR is off again after the next boot"
+    rm -f "$DEST"
+    o=$(others); [[ -z $o ]] || die "removed $DEST, but EDR stays on after a reboot: another modprobe file sets the cap: $(echo $o)"
+    echo "k114s-edr-cap: removed $DEST; EDR is off again after the next boot"
     ;;
   *) die "unknown argument $1" ;;
 esac

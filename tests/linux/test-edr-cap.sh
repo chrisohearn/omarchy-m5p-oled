@@ -26,6 +26,14 @@ printf '# fw27_panel_edr_max_nits=2000 in a comment only\n' > "$M/50-other.conf"
 run --undo; ok "undo removes only its file" "$rc $(test -e "$M/k114s-edr-cap.conf"; echo $?) $(cat "$M/aurora-m5-vrr.conf")" "0 1 options appledrm fw27_panel_vrr=0"
 run --undo; ok "undo with nothing installed says so" "$rc $(echo "$out" | grep -c 'nothing to undo')" "0 1"
 echo 'options appledrm fw27_panel_edr_max_nits=2000' > "$M/k114s-edr-cap.conf"; run --undo; ok "undo keeps a file this script did not install" "$rc $(test -e "$M/k114s-edr-cap.conf"; echo $?)" "1 0"; rm -f "$M/k114s-edr-cap.conf"
+# every modprobe.d directory counts, and a re-created test file counts for check and undo (#169)
+mkdir -p "$X/usr/lib/modprobe.d"; echo 'options appledrm fw27_panel_edr_max_nits=1600' > "$X/usr/lib/modprobe.d/zz-vendor.conf"
+rm -f "$M/k114s-edr-cap.conf"; run; ok "install refuses a cap set under /usr/lib/modprobe.d" "$rc $(test -e "$M/k114s-edr-cap.conf"; echo $?)" "1 1"
+rm -f "$X/usr/lib/modprobe.d/zz-vendor.conf"; run; ok "install works once that file is gone" "$rc" 0
+printf '%s\n' '# K114s EDR test (docs/r3-hdr.md section 8): remove after the test' 'options appledrm fw27_panel_edr_max_nits=1200' > "$M/k114s-edr-trial.conf"
+run --check; ok "check fails when the one-boot test file is back after install" "$rc $(echo "$out" | grep -c 'sets the cap too')" "1 1"
+run --undo; ok "undo with the test file back: says EDR stays on, exit 1" "$rc $(echo "$out" | grep -c 'EDR stays on') $(test -e "$M/k114s-edr-cap.conf"; echo $?)" "1 1 1"
+rm -f "$M/k114s-edr-trial.conf"
 printf 'apple,j714s\0' > "$BASE/other"; out=$(K114S_ROOT=$X K114S_DT_COMPATIBLE=$BASE/other bash "$TOOL" 2>&1); ok "install refuses a machine that is not an apple,k114s Mac" "$? $(test -e "$M/k114s-edr-cap.conf"; echo $?)" "1 1"
 run --bogus; ok "an unknown argument stops" "$rc" 1
 if [ "$(id -u)" != 0 ]; then
