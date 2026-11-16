@@ -1,0 +1,25 @@
+# K114s r3b.b1 kernel (docs/r3-display-plan.md, D5a): r3b plus the brightness series.
+#
+# Same base, release suffix and configuration as r3b (patches/linux/r3b.series, docs/r3b-kernel.md): the release stays
+# 7.3.0-17.v272-11-k114s-r3b-ARCH, the package stays linux-k114s-r3b (version 7.3.0.r3b.b1-1), so it upgrades the D1
+# package in place and replaces the r3b UKI (omarchy_linux-k114s-r3b.efi) instead of adding a fourth image to the ESP.
+# Build: K114S_LABEL=K114S-R3B-B1 (uname -v), output $K114S_BUILD_ROOT/build/r3b-b1, package K114S_CAND=r3b-b1.
+#
+# 1. the r3b series, unchanged and in its order
+r3b/0001-HID-dockchannel-hid-clamp-Report-Size-items-where-th.patch
+r3b/0002-HID-dockchannel-hid-pad-short-reports-to-the-clamped.patch
+r3b/0003-HID-magicmouse-drop-the-GD-Mouse-usages-on-dockchann.patch
+r3b/0004-HID-magicmouse-parse-the-0x5a-MTP-report-of-the-K114.patch
+sound/0004-ASoC-apple-macaudio-Add-K114-with-the-speakers-off.patch
+r3b/0005-PCI-apple-qualify-the-K114s-for-suspend-to-idle-over.patch
+# 2. localversion.10-pkgrel  -17.v272-11-k114s-r3b   (as r3b; not a patch file)
+# 3. the brightness series (docs/r3-brightness.md), applied with `git am` on top of 1 and 2 (agent-run: all five apply,
+#    no fuzz). 0001-0003 are aurora-silicon/linux #1646 (Jens Axboe, K116s); 0005 and 0006 are ours (the floor).
+brightness/0001-drm-apple-answer-the-PMU-temperature-for-every-panel.patch
+brightness/0002-drm-apple-apply-the-syslog-debug-filter-to-the-inter.patch
+brightness/0003-drm-apple-take-the-27.2-D590-notification-as-a-no-op.patch
+brightness/0005-dt-bindings-display-apple-dcp-optional-panel-brightn.patch
+brightness/0006-drm-apple-hold-brightness-requests-at-the-panel-s-fl.patch
+#
+# Not carried: brightness/0004 (linux #1887, 629e81bc2dd6) is in v272-11 already (`git apply --check -R` applies on the
+# r3b tree; forward fails in dcp.c and dcp_backlight.c).

@@ -313,8 +313,8 @@ runs only if D4 fails in a way that points at the loader, and D4 and D3 use the 
 | **D2** | Display tree on the **installed** loader (refusal path) | `aura-try` `-disp-oldldr` + one-shot r3b | `/chosen/asahi,t6050-dcp-handoff` = `refused`. The loader log has the five `__OS_LOG … overlaps /memreserve/` lines, `DCP: T6050: DCP image 3D6C8857-E6F1-3D2E-9DFF-587028AE0C6E is not C51FB0C8-C45D-39B0-85BC-520E600FC950` and `internal display handoff refused; the boot framebuffer keeps the panel`. DCP nodes still `disabled`. `card0` simpledrm only. GPU as D1 | #17 |
 | **D3** | The r3 loader on P's exact tree (loader change only) | `aura-try` `-gpu-newldr` + one-shot r3b | the loader version string differs from `1.0.0b13-g22b71758-dirty`. The GPU is admitted. With the PR #18 loader the trials use (no #230), one `GPU firmware image not admitted` line before the admitted build is expected, as on P today (`docs/r3-display-trials.md` E2). The five `__OS_LOG` lines, then `the device tree does not describe the internal display: no handoff`. A 64 KiB larger Stage 2 loads through `aura-try` | #17 |
 | **D4** | **The hand-off**: r3 loader + display tree | `aura-try` `-disp` + one-shot r3b | the section 9 list. A short attended session (section 10). Then close the window (4.4) unless the decision extends it | #17, #19, #25 |
-| **D5a** | The brightness kernel: `patches/linux/brightness` 0001-0003, 0005, 0006 on r3b (0004 is already in v272-11; each applies alone, agent-run `git apply --check`), as `linux-k114s-r3b` version `r3b.b1`, replacing the r3b UKI in place (window open, G2 recomputed; the D1 package kept in `/var/lib/k114s-recovery/`) | one-shot `Omarchy/linux-k114s-r3b` only, P's Stage 2 | D1's list, GPU-desktop session included | #2 |
-| **D5** | Brightness tree: `#include "t6050-k114s-brightness.dtsi"` (`apple,min-brightness = <10>`), plus the systemd-backlight first-boot drop-in **before** the boot | `aura-try` display + brightness tree + one-shot r3b | D4's list on the new kernel, then `k114s-backlight-check --read-only`, then the stepped check (r3-brightness.md, owner steps 1-7). `max_brightness` 1000. The floor line is in the kernel log | #2 |
+| **D5a** | The brightness kernel: `patches/linux/brightness` 0001-0003, 0005, 0006 on r3b (0004 is already in v272-11; all five apply in order with `git am`, `patches/linux/r3b-b1.series`), as `linux-k114s-r3b` version `r3b.b1`, replacing the r3b UKI in place (window open, G2 recomputed; the D1 package kept in `/var/lib/k114s-recovery/`). Built offline, section 5.2 | one-shot `Omarchy/linux-k114s-r3b` only, P's Stage 2 | D1's list, GPU-desktop session included | #2 |
+| **D5** | Brightness tree `dts/t6050-k114s-r3b-brightness.dts`: the D4 tree plus `#include "t6050-k114s-brightness.dtsi"` (`apple,min-brightness = <10>`), Stage 2 `boot-ctxr-disp-bl.bin` (section 5.2), plus the systemd-backlight first-boot drop-in **before** the boot | `aura-try` display + brightness tree + one-shot r3b | D4's list on the new kernel, then `k114s-backlight-check --read-only`, then the stepped check (r3-brightness.md, owner steps 1-7). `max_brightness` 1000. The floor line is in the kernel log | #2 |
 | **D6** | VRR offered: `fw27_panel_vrr=1` in the `/etc` file (section 7) | `aura-try` D5's Stage 2 + one-shot | `vrr_capable` 1 on the connector. Then, live, Hyprland `misc:vrr`: no flicker. About 385 ms of black when VRR toggles is expected (J716s). The swap watchdog never logs that it turned VRR off | #19 |
 | **D7** | DPMS and idle: an Omarchy idle profile for OLED (section 10). No kernel change | none new; in a D5/D6 session | `omarchy-brightness-display off`: is the panel black or dim (unknown, see 10)? It wakes on a key, with no DCP crash. The idle timeout blanks a static screen | #22 |
 | **D8** | Night light | none new; in a D5+ session, last, because a DCP crash ends brightness until a reboot | `CTM` listed on the `appledrm` CRTC (`drm_info` or `modetest -p`). `omarchy-toggle-nightlight` visibly warms the panel. No `DCP has crashed` | #73 |
@@ -382,6 +382,64 @@ prerequisites:
 - P's configured file (`9825a103…`) kept beside `k114s-repair/known-good/boot-ctxr.bin`;
 - the way back written into the D9b runbook: from macOS, the tool's `stage2` back to P's file; from a Linux that still
   boots, a one-boot `aura-try` of P's file.
+
+### 5.2 D5a and D5 offline build (agent-run, 2026-11-15)
+
+Offline, like D0. Nothing was installed. Nothing on the ESP, in `/boot` or in `/etc` was written, and the ESP was not read.
+Outputs are in `$K114S_BUILD_ROOT/integrate/release-display-d5/`, all listed in its `SHA256SUMS`; the gate logs are in
+`gates/`.
+
+**Package decision: an upgrade of `linux-k114s-r3b`, not a third K114s package.** The brightness kernel keeps the name,
+`pkgbase` and kernel release of the D1 package (`linux-k114s-r3b`, `7.3.0-17.v272-11-k114s-r3b-ARCH`) and only raises the
+version to `7.3.0.r3b.b1-1` (`vercmp` against `7.3.0.r3b-1`: newer). Reasons:
+
+- ESP (G2): in the window the ESP holds the r3a and r3b images, about 110.8 MB free with the r3b UKI and about 101.8 MB with
+  two trial Stage 2 files. A new package name would be a new preset and a third kernel image (about 79.4 MB), which breaks
+  the 88,080,384-byte guard. In place, the hook rewrites `omarchy_linux-k114s-r3b.efi`; the peak is the G2 row "during
+  the D5a rebuild". The new `Image` is the same size as r3b's (54,282,752 bytes) and the dry-run initramfs has the same 81
+  modules, so the UKI is expected at D1's size. G2 is still recomputed from `df -B1` before D5a.
+- Window and way back (4.3, 4.4): `Omarchy/linux-k114s-r3b`, the one-shot entry, `this boot started:
+  Omarchy.linux-k114s-r3b`, the macOS manual edit to the r3b default and D9a all keep their names. The release keeps the GPU
+  guard's opt-in `~/.config/k114s-gpu-desktop-r3b` and `check-package.sh`'s name rule. The D1 package stays in
+  `/var/lib/k114s-recovery/` as the downgrade (`pacman -U` of it, attended, from a boot on P's Stage 2).
+- Telling them apart on a running system: `uname -v` reads `K114S-R3B-B1` (r3b: `K114S-R3B`), `pacman -Q
+  linux-k114s-r3b` gives `7.3.0.r3b.b1-1`, and the kernel log has `brightness requests below 10 nits are raised to 10 nits`
+  once the D5 tree is in.
+
+The PKGBUILD takes it as `K114S_CAND=r3b-b1` (source `src/r3b-b1`, output `build/r3b-b1`, and a guard that the source
+carries the floor). The series is `patches/linux/r3b-b1.series`: r3b's six, the release suffix, then brightness 0001-0003,
+0005 and 0006 with `git am`, no fuzz. Applied from the repository files alone onto the base they give the built tree
+(git tree `2e785a04fdfa601a25b1db5026192712d8b7b0a1`; r3b's is `3ad64f0f…`).
+
+| Output | sha256 | Notes |
+| --- | --- | --- |
+| `pkg/linux-k114s-r3b-7.3.0.r3b.b1-1-aarch64.pkg.tar.zst` | `0ca7b7593340981702ba306ffb93168cb67615e5a62a162270f9117aff3491ba` | 47,536,324 bytes. Full build from clean output (`Image modules dtbs`, `-j18` at `nice 19`, 357 s), r3b's `.config` byte for byte. `vmlinuz` `93b7870c4eb8332b464fc18c2a2ffcd172d947f49d5be255c3bba2dbc6dd61b4`. Against the D0 package (`438c4efe…`): the same 2,035 files, the same config and 46 dtbs, and of 1,972 modules only `appledrm.ko` differs in code or data (`k114s-cmp-modules`) |
+| `dtb-p/t6050-k114s-r3b-brightness.dtb` | `5b6b83c8cd5e59333182f6ca37f22b1e99bd029daa1342d186daee096b292fda` | `dts/t6050-k114s-r3b-brightness.dts`: the D4 display tree plus `t6050-k114s-brightness.dtsi`, on P's includes. Against the D4 tree `914ec379…` it adds exactly one property: `apple,min-brightness = <10>` on `/soc/dcp@48ae00000/panel`. It refuses to build with `K114S_D0_DISPLAY_OFF` |
+| `dtb-p/display/…`, `dtb-p/display-off/…` | `914ec379…`, `2c870ba9…` | Controls, rebuilt from the same includes: D0's display tree and P's tree, byte for byte |
+| `stage2/boot-ctxr-disp-bl.bin` (D5) | `e089e8c843ee7c22f1c3b4c25c1201924667151d39573ebdfeeb3f595c2b2402` | 4,506,159 bytes. Prefix `582df9bb…` (r3 loader), tree `5b6b83c8…`, trailer `9d8dc11e…`. The control rebuild of D0's `-disp` gives `177f0028…` again |
+| `systemd/k114s-first-boot.conf` | `cc2c17ef475bea81c368e048f9e6f7975356a38ac49eb3cc0cc059620d0c0fd5` | The repository's `linux/brightness/systemd/k114s-first-boot.conf`, for `/etc/systemd/system/systemd-backlight@backlight:apple-panel-bl.service.d/` before the D5 boot (root step, not done) |
+
+| Gate or check | Result | Evidence |
+| --- | --- | --- |
+| `check-package.sh` against `linux-aurora` and against `linux-k114s` | PASS, both. It now also requires a `…r3b.b<N>` version to carry the floor in `appledrm` (the D0 package reports `floor no` and still passes) | agent-run |
+| `pacman -U --print` | `linux-k114s-r3b 7.3.0.r3b.b1-1` only | agent-run |
+| G6: no `appledrm` in the initramfs | PASS: `appledrm` is `=m`; the `mkinitcpio -r <package root>` dry run gives 81 modules and no `appledrm`, as D0's. The real UKI is checked again after D5a | agent-run |
+| Brightness host cases (`tests/brightness/run-dcp-backlight-host.sh src/r3b-b1`) | 28 cases, 0 failed (r3b without the series: 27). With the floor line removed, `backlight_floor_test` fails | emulator/replica |
+| `tests/brightness/test-backlight-check.sh` | 22 checks, 0 failed (drop-in text included) | emulator/replica |
+| `tests/lint-display-gpu-dtb.py --k116s` on the D5 tree | PASS. The lint now knows the floor: one cell, 1 to 999 nits (0, 1000 and two cells fail, 5 passes) | agent-run |
+| `tests/lint-dtb.py`; `tests/k114s-adt-display-facts.py --dtb` (saved ADT copy) | PASS; 17 comparisons, none failed | agent-run |
+| QEMU `k114s-qemu-smoke shell` and `modules` | PASS: banner `K114S-R3B-B1`; `ok=1965 failed=7`, the same seven as r3b; no Oops, BUG or WARNING | emulator/replica |
+| `tests/linux/run-r3.sh` | 1,053 pass, 0 fail | emulator/replica |
+
+Read from source, for the lead: brightness 0003 makes D590 a handled callback on 27.2, so the firmware-27 size check
+(`iomfb.c`, `iomfb_v27_callback_size_valid`) now applies to it: a D590 shorter than 20 bytes would mark the DCP crashed,
+where before it logged an unknown callback. That check comes from `231d448e4b`, an ancestor of Jens's `907bb7ec59`, so his
+K116s run (same DCP image `3D6C8857`) had it too. D5a boots 0001-0003 before any panel trial, and 0003 is the first to drop
+if D5 shows `unqualified IOMFB callback 590`.
+
+Not done here: G2's measurement, the D5a install and UKI rebuild, the drop-in install, and the trials. They are the lead's,
+with the owner, in the second window (4.4). The D5a rebuild runs from a boot on P's Stage 2 (section 12, `appledrm` and
+the initramfs).
 
 ## 6. Device-tree nodes (display tree)
 

@@ -195,6 +195,10 @@ To use the fragment, add one line at the end of display-gpu's `dts/t6050-k114s-r
 
     #include "t6050-k114s-brightness.dtsi"
 
+For the r3 display trials this is `dts/t6050-k114s-r3b-brightness.dts` (the D4 display tree plus that line), and the
+kernel is r3b with 0001-0003, 0005 and 0006 (`patches/linux/r3b-b1.series`; 0004 is in v272-11 already). Both are built
+offline: docs/r3-display-plan.md, section 5.2.
+
 A kernel without patches 0005 and 0006 ignores the property. With them the kernel logs
 `brightness requests below 10 nits are raised to 10 nits` at probe.
 

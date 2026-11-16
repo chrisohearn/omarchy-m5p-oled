@@ -10,6 +10,7 @@
 #   - depmod -a over the package tree reports no error and no unresolved symbol (-e)
 #   - no file in common with an installed package of the other kernel (pacman -Qlq linux-aurora), only directories
 #   - the kernel inside vmlinuz carries the same release string
+#   - a brightness build (version ...r3b.b<N>, linux-k114s-r3b) carries the floor of patches/linux/brightness 0006 in appledrm
 # usage: check-package.sh PACKAGE.pkg.tar.zst [OTHER-KERNEL-PACKAGE=linux-aurora] [Module.symvers]
 # Run it once per other kernel (linux-aurora, and linux-k114s for an r3b package): each must be installed.
 # The symbol check needs the build's Module.symvers (default $K114S_BUILD_ROOT/build/${K114S_CAND:-r3a}/Module.symvers); without it only plain depmod -a runs.
@@ -60,6 +61,14 @@ if [ -s "$symvers" ]; then sv=(-e -E "$symvers"); what="depmod -a -e"; else sv=(
 out=$(depmod -b "$w/usr" -a "${sv[@]}" -w "$rel" 2>&1 | grep -v 'duplicate module alias\|^spi:tpm_tis_spi')
 [ -z "$out" ] && ok "$what: no error, no unresolved symbol" || { no "$what:"; echo "$out" | head; }
 strings -a "$m/vmlinuz" | grep -q "Linux version $rel " && ok "vmlinuz banner names $rel" || no "vmlinuz banner"
+# The brightness build (version ...r3b.b<N>, docs/r3-display-plan.md D5a) must carry the floor of
+# patches/linux/brightness 0006 in appledrm; any other build only reports whether it does.
+ver=$(info pkgver); drm=$(find "$m" -name appledrm.ko | head -1)
+if [ -n "$drm" ] && strings -a "$drm" | grep -q 'brightness requests below %u nits are raised to %u nits'; then floor=yes; else floor=no; fi
+case $ver in
+  *.b[0-9]*) [ $floor = yes ] && ok "version $ver: appledrm carries the brightness floor (brightness 0006)" || no "version $ver: appledrm lacks the brightness floor (brightness 0006)" ;;
+  *) echo "info version $ver: appledrm brightness floor $floor" ;;
+esac
 if [ $fail != 0 ]; then echo "check-package: FAILED"
 elif [ $skipped != 0 ]; then echo "check-package: all run checks passed; $skipped skipped ($other is not installed)"
 else echo "check-package: all passed"; fi
