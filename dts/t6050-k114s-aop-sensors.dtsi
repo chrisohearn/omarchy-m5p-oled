@@ -32,8 +32,8 @@
  *     (harmony-db-version 3 only). Open aurora-silicon/linux #1983 (193-byte calibration for the
  *     14-inch M5 Max) and #1929 (VD6286 enable sequence) are the K114c's fixes for readings;
  *     without them the sensor may stay silent here. Not applied; they are driver changes.
- *   - #1876 (stop the reports on suspend and unbind) and #1924 (accelerometer and gyroscope only
- *     while read) are open drafts and also driver changes: nothing in this file needs them.
+ *   - #1876 (stop the reports on suspend and unbind; open draft) and #1924 (accelerometer and
+ *     gyroscope only while read; open, not a draft) are also driver changes: nothing in this file needs them.
  *
  * RISK. The AOP is the coprocessor the audio port also needs. Its firmware is loaded and left
  * halted by iBoot; starting it is the unproven step on this board (docs/r3-sound.md). Speakers

@@ -10,6 +10,11 @@ mkdir "$t/bin"
 printf '#!/bin/sh\necho "apple-pcie: port 1 link timeout"\n' >"$t/bin/dmesg"
 printf '#!/bin/sh\necho "00:00.0 SD Host controller: Genesys Logic GL9755"\n' >"$t/bin/lspci"
 chmod +x "$t/bin/dmesg" "$t/bin/lspci"
-out=$(PATH=$t/bin:$PATH "$here/k114s-parity-check.sh" sd 2>&1); rc=$?
+mkdir -p "$t/sys/class/mmc_host/mmc0"
+run() { out=$(PATH=$t/bin:$PATH K114S_SYS=$t/sys "$here/k114s-parity-check.sh" sd 2>&1); rc=$?; }
+run
 [[ $rc -eq 1 && $out == *"BAD   dmesg: apple-pcie: port 1 link timeout"* ]] && ok "a BAD dmesg line gives exit 1" || { bad "dmesg BAD (rc=$rc)"; echo "$out"; }
+printf '#!/bin/sh\necho "apple-pcie: port 1 link up"\n' >"$t/bin/dmesg"
+run
+[[ $rc -eq 0 && $out != *BAD* ]] && ok "no BAD line gives exit 0" || { bad "clean run (rc=$rc)"; echo "$out"; }
 exit $fail

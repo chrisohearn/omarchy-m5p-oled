@@ -22,7 +22,8 @@
 # The output holds no serial numbers, addresses or network names. Needs python3 (stdlib only).
 # Test hooks (tests/hardware/test-input-capture.sh only): K114S_PROC_INPUT, K114S_DEV_DIR,
 # K114S_BINDS_JSON, K114S_LOGIND_VALUE, K114S_LOGIND_DIRS, K114S_LEDS, K114S_PWM_DT, K114S_NO_SUDO,
-# K114S_SUSPEND_VALUE, K114S_SUSPEND_LP_VALUE, K114S_POWER_LP_VALUE.
+# K114S_SUSPEND_VALUE, K114S_SUSPEND_LP_VALUE, K114S_POWER_LP_VALUE, K114S_HYPR_LUA_DIRS.
+# The Lua scan reads the Hyprland and Omarchy config dirs; it cannot see a bind that runs an external script.
 # K114S_NO_MOON=1 makes the keys prompt leave out the moon key (the owner session sets it when it did not
 # verify that logind ignores the suspend key).
 set -u
@@ -59,7 +60,9 @@ power_policy() { # prints the verdict, returns 1 on a problem
 bind_policy() { # Hyprland must bind no XF86Sleep, keycode 150 or suspend action; fails when hyprctl does not answer
   local json=${K114S_BINDS_JSON:-} rc
   # Lua configs report arg as an opaque number, so the Lua sources are scanned as well
-  local dirs=${K114S_HYPR_LUA_DIRS:-$HOME/.config/hypr /usr/share/omarchy/default/hypr}
+  local dirs=${K114S_HYPR_LUA_DIRS:-$HOME/.config/hypr $HOME/.config/omarchy ${OMARCHY_PATH:-/usr/share/omarchy}/default/hypr}
+  # Omarchy keeps its generated Lua (toggles, current theme) under ~/.local/state/omarchy; directories are scanned recursively
+  [ -n "${K114S_HYPR_LUA_DIRS:-}" ] || dirs+=" $HOME/.local/state/omarchy"
   if [ -z "$json" ]; then json=$(mktemp); hyprctl binds -j >"$json" 2>/dev/null; fi
   py '
 import json,re,sys,glob,os
@@ -72,7 +75,7 @@ for x in b:
     if x.get("key")=="XF86Sleep" or x.get("keycode")==150 or re.search(sus,text,re.I):
         bad.append("hyprland bind can suspend: %s code=%s %s %s"%(x.get("key"),x.get("keycode"),x.get("dispatcher",""),x.get("description","")))
 for d in sys.argv[2:]:
-    for f in glob.glob(os.path.join(d,"**","*.lua"),recursive=True):
+    for f in [d] if os.path.isfile(d) else glob.glob(os.path.join(d,"**","*.lua"),recursive=True):
         for n,l in enumerate(open(f,errors="replace"),1):
             if not l.lstrip().startswith("--") and re.search(sus,l,re.I):
                 bad.append("hyprland lua can suspend: %s:%d"%(os.path.basename(f),n))
