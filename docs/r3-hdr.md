@@ -1,8 +1,8 @@
 # r3b.c1: the panel colour description and an EDR brightness cap (issue #92)
 
 2026-11-16. Evidence labels as in `docs/r3b-kernel.md`: **agent-run** (run on this Mac or in its build area),
-**emulator/replica** (QEMU, stand-in headers), **read from source**, **owner-observed**. Nothing in this document has
-been booted. The package is built and checked; installing it is a step for a session with the owner at the Mac (section 6).
+**emulator/replica** (QEMU, stand-in headers), **read from source**, **owner-observed**. Sections 1 to 6 were written
+before the boot. Section 7 records the owner session of 2026-11-16 that installed and booted r3b.c1 and ran the colour test.
 
 ## 1. What was wrong
 
@@ -75,7 +75,8 @@ emulator/replica, 2026-11-16):
 
 ## 5. Not verified
 
-- Anything on the hardware: the new EDID on the panel, Hyprland with colour management on, the log lines.
+- Anything on the hardware: the new EDID on the panel, Hyprland with colour management on, the log lines. (Verified since,
+  section 7.)
 - Whether the firmware's P3-D65 surface tag means "shown unconverted" on this OLED. If the factory target is wider than
   P3, user space slightly under-uses the gamut, which is no worse than today.
 - EDR itself on this panel, at any cap. The cap only removes or limits it.
@@ -101,3 +102,27 @@ One install and one reboot, after the D6 VRR boot or instead of it, never unatte
 
 Way back: the Limine menu's r3a entry (`Omarchy/linux-k114s`) boots as before; from there,
 `sudo pacman -U .../release-display-d5/pkg/linux-k114s-r3b-7.3.0.r3b.b1-1-aarch64.pkg.tar.zst` restores r3b.b1.
+
+## 7. The owner session, 2026-11-16: booted, and the colour test
+
+The owner was at the Mac and watched every boot.
+
+| Step | Result | Label |
+| --- | --- | --- |
+| Before: block P9 of `docs/r3-display-d5-d9.md` | holds | agent-run |
+| `pacman -U` of the c1 package (sha256 `2d215627...`, `check-package.sh` all passed against `linux-aurora` and `linux-k114s`) | upgraded r3b.b1 in place; one UKI built (`linux-k114s-r3b`); the Stage 2 hook rewrote `boot-ctxr.bin` byte for byte (still the display file `90b35137...`); the r3a image unchanged; only the r3b image's hash and its `path:` line changed in `limine.conf` | agent-run |
+| After: block P9, with G6 on both images | holds | agent-run |
+| Reboot | the desktop came back at 3024x1986@120 (`uname -v` `K114S-R3B-C1`) | owner-observed |
+| Kernel log | `panel ADT: no known colour gamut, EDID primaries default to Display P3` and `panel EDR off: cap 500 nits is not above the SDR maximum 1000 nits` | agent-run |
+| eDP-1 EDID (`edid-decode`) | red 0.6796/0.3203, green 0.2646/0.6904, blue 0.1503/0.0595, white 0.3125/0.3291; no HDR static metadata, no colorimetry block | agent-run |
+| `k114s-cm-trial edid`, then `dp3`, then `srgb` (colour management on, 20 s each) | all three: the panel stayed lit, colours normal; every revert verified | owner-observed |
+
+So the zero-primaries black panel is fixed by `hdr/0001`, and colour management works on this panel with each preset.
+The owner chose **colour management on with the eDP-1 preset `dp3`** as the managed default
+(`linux/display/dcp-colour.lua`, installed by `k114s-dcp-colour`). `dp3` and not `edid`: `dp3` does not use the EDID's
+primaries, so it does not depend on this kernel; `edid` blacks the panel on r3b.b1 (zero primaries), the way back of
+section 6. `dp3` on r3b.b1 has not been watched. The greeter keeps its own guard (colour management off); it shows only the
+login screen. HDR (PQ, EDR) stays off: the cap is in place and the EDID advertises no PQ.
+
+Still open: EDR itself (a cap above 1000 nits, then a PQ test), and whether the firmware shows P3-tagged surfaces
+unconverted on this OLED (section 5).
