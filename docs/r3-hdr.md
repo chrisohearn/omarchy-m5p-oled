@@ -152,10 +152,20 @@ as before.
 1. `bash linux/display/k114s-cm-trial hdredid 20`: the desktop with HDR output, using the EDID's luminance. The owner
    watches whether the panel stays lit, whether SDR content keeps its brightness and colours, and whether there is a flash
    or a slow ramp in brightness.
-2. If step 1 is fine, run `bash linux/display/k114s-cm-trial hdredid 60`. While it runs, play a short PQ clip in a window
-   (not full screen), for example `mpv --no-config --vo=gpu-next --target-colorspace-hint=yes --length=20
-   --vf=format=gamma=pq:primaries=bt.2020 av://lavfi:testsrc2=size=1280x720:rate=60`. The highlights should be clearly
-   brighter than SDR white, and nothing else on the panel should change.
+2. If step 1 is fine, make a real PQ test clip first. Relabelling an SDR pattern with mpv's `format` filter only changes
+   its tags, so it says nothing about EDR (#163). Instead, encode one with known levels: `testsrc2`'s white mapped to
+   1000 nits, inside the 1200-nit cap:
+   ```
+   ffmpeg -f lavfi -i testsrc2=size=1280x720:rate=60:duration=20 \
+     -vf "zscale=transferin=bt709:primariesin=bt709:matrixin=bt709:transfer=smpte2084:primaries=bt2020:matrix=bt2020nc:npl=1000,format=yuv420p10le" \
+     -c:v ffv1 -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc "$(mktemp -d)/pq-1000.mkv"
+   ```
+   (FFV1 because this Mac's libx265 is 8-bit only. `ffprobe` of the file says `yuv420p10le`, `smpte2084`, `bt2020`;
+   agent-run, 2026-11-16.)
+   Then run `bash linux/display/k114s-cm-trial hdredid 60`, and while it runs play that file in a window (not full screen)
+   with `mpv --no-config --vo=gpu-next --target-colorspace-hint=yes <file>`.
+   The clip's white should look clearly brighter than the desktop's SDR white, and nothing else on the
+   panel should change.
 3. `bash linux/display/k114s-cm-trial hdr 20`, the same as step 1 with Hyprland's own HDR luminance.
 
 Stop at the first black panel, flicker, brightness pumping or `DCP has crashed`. The revert brings colour management

@@ -10,7 +10,8 @@
 # the next Hyprland start or config reload reads monitors.lua as before. User session only, no sudo.
 #   Environment: HYPRLAND_INSTANCE_SIGNATURE (default: the newest instance); for the tests K114S_HYPRCTL, K114S_SYSTEMD_RUN
 #   and K114S_CM_TRIAL_WAIT (seconds to wait before the check, default SECONDS + 3).
-# Exit 0 when the revert was verified, 1 on a refusal or when the revert could not be verified.
+# Exit 0 when the trial took effect and the revert was verified; 1 on a refusal, when the requested preset never took effect,
+# or when the revert could not be verified.
 set -u
 die() { echo "k114s-cm-trial: $*" >&2; exit 1; }
 preset=${1:-}; secs=${2:-20}
@@ -38,8 +39,19 @@ unit=k114s-cm-trial-revert-$$
 echo "k114s-cm-trial: revert scheduled in ${secs} s (unit $unit.timer)"
 # 2. the trial
 "$hyprctl" eval "$try" >/dev/null 2>&1 || echo "k114s-cm-trial: the trial command failed; the revert still runs"
-echo "k114s-cm-trial: colour management ON, eDP-1 preset $preset. Owner: is the panel lit, and how do colours look?"
 edp_preset() { "$hyprctl" monitors 2>/dev/null | awk '/^Monitor / { m = $2 } m == "eDP-1" && $1 == "colorManagementPreset:" { print $2; exit }'; }
+# the trial counts only if Hyprland took it: an HDR request can be downgraded to sRGB without an error (#164)
+took=0
+for _ in 1 2 3 4 5; do
+  tp=$(edp_preset); tc=$("$hyprctl" getoption render:cm_enabled 2>/dev/null | head -1)
+  [ "$tp" = "$preset" ] && [ "$tc" = "bool: true" ] && { took=1; break; }
+  sleep "${K114S_CM_TRIAL_POLL:-0.2}"
+done
+if [ $took = 1 ]; then
+  echo "k114s-cm-trial: colour management ON, eDP-1 preset $preset. Owner: is the panel lit, and how do colours look?"
+else
+  echo "k114s-cm-trial: THE TRIAL DID NOT TAKE EFFECT (cm_enabled: ${tc:-?}, preset: ${tp:-?}): the panel is not showing preset $preset; the revert still runs" >&2
+fi
 echo "  now: eDP-1 colorManagementPreset $(edp_preset)"
 # 3. wait for the revert, then check it
 sleep "${K114S_CM_TRIAL_WAIT:-$((secs + 3))}"
@@ -47,6 +59,7 @@ cm=$("$hyprctl" getoption render:cm_enabled 2>/dev/null | head -1)
 pr=$(edp_preset)   # the eDP-1 block only: other outputs have presets of their own
 if [ "$cm" = "bool: false" ] && [ "$pr" = srgb ]; then
   echo "k114s-cm-trial: reverted: render:cm_enabled false, eDP-1 preset srgb"
+  [ $took = 1 ] || { echo "k114s-cm-trial: the revert is fine, but preset $preset never took effect: this trial does not count" >&2; exit 1; }
 else
   echo "k114s-cm-trial: REVERT NOT VERIFIED (cm_enabled: ${cm:-?}, preset: ${pr:-?}); run: $hyprctl eval '$back'" >&2
   exit 1
