@@ -2,8 +2,9 @@
 # A watched, self-reverting colour-management trial on the K114s panel (issue #20, docs/r3-hdr.md section 6).
 #   usage: k114s-cm-trial PRESET [SECONDS]      PRESET: srgb, dp3, edid or wide; SECONDS: 5 to 120, default 20
 # For a session with the owner looking at the panel. It turns Hyprland colour management on at runtime with the eDP-1
-# preset PRESET, then turns it back off after SECONDS: render:cm_enabled false and eDP-1 cm = "srgb", the managed
-# default of linux/display/k114s-dcp-colour. The way back is scheduled FIRST, as its own transient systemd user unit,
+# preset PRESET, then turns it back off after SECONDS: render:cm_enabled false and eDP-1 cm = "srgb", the state that
+# is lit on every K114s kernel so far (the managed default of linux/display/k114s-dcp-colour is dp3 with colour
+# management on since 2026-11-16; a reload restores it). The way back is scheduled FIRST, as its own transient systemd user unit,
 # so it runs even if this shell, the terminal or T3 goes away while the panel is black. Nothing is written to a file:
 # the next Hyprland start or config reload reads monitors.lua as before. User session only, no sudo.
 #   Environment: HYPRLAND_INSTANCE_SIGNATURE (default: the newest instance); for the tests K114S_HYPRCTL, K114S_SYSTEMD_RUN

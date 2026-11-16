@@ -1375,6 +1375,24 @@ today; the greeter on a DCP boot has not been looked at (**unknown**, owner-pend
   D6's sysfs `vrr_capable`, the greeter's missing colour guard (installed by hand, now `k114s-greeter-colour`), the `cm = "edid"` gamut warning (now
   `cm = "srgb"` in the managed block), and the colour fix gone from `monitors.lua` after a migration (P9 and U1 now check it).
 
+### 4c. After the window, 2026-11-16: the colour default and D6 (the owner at the Mac)
+
+- **Colour management (4a, closed).** With r3b.c1 (`docs/r3-hdr.md`, section 7) the panel EDID has Display P3 primaries and
+  `k114s-cm-trial edid`, `dp3` and `srgb` with colour management on all stayed lit with normal colours (owner-observed). The
+  managed block of `k114s-dcp-colour` now turns colour management **on** with the eDP-1 preset `dp3` (the owner's choice).
+  P9 and U1 still run `k114s-dcp-colour --check`, which now checks for that block. The greeter keeps its guard (off).
+- **D6 (VRR): failed, the DCP crashed.** Run in a default boot of r3b.c1, not through T4a (the window is closed, so there was no
+  one-shot and no `aura-try`): the mask file was moved into `$D/aurora-m5-vrr.conf.masked`, one reboot (owner watching), then the
+  D6 block. The boot itself was clean (`fw27_panel_vrr` Y, `vrr_capable` 1, the DCP's `set_digital_out_mode ... vrr:1`) and the
+  brightness ladder passed again (agent-run). Turning `misc:vrr` on in Hyprland made the panel go black at once (owner-observed).
+  The kernel log (agent-run; kept root-only as `$D/D6-dcp-crash-*.log`): `VRR_ENABLED 1: selecting "3024x1986": 120 ...` at the
+  first VRR swap, then half a second later `DCP has crashed` and `a reboot is required to restore the display`;
+  Hyprland fell back to its 1920x1080 `FALLBACK` output; `set_digital_out_mode timed out`; `IOMFB transaction timed out
+  ... pending IOMFB A463`. The block wrote `D6-failed` (its own stop line names the empty `vrr` read that followed the
+  crash). **The mask is back** (`options appledrm fw27_panel_vrr=0`) and a reboot restored the panel, so VRR stays masked on
+  this Mac; D9's rule (the mask follows D6) holds. VRR on the K114s OLED needs a driver change first: the opt-in path
+  (betizzel series patch 0014, `fw27_panel_vrr`) was tested upstream on the J714s LCD only.
+
 ## 5. Ways back
 
 Each step's undo is next to it. The first runbook's section 5 holds for every state it names (the window layouts are the same).
