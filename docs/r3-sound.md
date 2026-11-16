@@ -267,10 +267,6 @@ files are inert without the `/sound` node.
 ## Tests run (agent-run, 2026-11-14; count repaired 2026-11-15, on this Mac as an unprivileged user)
 
 - `tests/test-sound.sh` against the base tree with dtc 1.8.1 and gcc's preprocessor: 57 of 57.
-  The itemised breakdown that follows is the 2026-11-14 run and adds up to 40; the 17 checks the 2026-11-15 repair added are not itemised here. It covers the ADT reader on a made-up ADT (9), compile and lint of both trees (4), a build that
-  must fail without the PMP file (1), ten unsafe trees the lint must refuse (10), the UCM
-  profiles through `alsaucm` (4), the installer in a fake root (10), and the installed
-  speakerguardd v2 reader on the compiled tree (2).
 - Kernel: series applies with `git am`; `W=1` builds of the four touched objects with clang
   23.1.3, no warnings; KUnit `apple-speaker-*` 59 of 59 under QEMU 11.1.3 (arm64 `virt`);
   mutation check of the K114 assertion.
