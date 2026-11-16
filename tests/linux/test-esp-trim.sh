@@ -53,7 +53,9 @@ stub() { mkdir -p "$X/stub"; printf '#!/bin/sh\nexit 1\n' > "$X/stub/$1"; chmod 
 frun() { out=$(PATH=$X/stub:$PATH K114S_TEST=1 K114S_ROOT=$X K114S_NO_MOUNTCHECK=1 bash "$TOOL" "$@" 2>&1); rc=$?; }
 mk; stub rm; frun --apply m1n1-old; ok "apply: a failed delete stops with the undo command" "$rc $(echo "$out" | grep -c 'delete of m1n1/boot.bin.old failed.*--restore')" "1 1"
 mk; stub sync; frun --apply m1n1-old; ok "apply: a failed sync stops with the undo command" "$rc $(echo "$out" | grep -c 'sync failed after the delete.*--restore')" "1 1"
-mk; run --apply m1n1-old; bk3=$(ls -d "$X"/var/lib/k114s-recovery/esp-trim-*); stub cp; frun --restore "$bk3"
+mk; run --apply m1n1-old; bk3=$(ls -d "$X"/var/lib/k114s-recovery/esp-trim-*)
+# the cp stub leaves a partial file at its last argument, so the check sees whether the cleanup removed it
+mkdir -p "$X/stub"; printf '#!/bin/sh\nfor a; do d=$a; done; echo partial > "$d"; exit 1\n' > "$X/stub/cp"; chmod +x "$X/stub/cp"; frun --restore "$bk3"
 ok "restore: a failed copy stops and leaves no partial file" "$rc $(echo "$out" | grep -c 'copy of m1n1/boot.bin.old failed') $(test -e "$X/boot/efi/m1n1/boot.bin.old"; echo $?)" "1 1 1"
 rm -f "$X/stub/cp"; stub sync; frun --restore "$bk3"; ok "restore: a failed sync is reported" "$rc $(echo "$out" | grep -c 'sync failed after the restore')" "1 1"
 mk; run --apply m1n1-old; bk4=$(ls -d "$X"/var/lib/k114s-recovery/esp-trim-*)

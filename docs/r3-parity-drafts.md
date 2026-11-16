@@ -99,8 +99,8 @@ adds its own way to hang.
 
 Compare software and VA-API decode with `tests/hardware/k114s-avd-decode-test.sh` (a synthetic clip, `ffmpeg
 -hwaccel none ... -f md5` against `-hwaccel vaapi ... -f md5`, both as `nv12`; `--software-only` proves the clip
-and md5 steps without the decoder). Not done: the offline md5 test #30 asked for (it needs the decoder, so it can
-only run after the AVD boot), and the QEMU tests #62 and #67 asked for.
+and md5 steps without the decoder). The md5 comparison #30 asked for is written (that script) but has not run against the hardware decoder, because that
+needs the AVD boot. Not done: the QEMU tests #62 and #67 asked for.
 
 ## Upstream drafts
 

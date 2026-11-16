@@ -9,6 +9,7 @@ nbad=0; ok() { echo "ok    $*"; }; bad() { echo "BAD   $*"; nbad=$((nbad + 1)); 
 dmbad() { local l; while IFS= read -r l; do bad "dmesg: $l"; done; }   # counts each line, so the exit status sees it
 groups=${*:-avd sd sensors}
 dm=$(dmesg 2>/dev/null) || { dm=$(journalctl -k -b --no-pager 2>/dev/null); info "dmesg needs root; used the kernel journal"; }
+sys=${K114S_SYS:-/sys}   # test hooks (test-parity-check.sh only)
 st() { tr -d '\0' < "$1" 2>/dev/null; }
 for g in $groups; do case $g in
 avd)
@@ -25,7 +26,7 @@ avd)
 sd)
   echo "== SD card reader (issue #62)"
   lspci 2>/dev/null | grep -qi genesys && ok "GL9755 on the bus: $(lspci | grep -i genesys)" || bad "no Genesys device in lspci (port 1 did not train, or this boot is not the SD tree)"
-  ls -d /sys/class/mmc_host/mmc* >/dev/null 2>&1 && ok "mmc host: $(ls /sys/class/mmc_host | tr '\n' ' ')" || bad "no mmc host"
+  ls -d $sys/class/mmc_host/mmc* >/dev/null 2>&1 && ok "mmc host: $(ls $sys/class/mmc_host | tr '\n' ' ')" || bad "no mmc host"
   lsmod | grep -q sdhci_pci && ok "sdhci_pci loaded" || info "sdhci_pci not loaded"
   grep -iE 'apple-pcie|pcie.*port ?1|sdhci|mmc' <<<"$dm" | tail -12 | sed 's/^/info  dmesg: /'
   dmbad < <(grep -iE 'port ?1.*(fail|timeout)|PERST' <<<"$dm" | head -5)

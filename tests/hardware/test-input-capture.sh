@@ -10,7 +10,7 @@ fail=0
 export K114S_SUSPEND_VALUE=ignore K114S_SUSPEND_LP_VALUE=ignore K114S_POWER_LP_VALUE=ignore
 ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; fail=1; }
-cap() { K114S_NO_SUDO=1 K114S_PROC_INPUT=$t/devices K114S_DEV_DIR=$t/dev K114S_BINDS_JSON=$t/binds.json K114S_HYPR_LUA_DIRS=$t/lua \
+cap() { K114S_NO_SUDO=1 K114S_PROC_INPUT=$t/devices K114S_DEV_DIR=$t/dev K114S_BINDS_JSON=$t/binds.json K114S_HYPR_LUA_DIRS=${K114S_HYPR_LUA_DIRS-$t/lua} \
         K114S_LOGIND_VALUE=${LV:-ignore} K114S_LOGIND_DIRS="$t/ld" K114S_LEDS=$t/leds K114S_PWM_DT=$t/dt "$here/k114s-input-capture.sh" "$@" 2>&1; }
 
 mkdir -p "$t/lua" "$t/dev" "$t/ld" "$t/leds" "$t/dt"
@@ -103,6 +103,11 @@ out=$(cap keypolicy); rc=$?
 echo '-- systemctl suspend is not bound' >"$t/lua/b.lua"
 out=$(cap keypolicy); rc=$?
 [[ $rc -eq 0 ]] && ok "keypolicy ignores Lua comments" || { bad "lua comment (rc=$rc)"; echo "$out"; }
+# default scan list (hook unset): HOME and OMARCHY_PATH point at a scratch tree; the state dir is scanned recursively
+mkdir -p "$t/h/.local/state/omarchy/toggles/hypr" "$t/o/default/hypr"
+echo 'hl.bind("F12", hl.dsp.exec_cmd("systemctl suspend"))' >"$t/h/.local/state/omarchy/toggles/hypr/t.lua"
+out=$(HOME=$t/h OMARCHY_PATH=$t/o K114S_HYPR_LUA_DIRS= cap keypolicy); rc=$?
+[[ $rc -eq 1 && $out == *"lua can suspend: t.lua:1"* ]] && ok "keypolicy default dirs scan the Omarchy state tree" || { bad "default dirs (rc=$rc)"; echo "$out"; }
 echo 'not json' >"$t/binds.json"
 out=$(cap keypolicy); rc=$?
 [[ $rc -eq 1 && $out == *"binds: unavailable"* ]] && ok "keypolicy fails when hyprctl gives no binds" || { bad "no binds (rc=$rc)"; echo "$out"; }

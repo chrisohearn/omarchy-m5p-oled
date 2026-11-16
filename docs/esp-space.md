@@ -103,8 +103,8 @@ about 11.7 MB = 99.4 MB against 88.1 MB) but **do not clear it after the r3a swa
 installed guard, which in the window is exactly the case D4 calls a STOP (two kernel directories exist, a rebuild-all needs 158 MB). So:
 
 - **Before the r3a window.** Trimming makes the installed guard pass (99.4 MB free against 88.1 MB). **Restore the trim with `esp-trim --restore <backup>` before runbook step D1**: D4 measures free space after the swap (about 99.3 MB trimmed) and STOPs when it is at or above 88,080,384, so a trimmed ESP loses the attended window. A kernel-only update then fits: it rebuilds
-  `omarchy_linux-aurora.efi` (79.3 MB). A transaction that also changes `boot.bin` does **not** fit: with `boot.bin.old` gone, `update-m1n1` peaks at
-  `boot.bin` + `.new` + `.old` (+20.3 MB over today) plus the 79.3 MB image, about 99.6 MB (the +20.3 MB loader transient plus the 79.3 MB image, counted as if the two peaks overlap in time; nothing here shows the loader's transient is gone before the image is written) against 99.4 MB free, so at best no margin, and the r2c guard does not count the loader (the
+  `omarchy_linux-aurora.efi` (79.3 MB). A transaction that also changes `boot.bin` does not fit if the loader transient and the image write overlap: with `boot.bin.old` gone, `update-m1n1` peaks at
+  `boot.bin` + `.new` + `.old` (+20.3 MB over today) plus the 79.3 MB image, about 99.6 MB against 99.4 MB free (nothing here shows the two peaks do not overlap; treat it as the worst case), so at best no margin, and the r2c guard does not count the loader (the
   r3 guard, `k114s-guard`, does: one image per kernel directory + loader transient + 8 MiB margin, and would refuse). So the trims alone are a partial fix; installing
   the r3 tooling first is what makes the pause lift safely.
 - **Inside the r3a window**, do not trim to pass the guard. The window has two kernel directories; the r3 guard refuses it correctly. Do not delete `macos-junk` or `boot.bin.old` for
@@ -122,9 +122,9 @@ installed guard, which in the window is exactly the case D4 calls a STOP (two ke
 
 What it checks before it deletes: root, `/boot/efi` is a mount point (a delete on an unmounted ESP would hit the root filesystem), the backup folder
 is on root with room for the files plus 50 MiB, the backup is byte-identical to the live files (`sha256sum -c`), and the item-specific refusals above.
-A stop at any point leaves the ESP as it was. Evidence: `tests/linux/test-esp-trim.sh`, 24 checks on a replica of the layout (agent-run, replica): the dry run changes
+A stop at any point leaves the ESP as it was. Evidence: `tests/linux/test-esp-trim.sh`, 32 checks on a replica of the layout (agent-run, replica): the dry run changes
 nothing byte for byte, unknown names and paths are refused, kernels, firmware, Stage 2 files, repair bundle and `limine.conf` stay untouched,
-apply then restore returns the files byte for byte, a restore never overwrites, a tampered backup restores nothing, an unmounted folder is refused.
+apply then restore returns the files byte for byte, a restore never overwrites, a tampered backup restores nothing, an unmounted folder is refused, and failed rm, sync, cp and free-space STOPs report the undo command.
 **It has not been run on the Mac** and this branch does not run it. The replica cannot show how vfat behaves on the real partition or that
 macOS tolerates the missing folders (it recreates them).
 

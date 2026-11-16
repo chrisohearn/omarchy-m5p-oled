@@ -95,9 +95,13 @@ selftest_run() {
   # 2c. the gate's SKIP path, interactive, with a policy that would suspend; every other step is skipped by answer
   out=$(printf '\n\n\n%.0s' 1 >"$t/in"; printf 's\ns\n\n\n' >>"$t/in"; yes s | head -60 >>"$t/in"
     K114S_OWNER_STATE=$t/state2 K114S_LOGIND_VALUE=suspend K114S_SUSPEND_VALUE=hibernate bash "$0" --section B <"$t/in" 2>&1)
-  # no later step may run a command: only the three policy steps may be recorded as run
-  [ "$(echo "$out" | grep -c 'SKIPPED: the')" = 3 ] && ! echo "$out" | grep -qE '^  - (PASS|DONE|OK): ' \
-    && ok "failed key policy skips the power press and both key captures, and no later step runs" || { no "gate SKIP path"; echo "$out" | grep -E 'SKIPPED|^---' | head -20; }
+  # no later step may run a command: step() prints '    exit status' only when it ran one, so exactly one
+  # (the keypolicy command) may sit between the Key policy header and the Top-row keys header, none after it
+  [ "$(echo "$out" | grep -c 'SKIPPED: the')" = 3 ] \
+    && [ "$(echo "$out" | sed -n '/^--- #43, #44  Key policy/,/^--- #43  Top-row keys/p' | grep -c '^    exit status ')" = 1 ] \
+    && [ "$(echo "$out" | sed -n '/^--- #43  Top-row keys/,$p' | grep -c '^    exit status ')" = 0 ] \
+    && ok "failed key policy skips the power press and both key captures, and no later step runs" \
+    || { no "gate SKIP path"; echo "$out" | grep -E 'SKIPPED|^---' | head -20; }
   # 3. dry run in a scratch state dir: exit 0, runs nothing, covers every issue of the checklist, log is private
   out=$(K114S_OWNER_STATE=$t/state bash "$0" --dry-run </dev/null 2>&1); rc=$?
   [ "$rc" = 0 ] && ok "dry run exits 0" || { no "dry run exit $rc"; echo "$out" | tail -5; }
@@ -107,7 +111,8 @@ selftest_run() {
   done
   [ "$bad" = 0 ] && ok "summary has every issue"
   echo "$out" | grep -q 'FOLDED INTO TRIAL BOOTS' && ok "reboot items are listed as folded" || no "no folded reboot items"
-  [ "$(stat -c %a "$t/state")" = 700 ] && [ "$(stat -c %a "$t"/state/session-*.log)" = 600 ] && ok "log directory 0700, log 0600" || no "log permissions"
+  [ "$(stat -c %a "$t/state")" = 700 ] && [ "$(stat -c %a "$t"/state/session-*.log)" = 600 ] \
+    && ok "log directory 0700, log 0600" || no "log permissions"
   echo "$out" | grep -q 'dry-run: would run' && ok "dry run lists commands" || no "dry run lists no commands"
   [ "$bad" = 0 ] && echo "RESULT: OK" || echo "RESULT: FAIL"
   return $bad
@@ -161,6 +166,7 @@ load() { # N SECONDS CMD... : N bounded CPU loads (yes) while CMD runs; the load
   return $rc
 }
 
+# Step definitions stay on ONE line each (the self-tests 2 and 2b grep '^step'), so they may exceed 150 characters.
 # step ISSUES TITLE WHAT-YOU-DO [-- COMMAND...]   (no command: a manual step you do and report on)
 step() {
   local issues=$1 title=$2 what=$3 cmd=() miss="" a rc sug="" res note="" key=${KEY:-} need=${NEED:-}
