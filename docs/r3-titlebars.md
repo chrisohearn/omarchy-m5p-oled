@@ -165,7 +165,7 @@ buffer (with the native driver instead it dies: "Apple G17S uses the HAL300 comm
 this driver does not implement"). The script now says so when that is why a run failed. The test
 has to be run from a CPU-rendered session: `rm ~/.config/k114s-gpu-desktop`, log in again, run it
 (expect: rebuild 10 of 10; the channel `.so` a nested SIGSEGV at the first press, as in run 3),
-`touch` the file again. Record then: the `background, top and overlay layer surfaces mapped` line, 10 PASS lines for the rebuild, a nested SIGSEGV for the channel build (`titlebars.so.disabled-k114s`). Until then the TOP and OVERLAY coverage is **code written, unverified**, not fixed.
+`touch` the file again. Record then: the `background, top and overlay layer surfaces mapped` line, 10 PASS lines for the rebuild, a nested SIGSEGV for the channel build (`titlebars.so.disabled-k114s`). Until then the TOP and OVERLAY coverage is **code written, unverified**, not fixed. `tests/hardware/k114s-titlebars-nested-check.sh PACKAGE` runs both builds and checks those three outcomes (issue #7).
 
 What the nested test does not cover: the session's real configuration (Omarchy's
 `workspace-modes.lua`, its theme colors and buttons, the real bar and dock
@@ -234,13 +234,13 @@ the machine and has nothing unsaved in the session.
 
 ```bash
 P=~/k114s-build/titlebars-r2/pkg/omarchy-hyprland-titlebars-1:0.4.0+m5-1-aarch64.pkg.tar.xz
-sha256sum "$P"    # expect 81c321fae282a7c2c676c3b020838961ffe7c87d671b82532dcde92c550fdf99 (titlebars.so inside: e227dafb..., unchanged)
-sudo packaging/omarchy-hyprland-titlebars-m5/install.sh "$P"
+sudo packaging/omarchy-hyprland-titlebars-m5/install.sh "$P" 81c321fae282a7c2c676c3b020838961ffe7c87d671b82532dcde92c550fdf99
+# the second argument is the expected package sha256 (titlebars.so inside: e227dafb..., unchanged); omit it and the printed sum is not a check
 ```
 
 `install.sh` is the whole step, in one root session: it refuses anything that is not the `+m5`
 build, refuses to start while `/var/lib/pacman/db.lck` exists or a permit file is already there,
-prints the package's sha256, installs `titlebars-abi-check` into `/usr/local/lib/omarchy-k114s/`
+prints the package's sha256 (and refuses a mismatch with the optional expected one), installs `titlebars-abi-check` into `/usr/local/lib/omarchy-k114s/`
 and both hooks (`00-k114s-titlebars-guard.hook`, `02-k114s-titlebars-abi.hook`) into
 `/etc/pacman.d/hooks/`, writes the permit `install omarchy-hyprland-titlebars` and `allow-low-esp`
 for the one transaction and removes them again on exit (an `allow-low-esp` that was already there
@@ -261,8 +261,8 @@ transaction while `/boot/efi` has less; it has 87724032 bytes (83.66 MiB) free, 
 one too, harmlessly (PreTransaction, nothing changed) but for a reason that is not about this
 package: the transaction runs no mkinitcpio, Limine or boot-ctxr hook and writes nothing to the
 EFI partition (agent-run, hook triggers evaluated against the package's file list). Hence
-`allow-low-esp`, which `install.sh` still sets (the lock check above keeps another transaction from
-slipping in under it). On `r3/update-tooling` the space guard triggers on boot-file paths and
+`allow-low-esp`, which `install.sh` still sets (the lock check above looks once, at the start, so it narrows the window in which another
+transaction could slip in under it but does not close it). On `r3/update-tooling` the space guard triggers on boot-file paths and
 packages only (`01-k114s-guard-esp.hook`), none of which this package has, so the marker is a
 no-op there. There, `noextract.list` keeps `titlebars.so` out while the installed version lacks
 `+m5`, which is true during this very `-U` from the channel's `0.4.0-1`: `install.sh` then dies
@@ -301,7 +301,7 @@ triggers on Install and Upgrade of `omarchy-hyprland-titlebars` and `hyprland-m5
 transaction that would change either without `allow-coupled-update` or a release permit
 (`/run/omarchy-k114s/permit`, a line `install PACKAGE`, at most an hour old). Pacman has not run
 this hook on this machine (agent-run: the script and `install.sh` in throwaway roots,
-`test-install.sh`, 19 checks; the hook's trigger syntax is the one `00-k114s-hold-guard.hook`
+`test-install.sh`, 29 checks; the hook's trigger syntax is the one `00-k114s-hold-guard.hook`
 uses). The cost is that an `omarchy update` whose refresh dropped the `IgnorePkg` line, and that
 would downgrade the plugin, stops with a message instead of finishing; `apply-holds` and a rerun
 fix it, as with the other held packages.

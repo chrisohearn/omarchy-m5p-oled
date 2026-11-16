@@ -61,5 +61,11 @@ touch -d '2 hours ago' $r/run/omarchy-k114s/permit
 ok "--pre: a stale permit counts for nothing" "$(pre $r omarchy-hyprland-titlebars)" 1
 : > $r/$E/allow-coupled-update
 ok "--pre: allow-coupled-update lets it through" "$(pre $r omarchy-hyprland-titlebars hyprland-m5)" 0
+E3B0=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+r=$BASE/s1; mkdir -p $r
+ok "expected sha256 that matches: install passes" "$(mkdir -p $r/usr/bin; : > $r/usr/bin/Hyprland; K114S_ROOT=$r PACMAN=$BASE/pacman K114S_HYPRLAND_OWNER=hyprland "$HERE/install.sh" "$BASE/pkg" $E3B0 >/dev/null 2>&1; echo $?)" 0
+r=$BASE/s2; mkdir -p $r/usr/bin; : > $r/usr/bin/Hyprland
+ok "expected sha256 that differs: install refuses" "$(K114S_ROOT=$r PACMAN=$BASE/pacman K114S_HYPRLAND_OWNER=hyprland "$HERE/install.sh" "$BASE/pkg" "$(printf '0%.0s' {1..64})" >/dev/null 2>&1; echo $?)" 1
+ok "... before pacman -U, any marker or any hook" "$(find $r -type f ! -path "$r/usr/bin/Hyprland" 2>/dev/null | wc -l)" 0
 echo "titlebars install/guard tests: $pass passed, $fail failed"
 [ "$fail" = 0 ]
