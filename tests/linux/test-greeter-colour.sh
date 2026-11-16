@@ -42,4 +42,13 @@ ok "put: a failed staging write stops, keeps the target and leaves no staging fi
 ok "put: a good write replaces the target and keeps its mode" "$rc $(command cat "$T/f") $(stat -c %a "$T/f")" "0 new 600"
 ( die() { exit 1; }; eval "$putfn"; echo fresh | put "$T/g" ); rc=$?
 ok "put: a new file gets mode 644 (the fallback)" "$rc $(command cat "$T/g") $(stat -c %a "$T/g") $(ls "$T" | wc -l)" "0 fresh 644 2"
+# the callers (#141 review): a failed write in --install or --undo stops the script before the conf is repointed or the copy removed
+mk=$BASE/mkbin; mkdir -p "$mk"; real=$(command -v mktemp)
+printf '#!/bin/sh\ncase "$1" in *"$FAIL_STAGE"*) exit 1 ;; esac\nexec %s "$@"\n' "$real" > "$mk/mktemp"; chmod +x "$mk/mktemp"
+rm -rf "$K114S_SDDM_ROOT/etc/sddm" "$C".*; cp "$L/gpu-desktop/70-k114s-greeter-software.conf" "$C"; c0=$(sum "$C")
+PATH=$mk:$PATH FAIL_STAGE=hyprland-k114s.lua bash "$S" >/dev/null 2>&1; rc=$?
+ok "install: a failed copy write stops, the conf still points at stock and no empty copy is left" "$rc $(sum "$C") $(test -e "$MY"; echo $?)" "1 $c0 1"
+bash "$S" >/dev/null 2>&1; i1=$(sum "$C")$(sum "$MY")
+PATH=$mk:$PATH FAIL_STAGE=70-k114s-greeter-software.conf bash "$S" --undo >/dev/null 2>&1; rc=$?
+ok "undo: a failed conf write stops and keeps both the conf and the copy" "$rc $(sum "$C")$(sum "$MY")" "1 $i1"
 finish "greeter colour tests"
