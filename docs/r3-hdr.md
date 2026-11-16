@@ -1,0 +1,99 @@
+# r3b.c1: the panel colour description and an EDR brightness cap (issue #92)
+
+2026-11-16. Evidence labels as in `docs/r3b-kernel.md`: **agent-run** (run on this Mac or in its build area),
+**emulator/replica** (QEMU, stand-in headers), **read from source**, **owner-observed**. Nothing in this document has
+been booted. The package is built and checked; installing it is a step for a session with the owner at the Mac (section 6).
+
+## 1. What was wrong
+
+Two things, both in `appledrm`, both found while explaining the black screens of the first DCP boots
+(`docs/r3-display-d5-d9.md`, betizzel/omarchy-m5#21, aurora-silicon/linux#2060):
+
+1. **The panel EDID had zero primaries.** The driver builds the internal panel's EDID itself. Firmware 27 publishes no
+   chromaticities, so the primaries come from the colour target the ADT's `/product` `artwork-display-gamut` names. The
+   driver knows only `P3` and `sRGB`. This Mac's ADT says `Rec2020` (agent-run, read-only, with a valid version-1
+   `primary-calibration-matrix`), so there was no target and the EDID carried red, green and blue at (0, 0) with only the
+   D65 white. Hyprland's colour management built a singular matrix from that, and every frame came out black
+   (owner-observed; root cause read from source). The workaround on this Mac is colour management off, with the eDP-1
+   preset `srgb` (`linux/display/k114s-dcp-colour`).
+2. **Nothing capped EDR.** The ADT gives this panel a 2000-nit peak (`LmaxProduct`) and an EDR headroom up to 16
+   (agent-run: kernel log `panel peak luminance 2000 nits (ADT)`, `panel EDR headroom up to 16.000`). Firmware 27 shows
+   PQ content as EDR: each swap asks for SDR white times the headroom, up to that peak. The first PQ frame a compositor
+   presents would start a ramp towards 2000 nits on the OLED. The path was validated upstream on the J714s (mini-LED)
+   only. Today nothing on this Mac asks for PQ (colour management is off), so this is a guard for later, not a fix of
+   something seen.
+
+## 2. The fix: three patches on r3b.b1 (`patches/linux/r3b-c1.series`)
+
+| Patch | What | Upstream |
+| --- | --- | --- |
+| `hdr/0001` | An internal panel whose ADT names no known gamut is described as **Display P3**: the space the driver already tags every untagged eDP RGB surface with (`iomfb_template.c`, P3-D65). The EDID and the surface tag then agree. `Rec2020` is not mapped to BT.2020 primaries, because the firmware is handed P3-tagged surfaces. One log line says so: `panel ADT: no known colour gamut, EDID primaries default to Display P3`. | offered (aurora-silicon/linux#2060) |
+| `hdr/0002` | `fw27_panel_edr_max_nits`, a read-only `appledrm` parameter read when the DCP binds. It lowers the peak the driver accepts from the ADT. A cap at or below the panel's SDR maximum leaves no headroom: no peak, so the EDID advertises no PQ, PQ commits are refused and no swap carries an EDR step. Default 0 = the panel's own peak (unchanged behaviour). | offered, with 0001 |
+| `hdr/0003` | K114s only: the default is **500**. With the SDR maximum of 1000 nits that means no EDR at all. SDR brightness is not affected. Raising it later: `appledrm.fw27_panel_edr_max_nits=N` on the command line or `options appledrm fw27_panel_edr_max_nits=N` in modprobe.d. | not for upstream |
+
+With the cap in place, any EDR swap asks for at most SDR white or the capped peak, whichever is higher (KUnit
+`edr_peak_bound_test`, below). On this Mac the cap turns EDR off rather than limiting it: the panel node of the running
+device tree is enabled and carries `apple,max-brightness` 1000 (agent-run), and the driver reads it before the ADT peak
+(`dcp.c`, the panel block of the probe; read from source), so `dcp_edr_peak(2000, 1000, 500)` is 0.
+
+What changes for Hyprland after the boot (read from source, not seen): the EDID has Display P3 primaries, and no HDR
+static metadata or BT.2020 colorimetry, because the panel has no peak. With colour management on, the `edid` preset then
+converts into P3 instead of producing NaNs, so the panel should light. The `edid` preset is still labelled BT.2020 inside
+Hyprland, so its "not 10-bit" warning can stay. The workaround in `monitors.lua` stays until the owner has seen the
+panel with colour management on (section 6).
+
+## 3. Proof (all offline)
+
+| Check | Result | Label |
+| --- | --- | --- |
+| Build: `K114S_LABEL=K114S-R3B-C1 kmake O=build/r3b-c1 Image modules dtbs` from `src/r3b-c1` (r3b-b1 + hdr 0001-0003), the r3b.b1 `.config` unchanged | clean, no warning in `drivers/gpu/drm/apple` | agent-run |
+| `k114s-cmp-modules build/r3b-c1` against the installed r3b.b1 | `DIFF(.text) appledrm.ko`, 1971 of 1972 SAME | agent-run |
+| The three patch files reproduce the built tree (`git am` on r3b-b1's head `c492e07e75`) | same tree `ca972036c40e` | agent-run |
+| `tests/brightness/run-dcp-backlight-host.sh src/r3b-c1` (the driver's own `dcp_backlight_test.c` compiled for the host) | 30 cases pass, including `edr_peak_test` and `edr_peak_bound_test`; both new cases fail with the cap removed | emulator/replica |
+| KUnit in QEMU (section 4) | all 32 Apple display suites pass, 0 `not ok` in the whole run; without the P3 fallback `parser_panel_adt_color_target` fails | emulator/replica |
+| `K114S_CAND=r3b-c1 makepkg`, then `check-package.sh` | all passed, including the brightness floor, the Display P3 default and the 500-nit cap (read from `appledrm.ko`) | agent-run |
+
+Package (outside the repository, `$K114S_BUILD_ROOT/integrate/release-r3b-c1/`, with `SHA256SUMS`):
+`linux-k114s-r3b-7.3.0.r3b.c1-1-aarch64.pkg.tar.zst`, sha256 `2d215627dd09f51689154f5ca9b140969cd9f0ceb828b00370cfcf35bf20e69c`.
+The r3b.b1 package for the way back is `release-display-d5/pkg/linux-k114s-r3b-7.3.0.r3b.b1-1-aarch64.pkg.tar.zst`.
+
+## 4. KUnit in QEMU
+
+`build/r3b-c1-kunit` is the same tree with `CONFIG_KUNIT=y`, `DRM_APPLE_KUNIT_TEST=m`, `DRM_APPLE_DISPLAY_KUNIT_TEST=y`
+and `DRM_APPLE_PARSER_KUNIT_TEST=y`. Loading `appledrm` and `dcp_backlight_test` in `k114s-qemu-smoke` runs their suites
+(no Apple hardware is needed by these cases). Run with `k114s-qemu-smoke modules build/r3b-c1-kunit INIT`, where INIT
+mounts the pseudo file systems, runs `modprobe appledrm` and `modprobe dcp_backlight_test`, and powers off (agent-run,
+emulator/replica, 2026-11-16):
+
+- All 32 suites of the Apple display driver pass, among them `apple-display-parser` 43 of 43 (with
+  `parser_panel_color_target` and the extended `parser_panel_adt_color_target`) and `apple-dcp-backlight` 30 of 30 (with
+  `edr_peak_test` and `edr_peak_bound_test`). The serial log has no `not ok` line at all (632 cases across the kernel's
+  suites).
+- Mutation: with `dcp_panel_color_target()` returning only the ADT's own space (the old behaviour), the same run gives
+  `apple-display-parser: pass:42 fail:1`, `not ok 12 parser_panel_adt_color_target`. The cap's two cases fail without
+  the cap in the host run (section 3).
+
+## 5. Not verified
+
+- Anything on the hardware: the new EDID on the panel, Hyprland with colour management on, the log lines.
+- Whether the firmware's P3-D65 surface tag means "shown unconverted" on this OLED. If the factory target is wider than
+  P3, user space slightly under-uses the gamut, which is no worse than today.
+- EDR itself on this panel, at any cap. The cap only removes or limits it.
+
+## 6. For a session with the owner at the Mac (not before)
+
+One install and one reboot, after the D6 VRR boot or instead of it, never unattended:
+
+1. `sudo pacman -U .../release-r3b-c1/linux-k114s-r3b-7.3.0.r3b.c1-1-aarch64.pkg.tar.zst`: upgrades r3b.b1 in place and
+   rebuilds `omarchy_linux-k114s-r3b.efi` (the default entry). Check G6 on the new image as after every UKI rebuild
+   (`docs/r3-display-d5-d9.md`, F16): no `appledrm` in its initramfs.
+2. Reboot with the owner watching. Expected: the desktop as today (colour management is still off).
+3. Read-only: `journalctl -k -b | grep -E 'EDID primaries default|panel EDR off|panel peak'` shows the P3 line and
+   `panel EDR off: cap 500 nits is not above the SDR maximum 1000 nits`; the connector EDID decodes with P3 primaries
+   (about 0.680/0.320, 0.265/0.690, 0.150/0.060) and no HDR static metadata block.
+4. Then the colour test the owner asked to watch: colour management on at runtime with a 20-second auto-revert, first
+   the `edid` preset, then `dp3`. If the panel stays lit and colours look right, make that the managed default through a
+   repository PR and retire the workaround.
+
+Way back: the Limine menu's r3a entry (`Omarchy/linux-k114s`) boots as before; from there,
+`sudo pacman -U .../release-display-d5/pkg/linux-k114s-r3b-7.3.0.r3b.b1-1-aarch64.pkg.tar.zst` restores r3b.b1.
