@@ -18,6 +18,9 @@ restart() { [[ -n $ROOT ]] && return 0; systemctl daemon-reload && systemctl try
 case ${1:-install} in
   install)
     [[ $(id -u) == 0 || -n $ROOT ]] || die "run with sudo"
+    # Apple Silicon only: on an Intel MacBook UPower's "MacBook" workaround is needed (issue #156)
+    grep -zFxq 'apple,k114s' "${K114S_DT_COMPATIBLE:-/sys/firmware/devicetree/base/compatible}" 2>/dev/null ||
+      die "this is not an apple,k114s Mac: nothing installed"
     [[ -f $HERE/$CONF && -f $HERE/$NAMEF ]] || die "$HERE/$CONF or $HERE/$NAMEF is missing"
     case $(head -n 1 "$HERE/$NAMEF") in MacBook*) die "$HERE/$NAMEF starts with MacBook: UPower would still ignore the capacity" ;; esac
     if cmp -s "$HERE/$CONF" "$DCONF" && cmp -s "$HERE/$NAMEF" "$DNAME"; then
@@ -36,15 +39,21 @@ case ${1:-install} in
     if [[ -z $ROOT ]] && command -v upower >/dev/null && [[ -r /sys/class/power_supply/macsmc-battery/capacity ]]; then
       cap=$(< /sys/class/power_supply/macsmc-battery/capacity)
       up=$(upower -i /org/freedesktop/UPower/devices/battery_macsmc_battery 2>/dev/null | awk '/percentage:/ { sub("%", "", $2); printf "%d", $2 + 0.5; exit }')
-      [[ $up == "$cap" ]] || die "installed, but UPower says ${up:-nothing}% and the SMC $cap% (restart upower?)"
-      echo "k114s-upower-percentage: installed; UPower and the SMC both say $cap%"
+      # UPower polls the battery, so it can trail the SMC by one point for a moment; more than that is the old ratio
+      [[ -n $up ]] && (( up - cap <= 1 && cap - up <= 1 )) ||
+        die "installed, but UPower says ${up:-nothing}% and the SMC $cap% (restart upower?)"
+      echo "k114s-upower-percentage: installed; UPower says $up% and the SMC $cap%"
     else
       echo "k114s-upower-percentage: installed"
     fi
     ;;
   --undo)
     [[ $(id -u) == 0 || -n $ROOT ]] || die "run with sudo"
-    if [[ ! -e $DCONF && ! -e $DNAME ]]; then echo "k114s-upower-percentage: nothing to undo"; exit 0; fi
+    if [[ ! -e $DCONF && ! -e $DNAME ]]; then
+      # an earlier undo may have removed the files and stopped before the restart: restart anyway, it is cheap (issue #156)
+      restart || die "nothing to undo, but upower did not restart (systemctl status upower)"
+      echo "k114s-upower-percentage: nothing to undo; upower restarted"; exit 0
+    fi
     if [[ -e $DCONF ]]; then grep -q -x -F -- "$MARK" "$DCONF" || die "$DCONF is not the file this script installs: not removed"; fi
     if [[ -e $DNAME ]]; then cmp -s "$HERE/$NAMEF" "$DNAME" || die "$DNAME is not the file this script installs: not removed"; fi
     rm -f "$DCONF" "$DNAME"; rmdir "$(dirname "$DCONF")" 2>/dev/null || true
