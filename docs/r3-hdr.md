@@ -193,7 +193,8 @@ was the only new setting.
 E3.3 (the `hdr` preset) was not run, because the owner asked to keep `hdredid` on. **HDR is now the default** (the owner's
 words: "Looked good let's keep it on"):
 - `linux/display/k114s-edr-cap` installs `/etc/modprobe.d/k114s-edr-cap.conf` (the 1200-nit cap) and removes the
-  one-boot test file. `--check` and `--undo` are there too.
+  one-boot test file. It refuses while any other modprobe file sets the cap. `--check` also fails then, and on this Mac it
+  requires `modprobe -c` to read exactly one cap, 1200. `--undo` is there too.
 - The managed colour block (`dcp-colour.lua`) picks `hdredid` when appledrm's cap is above the 1000-nit SDR maximum or 0, and
   `dp3` otherwise. It reads the cap from `/sys/module/appledrm/parameters/fw27_panel_edr_max_nits`. That works in Hyprland's
   Lua (agent-run: `io.open` read 1200). So the same block is right on a kernel without EDR, and on r3b.b1.

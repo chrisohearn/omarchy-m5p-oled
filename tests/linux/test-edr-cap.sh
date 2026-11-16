@@ -17,8 +17,12 @@ run; ok "install: the file is the repository's, mode 644, and the one-boot test 
 ok "install leaves the VRR mask alone" "$(cat "$M/aurora-m5-vrr.conf")" "options appledrm fw27_panel_vrr=0"
 run --check; ok "check after install passes" "$rc" 0
 run; ok "install twice: already installed" "$rc $(echo "$out" | grep -c 'already installed')" "0 1"
-echo 'options appledrm fw27_panel_edr_max_nits=1600' > "$M/k114s-edr-trial.conf"; run
-ok "a test file with another cap is kept and reported" "$rc $(test -e "$M/k114s-edr-trial.conf"; echo $?) $(echo "$out" | grep -c 'left as it is')" "0 0 1"; rm -f "$M/k114s-edr-trial.conf"
+echo 'options appledrm fw27_panel_edr_max_nits=1600' > "$M/k114s-edr-trial.conf"; run --check
+ok "check fails while a test file with another cap is there (it could override 1200)" "$rc $(echo "$out" | grep -c 'sets the cap too')" "1 1"
+rm -f "$M/k114s-edr-cap.conf"; run
+ok "install refuses while another file sets another cap, and writes nothing" "$rc $(test -e "$M/k114s-edr-cap.conf"; echo $?) $(test -e "$M/k114s-edr-trial.conf"; echo $?)" "1 1 0"
+mv "$M/k114s-edr-trial.conf" "$M/50-other.conf"; run; ok "install refuses any other file that sets the cap" "$rc $(test -e "$M/k114s-edr-cap.conf"; echo $?)" "1 1"
+printf '# fw27_panel_edr_max_nits=2000 in a comment only\n' > "$M/50-other.conf"; run; ok "a file that only mentions the cap in a comment does not block install" "$rc $(test -e "$M/k114s-edr-cap.conf"; echo $?)" "0 0"; rm -f "$M/50-other.conf"
 run --undo; ok "undo removes only its file" "$rc $(test -e "$M/k114s-edr-cap.conf"; echo $?) $(cat "$M/aurora-m5-vrr.conf")" "0 1 options appledrm fw27_panel_vrr=0"
 run --undo; ok "undo with nothing installed says so" "$rc $(echo "$out" | grep -c 'nothing to undo')" "0 1"
 echo 'options appledrm fw27_panel_edr_max_nits=2000' > "$M/k114s-edr-cap.conf"; run --undo; ok "undo keeps a file this script did not install" "$rc $(test -e "$M/k114s-edr-cap.conf"; echo $?)" "1 0"; rm -f "$M/k114s-edr-cap.conf"
