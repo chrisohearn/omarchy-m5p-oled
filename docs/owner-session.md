@@ -22,14 +22,14 @@ Reboot items are only listed, marked FOLDED INTO TRIAL BOOTS: fold them into the
 
 ## Safety gates and session-ending steps
 
-- The power-button press (#70) is offered only if the power-key policy check passes, and both key captures (#43, #44) only if logind `HandleSuspendKey`, `HandleSuspendKeyLongPress` and `HandlePowerKey` are all `ignore`. The #44 capture also tells you not to press the moon key. Otherwise the step is skipped with the reason.
+- The power-button press (#70) is offered only if the power-key policy check passes, and both key captures (#43, #44) only if logind `HandleSuspendKey`, `HandleSuspendKeyLongPress`, `HandlePowerKey` and `HandlePowerKeyLongPress` are all `ignore`, Hyprland binds no `XF86Sleep` or suspend/hibernate action, and `hyprctl` answers. The #44 capture also tells you not to press the moon key. Otherwise the step is skipped with the reason.
 - Steps that end the desktop session (the CPU-rendered session in #7 and the Zink retry in #26) are listed after the summary is written, never run in the middle. The Zink retry points at `docs/vulkan-clients.md` "Owner step 2".
 - The summary file is rewritten after every step, and Ctrl-C or a hang-up writes it before exiting, so a killed session still leaves a summary.
 - Some target issues are closed. A pasted result may need the issue reopened or a comment on it.
 
 ## Log
 
-`~/.local/state/k114s-owner-session/session-<time>.log`, directory mode 0700, file mode 0600. Everything written (command output, your notes, the summary) is redacted: MAC and IP addresses, e-mails, serials, labelled network names (after SSID: or SSID=), UUIDs, long hashes, per-unit calibration file names, home paths, and the host and user names. Raw output only passes through a private temp file that is deleted on exit. Read the summary once before pasting it anyway.
+`~/.local/state/k114s-owner-session/session-<time>.log`, directory mode 0700, file mode 0600. Everything written (command output, your notes, the summary) is redacted: MAC and IP addresses, e-mails, serials, network names (after SSID, with or without a colon, and iwctl `Connected network`), serial fields (`Serial`, `iSerial`, `ID_SERIAL`), UUIDs, long hashes, per-unit calibration file names, home paths, and the host and user names. Raw output only passes through a private temp file that is deleted on exit. Leftover temp files from a killed session are deleted at the next start. Read the summary once before pasting it anyway.
 
 ## Self-test
 
