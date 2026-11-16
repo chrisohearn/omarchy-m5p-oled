@@ -9,7 +9,7 @@
 #   tests/hardware/k114s-avd-decode-test.sh                 h264 hevc vp9 at 1920x1080, 2 s
 #   tests/hardware/k114s-avd-decode-test.sh h264            one codec
 #   tests/hardware/k114s-avd-decode-test.sh --software-only prove the clip and md5 steps without the decoder (works on any boot)
-#   AVD_SIZE=1280x720 tests/hardware/k114s-avd-decode-test.sh   other sizes (above 1080p and 10-bit are untested upstream: #1936, #1995)
+#   AVD_SIZE=1280x720 tests/hardware/k114s-avd-decode-test.sh   other sizes (above 1080p and 10-bit are untested upstream: #1995; #1936, the ring-wrap fix, is merged but not in the installed base)
 # Exit: 0 every codec equal, 1 a mismatch or decode failure, 2 usage or a missing tool, 3 no decoder (SKIP).
 set -u
 size=${AVD_SIZE:-1920x1080}

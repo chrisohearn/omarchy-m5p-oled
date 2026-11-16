@@ -122,6 +122,11 @@ r=$(mk); d=$r/var/lib/pacman/local/omarchy-mac-1-1; mkdir -p "$d"
 echo "./usr/bin/omarchy-unowned time=1.0 size=2 sha256digest=$(printf 'a\n' | sha256sum | cut -c1-64)" | gzip > "$d/mtree"
 printf 'a\n' > "$r/usr/bin/omarchy-unowned"; out=$(inst "$r" "$foreign"); rc=$?
 ok "file of omarchy-mac: accepted and applied" "$rc:$(cat "$r/usr/bin/omarchy-unowned")" "0:b"
+# A sibling package whose name starts with omarchy-mac (omarchy-mac-boot) is not omarchy-mac: refused.
+r=$(mk); d=$r/var/lib/pacman/local/omarchy-mac-boot-20261104-1; mkdir -p "$d"
+echo "./usr/bin/omarchy-unowned time=1.0 size=2 sha256digest=$(printf 'a\n' | sha256sum | cut -c1-64)" | gzip > "$d/mtree"
+printf 'a\n' > "$r/usr/bin/omarchy-unowned"; out=$(inst "$r" "$foreign"); rc=$?
+ok "file of omarchy-mac-boot: refused (not matched by the omarchy-mac glob)" "$rc:$(cat "$r/usr/bin/omarchy-unowned")" "1:a"
 
 # Applied by the first version of this tool (no records): the next run adopts it, once.
 legacy() { local r; r=$(mk); inst "$r" >/dev/null; rm -f "$r"/usr/local/lib/omarchy-k114s/omarchy-patches/{*.applied,.records}; echo "$r"; }

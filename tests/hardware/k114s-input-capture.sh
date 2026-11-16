@@ -211,7 +211,9 @@ end=t0+secs
 while time.time()<end and fds:
     r,_,_=select.select(list(fds),[],[],0.2)
     for fd in r:
-        d=os.read(fd,24*64)
+        try: d=os.read(fd,24*64)
+        except OSError as e:   # ENODEV when the device resets or resumes mid-capture: keep the summary
+            print("%s went away mid-capture (%s); the summary covers what was read"%(fds[fd],e.strerror)); del fds[fd]; break
         if not d: del fds[fd]; break   # a regular file (test) ends; a device never does
         for i in range(0,len(d)-23,24):
             _,_,t,c,v=struct.unpack("@llHHi",d[i:i+24]); events+=1; dev=fds.get(fd,"")

@@ -75,7 +75,7 @@ plug back in, and confirm no `MISMATCH` line. The #1615 PR is still an open draf
 
 ## #56 why the profile is `performance`, and what it is on battery
 
-Source: `omarchy-powerprofiles-init`, `-set`, `-list`, `-floor` (omarchy-dev 4.0.0.r7859.g9ac0883; the installed omarchy-mac 0.2.3-2 ships only the charge-limit pieces).
+Source: `omarchy-powerprofiles-init`, `-set`, `-list`, `-floor` (omarchy-dev 4.0.0.r7906.g29fbc4e-1, as installed and checked with `pacman -Qo`; the installed omarchy-mac 0.2.3-2 ships only the charge-limit pieces).
 
 1. Hyprland autostart runs `omarchy-powerprofiles-init`, which is `omarchy-powerprofiles-set autodetect`.
    The shell battery service runs `omarchy-powerprofiles-set ac|battery` whenever UPower's

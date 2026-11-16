@@ -34,7 +34,7 @@ problem with gpu-next on Asahi; unverified on the M5).
    `bash tests/hardware/k114s-parity-check.sh avd` (node okay, `/dev/video*`, `/dev/media*`, driver, dmesg).
    If the module is not loaded, `sudo modprobe apple_avd` (check `modinfo` for the exact name first).
 3. `bash tests/hardware/k114s-avd-decode-test.sh` prints PASS per codec when hardware frames equal software
-   frames at 1080p. Optional: `AVD_SIZE=3024x1964 ...` for a size above 1080p (upstream: untested, #1936 ring wrap).
+   frames at 1080p. Optional: `AVD_SIZE=3024x1964 ...` for a size above 1080p (upstream: untested; the ring-wrap fix #1936 merged 2026-11-15 and is not in the installed base).
 4. Play one real H.264 or HEVC file in mpv and say whether it looks right and does not stutter.
 5. Report the outcome on #30. A pass moves the matrix row to "boot-tested"; only then is the AVD fragment a
    candidate for the default tree.
