@@ -14,17 +14,25 @@ while [ $# -gt 0 ]; do case $1 in
   *) echo "usage: k114s-mic-trial.sh [--secs N] [--dir DIR]" >&2; exit 2 ;; esac; done
 case $secs in ''|*[!0-9]*) echo "--secs needs a number" >&2; exit 2 ;; esac
 here=$(cd "$(dirname "$0")" && pwd); A=$here/k114s-mic-analyze.py
-for t in pw-record wpctl python3; do command -v $t >/dev/null || { echo "missing: $t" >&2; exit 2; }; done
+for t in pw-record arecord wpctl python3; do command -v $t >/dev/null || { echo "missing: $t" >&2; exit 2; }; done
 [ -d /proc/asound/AppleK114HPAI ] || { echo "BAD     no card AppleK114HPAI: this boot has no microphone card (wrong tree?)"; exit 1; }
 [ -n "$dir" ] || dir=$(mktemp -d "${TMPDIR:-/tmp}/k114s-mic.XXXXXX"); mkdir -p "$dir"
-raw=alsa_input.platform-sound.RawMics; mono=effect_output.k114-mic
+# The raw array is a hidden node: the mic graph's rule (82-k114-audio.conf, hide-parent = true) takes every
+# client's permission on it away, so pw-record cannot see or record it (agent-run 2026-11-17: "target not found",
+# no samples). The raw takes read the PCM itself instead; it is free while nothing records the microphone,
+# because PipeWire suspends it.
+raw=hw:AppleK114HPAI,0; mono=effect_output.k114-mic
 wpctl status 2>/dev/null | grep -q -E 'MacBook Microphone|k114' && echo "info    mono source present" || echo "info    mono source not listed in wpctl status (the raw takes still work)"
 take() { # name target channels prompt [silent-dbfs]
   printf '\n>>> %s\n    Recording %ss starts when you press Enter.\n' "$4" "$secs" >/dev/tty; read -r _ </dev/tty
-  # dont-fallback: a missing target must fail, not fall back to the mono default source (3 identical channels).
-  # AUX0..2 matches mic.json's capture.props, so channels map one to one onto the raw microphones.
-  local map=(); [ "$3" = 3 ] && map=(--channel-map AUX0,AUX1,AUX2)
-  timeout "$secs" pw-record --target "$2" -P '{ node.dont-fallback = true }' --rate 48000 --channels "$3" "${map[@]}" --format f32 "$dir/$1.wav" 2>"$dir/$1.err"
+  if [ "$3" = 3 ]; then
+    # the PCM directly: three channels in the order mic.json's capture stream sees them (AUX0..2)
+    timeout "$((secs + 3))" arecord -q -D "$2" -c 3 -r 48000 -f FLOAT_LE -d "$secs" "$dir/$1.wav" 2>"$dir/$1.err" ||
+      { echo "BAD     $1: arecord failed on $2 (busy? close any app using the microphone): $(head -c 200 "$dir/$1.err")"; return 1; }
+  else
+    # dont-fallback: a missing target must fail, not fall back to another source
+    timeout "$secs" pw-record --target "$2" -P '{ node.dont-fallback = true }' --rate 48000 --channels 1 --format f32 "$dir/$1.wav" 2>"$dir/$1.err"
+  fi
   [ -s "$dir/$1.wav" ] || { echo "BAD     $1: nothing recorded (target $2): $(head -c 200 "$dir/$1.err")"; return 1; }
   echo "== $1 ($2, $3 ch)"; python3 -I "$A" "$dir/$1.wav" --expect-channels "$3" --silent-dbfs "${5:--70}"
 }
@@ -36,5 +44,5 @@ take clapR   $raw  3 "Clap sharply, about once a second, near the RIGHT edge of 
 take mono    $mono 1 "Count aloud again; this is the mono source (what apps use)." || fail=1
 echo; echo "== summary: recordings are in $dir (delete them when done; they contain your voice)"
 [ $fail = 0 ] && echo "ok      all takes recorded" || echo "BAD     at least one take failed"
-echo "ASK     Play the mono take through HEADPHONES only (pw-play --volume 0.3 $dir/mono.wav): intelligible? level ok? noise?"
+echo "ASK     Judge the microphone by dictating (Superwhisper on the default input), or play the mono take through HEADPHONES only (pw-play --volume 0.3 $dir/mono.wav): intelligible? level ok? noise?"
 exit $fail

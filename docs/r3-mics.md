@@ -1,8 +1,9 @@
 # K114s built-in microphones: the sound trial tree (issue #38)
 
-Status, 2026-11-17: tree built and checked offline; Stage A user space installed on the Mac; one-boot trial
-not yet run. Evidence labels: **agent-run** (a command run on this Mac by the AI agent), **owner-observed**,
-**replica** (made-up input). Nothing has been recorded or heard yet.
+Status, 2026-11-17: **the built-in microphones work.** The sound tree booted as a one-boot trial, passed the
+speaker gates, recorded on all three microphones, and carried the owner's dictation. It is now the configured
+Stage 2. Evidence labels: **agent-run** (a command run on this Mac by the AI agent), **owner-observed**,
+**replica** (made-up input). Nothing was ever played.
 
 The owner picked the built-in microphones (#38, #39) for this round. The headphone jack (#37, #40) is out of
 scope. The jack codec still comes with the reviewed Stage A fragment, since the microphones were always
@@ -81,6 +82,43 @@ DSP pattern reads `effect_output\.[jk][0-9]+-mic` (agent-run).
 5. If all of that holds, promote the sound tree to the configured Stage 2 (`update-boot-ctxr`), as the Touch ID
    tree was promoted.
 
-## Results
+## Results (2026-11-17)
 
-Not run yet.
+**Trial boot.** Jarvis acknowledged the unattended one-boot trial for 04:30:00Z. The kernel started at 04:30:40Z
+through `m1n1/boot-ctxr-sound.bin` (`/proc/device-tree/chosen/aurora,trial`) on r3b.c4, and `aura-try` read
+`spent` afterwards (agent-run).
+
+| Check (in the trial boot) | Result | Label |
+| --- | --- | --- |
+| A0: `linux/audio/tree-check`, `/sound` compatible, `speaker-readiness.sh` | "the Stage A tree: jack link only, no amplifier, no speaker channel"; exactly `apple,k114-macaudio apple,macaudio`; exit 0 | agent-run |
+| A2: I2C devices at 0x38 to 0x3d; mixer controls; kernel log | none; no protection, unlock, sense or amplifier control; no speaker or amplifier line | agent-run |
+| A1: the cards | `AppleK114HPAI` (aop_audio, device 0 "Microphone Array") and `AppleK114` (macaudio, device 0 "Primary") | agent-run |
+| The coprocessors | "PMP firmware and endpoint ready", "PMP started", PMP report running; AOP RTKit up; both audio DMA controllers. The only new error-like line against the previous boot: the AOP's "crashlog endpoint not in the endpoint map" | agent-run |
+| Touch ID, WirePlumber | sensor node present, `aurora-sep` active; WirePlumber started behind its tree check | agent-run |
+| P9 | holds (then updated to the sound hashes after the promotion) | agent-run |
+
+**The microphones.**
+
+| Check | Result | Label |
+| --- | --- | --- |
+| Raw array, quiet room (`arecord -D hw:AppleK114HPAI,0`, 3 ch, 48 kHz, float) | three live channels, about -55 dBFS peak and -73 dBFS RMS, no clipping, correlation about 0.9 | agent-run |
+| Raw array with the owner: quiet, counting, claps left and right (two takes) | speech peaks about -43 dBFS raw; claps up to -3.7 dBFS on channel 2, no clipping. Channel 2 reads 3 to 4 dB louder for every sound. Channel 1 is 2 to 3 dB above channel 0 for left claps; right claps show no consistent side | agent-run, owner speaking |
+| Mono source `effect_output.k114-mic` (the default graph: equal mix, two gains of 8, high-pass, limiter) | quiet room -39 dBFS RMS; during dictation -20 dBFS peak, no clipping | agent-run |
+| Default input | "MacBook Microphone" (`omarchy_asahi_mic`, omarchy-mac's mapper with patch 0004), both channels equal by design; records | agent-run |
+| Dictation | the owner dictated with Superwhisper (cloud mode, its default input): "This is me using Superwhisper to reply to you." came out exactly | owner-observed |
+
+**Found on the hardware.**
+- The raw array cannot be recorded through PipeWire. The graph's rule (`82-k114-audio.conf`, `hide-parent = true`,
+  as on the J714) takes every ordinary client's permission on the raw node away, so `pw-record --target
+  alsa_input.platform-sound.RawMics` reports "target not found" and records nothing, and `wpctl` lists no source but
+  the processed ones. That is the intended design: apps use the processed source. `tests/hardware/k114s-mic-trial.sh`
+  now reads the PCM directly for its raw takes.
+- The array layout is still unknown. One sensitivity or position difference (channel 2) and a weak left-right
+  difference are not enough to steer a beamformer, so the default stays the equal mix and the beamformer stays opt-in.
+
+**Promotion.** From the trial boot the sound tree became the pinned tree, and `update-boot-ctxr` wrote
+`m1n1/boot-ctxr.bin` = `0990b168…`, the trial file byte for byte. The before-copies of the Touch ID files are in
+`/var/lib/k114s-recovery/mics/promote-before/` (root-only). The ESP has 110,444,544 bytes free.
+
+**Not tested here:** the headphone jack (out of the owner's scope, #37 and #40), suspend with the PMP and AOP
+running (suspend stays masked), the beamformer.
