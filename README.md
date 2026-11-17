@@ -29,7 +29,8 @@ on the Mac by the AI agent). States not yet on the Mac (*integrated*, *built*, *
 | Speakers | blocked upstream: no protection data for this model ([why](docs/r3-audio-protection.md)) |
 | USB-C data ports | in the booted device tree; both controllers bind to `dwc3-apple`, but no USB bus has appeared and no device has been plugged in yet (agent-run, re-checked on r3a 2026-11-15) |
 | Touch ID | working since 2026-11-16: the right index finger unlocks sudo, the lock screen and admin prompts (kernel r3b.c4; the Touch ID tree, and since 2026-11-17 the sound tree that carries it, in the Stage 2; [docs/r3-touchid.md](docs/r3-touchid.md)) |
-| Camera, touchscreen, video decode, SD reader, Thunderbolt, external displays | drafted or ADT-checked offline, never booted (see [docs/matrix.md](docs/matrix.md)) |
+| Hardware video decode | working since 2026-11-17: H.264, HEVC and VP9 on the Apple Video Decoder, used by mpv by default (owner-observed playback; [docs/r3-avd-decode.md](docs/r3-avd-decode.md)); the browser stays on software decode |
+| Camera, touchscreen, SD reader, Thunderbolt, external displays | drafted or ADT-checked offline, never booted (see [docs/matrix.md](docs/matrix.md)) |
 
 Per-subsystem detail, sources and next steps are in [docs/matrix.md](docs/matrix.md).
 

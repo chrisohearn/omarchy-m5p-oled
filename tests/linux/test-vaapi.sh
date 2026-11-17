@@ -15,6 +15,11 @@ K114S_ROOT=$R bash "$S" --install >/dev/null 2>&1 && [ -f "$dst" ] && ok "instal
 K114S_ROOT=$R bash "$S" --check >/dev/null 2>&1 && ok "check passes after install" || bad "check after install"
 echo "LIBVA_DRIVER_NAME=other" > "$dst"; K114S_ROOT=$R bash "$S" --check >/dev/null 2>&1 && bad "check passes on a changed file" || ok "check fails on a changed file"
 K114S_ROOT=$R bash "$S" --install >/dev/null 2>&1 && K114S_ROOT=$R bash "$S" --check >/dev/null 2>&1 && ok "install repairs a changed file" || bad "repair"
+# an override that cannot be removed (a read-only directory) must fail undo, not report success (#186); root ignores the mode
+if [ "$(id -u)" != 0 ]; then
+  chmod 555 "$(dirname "$dst")"; out=$(K114S_ROOT=$R bash "$S" --undo 2>&1); rc=$?; chmod 755 "$(dirname "$dst")"
+  [ $rc != 0 ] && [ -e "$dst" ] && grep -q 'cannot remove' <<<"$out" && ok "undo fails when the override cannot be removed" || bad "undo reported success with the override still present (rc $rc): $out"
+fi
 K114S_ROOT=$R bash "$S" --undo >/dev/null 2>&1 && [ ! -e "$dst" ] && ok "undo removes it" || bad "undo"
 K114S_ROOT=$R bash "$S" --bogus >/dev/null 2>&1 && bad "unknown flag accepted" || ok "unknown flag refused"
 echo "vaapi tests: $n passed, $nf failed"; exit $fail

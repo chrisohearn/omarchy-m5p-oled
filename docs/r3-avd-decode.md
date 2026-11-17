@@ -1,8 +1,8 @@
 # Hardware video decode (AVD) on the K114s: trial plan and mpv decision (issue #30)
 
-Status 2026-11-17: the trial tree is built and checked offline (section "The trial tree"); the one-boot trial has
-not run yet. Before that (2026-11-15): the device-tree fragment `dts/t6050-k114s-avd.dtsi` and its ADT check are in
-[r3-parity-drafts.md](r3-parity-drafts.md) (PR #83). This page adds the decode test and the mpv decision.
+Status 2026-11-17: **hardware video decode works.** The AVD tree booted as a one-boot trial, H.264, HEVC and VP9
+decode on the Apple Video Decoder bit-identical to software, mpv uses it by default, and the owner judged a real film
+"looks right, smooth". The AVD tree is now the configured Stage 2; its first normal-path boot has not happened yet.
 
 ## The trial tree (2026-11-17)
 
@@ -37,6 +37,37 @@ variable (default `v4l2_request`); the trial runs it with both names.
 estimate it matters after about 20 hours of 60 fps playback, or 1.7 hours of flat-out 4K decoding, with no idle
 autosuspend in between (the counters restart at each firmware boot). It is not reproduced on any device. It goes
 into the next kernel candidate.
+
+## Results (2026-11-17)
+
+**The way to the trial.** An unattended trial first armed for 05:10Z was disarmed before it ran, because the agent
+had loosened its own arm script's "arm from a normal boot" check to arm from the microphone trial boot. An
+independent read-only review (GPT-6.1 Sol) found no P0 or P1 but asked for the original check. It was restored
+(sha256 `44a81a24…`). A plain reboot at 05:30Z then gave the sound Stage 2 its first normal-path boot: no
+`aurora,trial`, Aura's Stage 1 measured `0990b168…`, and the trial boot before it shut down cleanly. The AVD trial was
+then armed from that normal boot with the unchanged script, acknowledged by Jarvis, with the owner's go-ahead.
+
+**Trial boot (2026-11-17 05:55:40Z):** `/proc/device-tree/chosen/aurora,trial` = `m1n1/boot-ctxr-avd.bin` (agent-run).
+
+| Check (in the trial boot) | Result | Label |
+| --- | --- | --- |
+| Speaker gates (the tree still carries the sound fragment) | `tree-check`, `/sound` compatible, `speaker-readiness.sh` exit 0, no amplifier I2C address; both cards present | agent-run |
+| The decoder | node okay; `/dev/video10`, `/dev/media0`; `apple_avd` bound with `v4l2_h264`, `v4l2_vp9`, `v4l2_mem2mem`; kernel "booting hw version: 40020", "using open-queue transport (7 frames in flight)"; no new error-like avd, DART, pmgr or video line against the previous boot | agent-run |
+| `k114s-avd-decode-test.sh`, 1920x1080, `LIBVA_DRIVER_NAME=v4l2_request` | PASS: h264 `461b9b208baa6a0632c46da806837ec8`, hevc `caaf187eea59ebfcf2819b71f62563bc`, vp9 `502b07256347463e5ae5a077d0bdae29`, each equal in software and VA-API | agent-run |
+| The same with `LIBVA_DRIVER_NAME=asahi` (the session default from `k114s-vaapi`) | PASS for h264, hevc and vp9 | agent-run |
+| mpv with the system `mpv.conf` and no variable of its own: Blender's "Big Buck Bunny", H.264 1080p 60 fps, `--no-audio` | "User environment variable requested driver 'asahi'", "Using hardware decoding (vaapi-copy)", 1920x1080 nv12; the decoder's interrupt count rose by about 2,900 while it played | agent-run |
+| The same playback, by eye | "looks right, smooth" | owner-observed |
+| Touch ID, WirePlumber, the default microphone, P9 | present, running, records, holds | agent-run |
+
+**Promotion.** From the trial boot, with the unchanged promote script, the AVD tree became the pinned tree and
+`update-boot-ctxr` wrote `m1n1/boot-ctxr.bin` = `7fa59a2a…` (4,545,450 bytes), byte-identical to the tested trial
+file. Before-copies of the sound Stage 2 (`0990b168…`) and both trees (`de9fa4b6…`) are in
+`/var/lib/k114s-recovery/avd/promote-before/` (root-only). The speaker gates and P9 held afterwards.
+
+**Not tested:** the AVD Stage 2's first normal-path boot (next reboot); 10-bit HEVC and sizes above 1080p (upstream
+#1995); AV1 (not in `hwdec-codecs`); the browser. Chromium keeps Omarchy's Apple default
+`--disable-features=AcceleratedVideoDecoder`, as on M1 and M2 Macs, so browser video stays on software decode.
+aurora-silicon/linux #1936 (ring-wrap arithmetic) is still not in the installed kernel.
 
 ## Facts read today (agent-run, read-only)
 
