@@ -39,6 +39,15 @@ run --undo >/dev/null 2>&1; mkdir -p "$X/usr/lib/modprobe.d"; echo 'options appl
 run; ok "a cap in a file masked by the same name in /etc does not block install" "$rc $(test -e "$M/k114s-edr-cap.conf"; echo $?)" "0 0"
 rm -f "$M/vendor.conf"; run --check; ok "unmasked, the same vendor file fails the check" "$rc" 1
 rm -f "$X/usr/lib/modprobe.d/vendor.conf"; run --undo >/dev/null 2>&1
+# #173: exact names, and directories mask nothing; a /dev/null symlink still masks
+echo 'options appledrm fw27_panel_edr_max_nits=1600' > "$X/usr/lib/modprobe.d/bar.conf"; echo '# other' > "$M/foo bar.conf"
+run; ok "a name with a space ('foo bar.conf') does not mask bar.conf" "$rc $(test -e "$M/k114s-edr-cap.conf"; echo $?)" "1 1"
+rm -f "$M/foo bar.conf" "$X/usr/lib/modprobe.d/bar.conf"
+mkdir -p "$M/dir.conf"; echo 'options appledrm fw27_panel_edr_max_nits=1600' > "$X/usr/lib/modprobe.d/dir.conf"
+run; ok "a directory named dir.conf in /etc does not mask the file dir.conf" "$rc $(test -e "$M/k114s-edr-cap.conf"; echo $?)" "1 1"
+rmdir "$M/dir.conf"; ln -s /dev/null "$M/dir.conf"
+run; ok "a /dev/null symlink of the same name still masks it" "$rc $(test -e "$M/k114s-edr-cap.conf"; echo $?)" "0 0"
+rm -f "$M/dir.conf" "$X/usr/lib/modprobe.d/dir.conf"; run --undo >/dev/null 2>&1
 printf 'apple,j714s\0' > "$BASE/other"; out=$(K114S_ROOT=$X K114S_DT_COMPATIBLE=$BASE/other bash "$TOOL" 2>&1); ok "install refuses a machine that is not an apple,k114s Mac" "$? $(test -e "$M/k114s-edr-cap.conf"; echo $?)" "1 1"
 run --bogus; ok "an unknown argument stops" "$rc" 1
 if [ "$(id -u)" != 0 ]; then

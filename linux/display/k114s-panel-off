@@ -32,6 +32,9 @@ case ${1:---install} in
     "$sc" --user daemon-reload || die "systemctl --user daemon-reload failed"
     "$sc" --user enable "$name" >/dev/null 2>&1 || die "cannot enable $name"
     "$sc" --user restart "$name" || die "cannot start $name (systemctl --user status $name)"
+    # an unmet ConditionEnvironment skips the start without a failure (#178): only a running unit is a success
+    [ "$("$sc" --user is-active "$name" 2>/dev/null)" = active ] ||
+      die "$name did not start: is the graphical session's environment (WAYLAND_DISPLAY) imported into systemd --user? (systemctl --user status $name)"
     echo "k114s-panel-off: installed ($conf, $unit); the panel turns off after 5 minutes idle" ;;
   --undo)
     "$sc" --user disable --now "$name" >/dev/null 2>&1
