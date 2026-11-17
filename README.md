@@ -28,7 +28,7 @@ on the Mac by the AI agent). States not yet on the Mac (*integrated*, *built*, *
 | Suspend and lid | blocked on purpose: r3a is booted and the GPU mailbox interrupt is proven (about 400/s), but the suspend targets stay masked; open are `sleep-lid/0010` (not in r3a), the PMP nodes and the first attended cycle |
 | Speakers | blocked upstream: no protection data for this model ([why](docs/r3-audio-protection.md)) |
 | USB-C data ports | in the booted device tree; both controllers bind to `dwc3-apple`, but no USB bus has appeared and no device has been plugged in yet (agent-run, re-checked on r3a 2026-11-15) |
-| Touch ID | working since 2026-11-16: the right index finger unlocks sudo and the lock screen (owner-tested; admin prompts are set up the same way, not yet tried) (kernel r3b.c4, the Touch ID tree in the Stage 2; [docs/r3-touchid.md](docs/r3-touchid.md)) |
+| Touch ID | working since 2026-11-16: the right index finger unlocks sudo, the lock screen and admin prompts (kernel r3b.c4, the Touch ID tree in the Stage 2; [docs/r3-touchid.md](docs/r3-touchid.md)) |
 | Camera, touchscreen, video decode, SD reader, Thunderbolt, external displays | drafted or ADT-checked offline, never booted (see [docs/matrix.md](docs/matrix.md)) |
 
 Per-subsystem detail, sources and next steps are in [docs/matrix.md](docs/matrix.md).

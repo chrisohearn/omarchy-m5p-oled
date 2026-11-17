@@ -1,8 +1,8 @@
 # Touch ID plan for the K114s (issue #49)
 
 Status: **working since 2026-11-16.** The right index finger is enrolled. It matches before and after a reboot,
-another finger is refused, and sudo and the lock screen accept it (owner-tested); polkit is configured the same way but
-no admin prompt has been tried yet (section "Phases 3 to 7: the result").
+another finger is refused (also after a reboot), and sudo, the lock screen (owner-tested) and admin prompts (polkit,
+journal-proved match) accept it (section "Phases 3 to 7: the result").
 Kernel r3b.c4; the Touch ID tree is the configured Stage 2 (`3cc123d8…`). Still open: the owner's check of
 macOS Touch ID and unlock at the next macOS boot, and the upstream profile line. The plan below was written
 2026-11-15 on the K114s (kernel `7.3.0-17.v272-4-k114s-r3a-ARCH`), owner away. Evidence labels: agent-run,
@@ -224,15 +224,18 @@ It prints the booted tree's state and the driver's profile list and writes nothi
 | Read-only load (`xart_writes=0 provision_keybag=0`) | profile `T6050/J714s, K116s, K114s`, warm bootstrap, 13 endpoints, key store open, hwrng; one APFS `.gl` extent with 11 valid records, `writes disabled`; no keybag; `aurora-touchid-setup --check` would build `mesacal-k114s.bin` and `msrk-k114s.bin`. The guard reads 0 here because the driver arms it only when writes are on (`sep.rs`, `Some(level) if store.writes_enabled()`) | agent-run |
 | Backups | the iBoot System Container imaged read-only (`zstd`, the partition's and the image's sha256 equal); a copy on omarchy-pc over a dedicated SSH key restricted to this Mac's tailnet address, the PC's host key pinned through T3; both hashes checked on the PC | agent-run |
 | Promotion | both pinned trees `3d4580e5…`; `update-boot-ctxr` wrote `m1n1/boot-ctxr.bin` `3cc123d8…`, the trial file byte for byte; the brightness files kept under `/var/lib/k114s-recovery/touchid/promote-before/` | agent-run |
-| Calibration | `aurora-touchid-setup` built `apple/mesacal-k114s.bin` and `apple/msrk-k114s.bin` from this Mac's factory data (the tree's `firmware-name` names were right) | agent-run |
-| Opt-in boot (`/etc/modprobe.d/aurora-sep-xart.conf`: `xart_writes=1 provision_keybag=1`; `aurora-sep.service` enabled) | `xART guard level 1: 9 session records exist, 0 created by Linux`; `writes ENABLED`; `sks: identity keybag provisioned`; trusted keys after 2 s; the sensor bound at 8 MHz, mode 2. The xART records were byte-identical to the trial boot's: creating the keybag wrote nothing to xART on this Mac | agent-run |
+| Calibration | `aurora-touchid-setup` built `apple/mesacal-k114s.bin` and `apple/msrk-k114s.bin` from this Mac's factory data (the tree's `firmware-name` names were right). The read-only `--check` before it reported both files "would install (missing)", exit 1 by design for a pending change; after the build `--check` reports both "in place (identical to the rebuild)", exit 0 (2026-11-17) | agent-run |
+| Opt-in boot (`/etc/modprobe.d/aurora-sep-xart.conf`: `xart_writes=1 provision_keybag=1`; `aurora-sep.service` enabled) | `xART guard level 1: 9 session records exist, 0 created by Linux`; `writes ENABLED`; `sks: identity keybag provisioned`; trusted keys after 2 s; the sensor bound at 8 MHz, mode 2. The xART record list (slot, kind, length, revision, CRC check) was identical to the trial boot's: creating the keybag rewrote no record on this Mac (payload bytes were not compared) | agent-run |
 | Enrolment, right index | `enroll-completed` (8 accepted touches, 2 retries); guard refusals 0 | agent-run, owner touched |
 | Matching | `verify-match` with the enrolled finger, `verify-no-match` with another | agent-run, owner touched |
-| xART after enrolment and matching | the 9 macOS-era session records (kind 4) unchanged; slot 6, a kind-1 shared root record, revision 722 to 750 (the roots are allowed at guard level 1, as `XART-SAFETY.md` describes) | agent-run |
+| xART after enrolment and matching | the 9 session records that predate Linux (8 of kind 4, 1 of kind 3) and the kind-2 record unchanged in slot, length and revision; slot 6, a kind-1 shared root record, revision 722 to 750 (the roots are allowed at guard level 1, as `XART-SAFETY.md` describes) | agent-run |
+| xART on 2026-11-17, after the restore boot, a later boot and three more matches | the same ten records still unchanged in slot, length and revision; the kind-1 root now in slot 8 at revision 759 (the store writes each update to a fresh slot). Payload bytes not compared: the inspector reports metadata and CRC validity only | agent-run |
 | Reboot | `Touch ID: restored 1 enrolled identity/identities; enrolment survived reboot`; `verify-match` again; refusals 0 | agent-run, owner touched |
 | sudo, polkit, lock screen | Omarchy's own `setup_pam_config` (`pam_fprintd` behind the `omarchy-hw-laptop-closed` gate) and `omarchy-apply-lock`; backups of `/etc/pam.d/sudo` first | agent-run |
 | The owner's test of sudo and the lock screen with the finger | "Both worked" | owner-observed |
-| polkit (admin dialogs) | configured as above; no admin prompt tried yet | agent-run (configuration only) |
+| polkit (admin dialogs), 2026-11-17 | `pkexec /usr/bin/true` authenticated in 3 s; the clamshell gate let the fingerprint step run (lid open); the kernel log has the match ("unlock policy after the match: satisfied true") | agent-run, owner touched |
+| Wrong finger after a reboot, 2026-11-17 (a later boot than the restore boot) | `verify-no-match`; "no enrolled finger matched the capture" | agent-run, owner touched |
+| Independent verification (GPT-6.1 Sol, read-only, 2026-11-17) | checks 1, 2, 4, 7 pass and 6 passes as owner-attested; it failed 3 (the pre-build `--check`) and could not verify 5 (no wrong finger after a reboot). Both gaps are closed by the rows above; a delta check follows | independent |
 
 Not done: macOS. On the next macOS boot the owner checks that Touch ID and unlock still work there (the shared root
 record changed). Undo, as root, in order: `sudo rm /etc/modprobe.d/aurora-sep-xart.conf`,
