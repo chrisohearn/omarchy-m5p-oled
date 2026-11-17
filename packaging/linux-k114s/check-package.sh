@@ -13,6 +13,7 @@
 #   - a brightness build (version ...r3b.b<N>, linux-k114s-r3b) carries the floor of patches/linux/brightness 0006 in appledrm
 #   - an HDR build (version ...r3b.c<N>) also carries the floor, and hdr 0001-0003: the Display P3 default and the 500-nit EDR cap
 #   - from r3b.c3, appledrm also has fw27_panel_vrr_min with its default of 24 (vrr 0001)
+#   - from r3b.c4, apple-sep admits the K114s to its T6050 profile (sep 0001, Touch ID)
 # usage: check-package.sh PACKAGE.pkg.tar.zst [OTHER-KERNEL-PACKAGE=linux-aurora] [Module.symvers]
 # Run it once per other kernel (linux-aurora, and linux-k114s for an r3b package): each must be installed.
 # The symbol check needs the build's Module.symvers (default $K114S_BUILD_ROOT/build/${K114S_CAND:-r3a}/Module.symvers); without it only plain depmod -a runs.
@@ -84,6 +85,13 @@ case $ver in
   *.c[3-9]*)
     if [ -n "$drm" ] && modinfo -F parm "$drm" | grep -q '^fw27_panel_vrr_min:.*(default: 24)'; then ok "version $ver: appledrm has fw27_panel_vrr_min, default 24 (vrr 0001)"
     else no "version $ver: appledrm lacks fw27_panel_vrr_min with default 24 (vrr 0001)"; fi ;;
+esac
+# From r3b.c4 (docs/r3-touchid.md) apple-sep's T6050 profile admits the K114s; without it the driver refuses this Mac.
+case $ver in
+  *.c[4-9]*)
+    sep=$(find "$m" -name apple-sep.ko | head -1)
+    if [ -n "$sep" ] && strings -a "$sep" | grep -q 'apple,k114s'; then ok "version $ver: apple-sep admits apple,k114s (sep 0001)"
+    else no "version $ver: apple-sep does not admit apple,k114s (sep 0001)"; fi ;;
 esac
 if [ $fail != 0 ]; then echo "check-package: FAILED"
 elif [ $skipped != 0 ]; then echo "check-package: all run checks passed; $skipped skipped ($other is not installed)"
