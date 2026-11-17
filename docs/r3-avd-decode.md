@@ -60,8 +60,8 @@ problem with gpu-next on Asahi; unverified on the M5).
 
 ## Owner steps (the boot trial is the owner's)
 
-1. Build a trial tree from the proven configuration P's `t6050-k114s-r3-gpu.dts` with `K114S_R3_AVD` defined (AVD
-   alone), with `build/make-stage2.sh`, in its own worktree. Boot it as one `aura-try` boot, with the checks of
+1. Build the trial tree `dts/t6050-k114s-r3b-avd.dts` (the configured sound tree plus the AVD fragment; section "The
+   trial tree") with `build/make-stage2.sh`, in its own worktree. Boot it as one `aura-try` boot, with the checks of
    [r3-display-plan.md](r3-display-plan.md) section 4.2 and the way back of 4.3. No standing `stage2-trial` re-arm
    exists (4.1 rule 3). Run it only before the display window opens (D1) or after it closes (4.4), never inside it.
    Its Stage 2 file counts against the two-trial-file ESP budget (G2).
@@ -70,7 +70,11 @@ problem with gpu-next on Asahi; unverified on the M5).
    If the module is not loaded, `sudo modprobe apple_avd` (check `modinfo` for the exact name first).
 3. `bash tests/hardware/k114s-avd-decode-test.sh` prints PASS per codec when hardware frames equal software
    frames at 1080p. Optional: `AVD_SIZE=3024x1964 ...` for a size above 1080p (upstream: untested; the ring-wrap fix #1936 merged 2026-11-15 and is not in the installed base).
-4. Play one real H.264 or HEVC file in mpv and say whether it looks right and does not stutter.
+4. Before any playback check, make VA-API find the decoder's driver: `sudo bash linux/media/k114s-vaapi`, then log out
+   and in (or reboot), and `bash linux/media/k114s-vaapi --check`. Without it `LIBVA_DRIVER_NAME` is unset, mpv finds
+   no VA-API driver and quietly decodes in software, so a playback check would pass without the decoder. (Installed on
+   this Mac 2026-11-17 before the trial boot.) Then play one real H.264 or HEVC file in mpv and say whether it looks
+   right and does not stutter; `mpv --msg-level=vd=v` prints `Using hardware decoding (vaapi-copy)` when the decoder is used.
 5. Report the outcome on #30. A pass moves the matrix row to "boot-tested"; only then is the AVD fragment a
    candidate for the default tree.
 

@@ -1,8 +1,8 @@
 #!/bin/bash
 # Software test of linux/media/k114s-vaapi in a fake root: install, check, undo, and the refusal without the driver.
 set -u
-here=$(cd "$(dirname "$0")/../.." && pwd); S=$here/linux/media/k114s-vaapi; fail=0; n=0
-ok() { echo "ok   $1"; n=$((n+1)); }; bad() { echo "FAIL $1"; fail=1; }
+here=$(cd "$(dirname "$0")/../.." && pwd); S=$here/linux/media/k114s-vaapi; fail=0; n=0; nf=0
+ok() { echo "ok   $1"; n=$((n+1)); }; bad() { echo "FAIL $1"; fail=1; nf=$((nf+1)); }
 R=$(mktemp -d); trap 'rm -rf "$R"' EXIT
 dst=$R/etc/environment.d/50-k114s-vaapi.conf
 out=$(K114S_ROOT=$R bash "$S" --install 2>&1); rc=$?
@@ -17,4 +17,4 @@ echo "LIBVA_DRIVER_NAME=other" > "$dst"; K114S_ROOT=$R bash "$S" --check >/dev/n
 K114S_ROOT=$R bash "$S" --install >/dev/null 2>&1 && K114S_ROOT=$R bash "$S" --check >/dev/null 2>&1 && ok "install repairs a changed file" || bad "repair"
 K114S_ROOT=$R bash "$S" --undo >/dev/null 2>&1 && [ ! -e "$dst" ] && ok "undo removes it" || bad "undo"
 K114S_ROOT=$R bash "$S" --bogus >/dev/null 2>&1 && bad "unknown flag accepted" || ok "unknown flag refused"
-echo "test-vaapi: $n ok"; exit $fail
+echo "vaapi tests: $n passed, $nf failed"; exit $fail
