@@ -49,10 +49,22 @@ left and right go to the previous and next workspace, and four fingers move the 
 deliberate choice upstream, so it was not reported as a bug. On this Mac the owner wants the macOS direction, where the
 desktop follows the fingers: a swipe left goes to the next workspace.
 
-`linux/input/k114s-mac-swipes` adds that as a marked block (`linux/input/mac-swipes.lua`) to the user's
-`~/.config/hypr/input.lua`, which loads after the defaults. The block unsets the four default left and right gestures, then
-sets them reversed. Like `k114s-dcp-colour`, it takes `--install` (the default), `--check` and `--undo`, and keeps a
-first-install backup. Install refuses while `input.lua` sets one of those gestures outside the block, because Hyprland
-rejects a second gesture on the same fingers and direction. Owner-observed after the install: the swipes go the right way,
-and `hyprctl configerrors` is empty (agent-run).
+Since 2026-11-16 that preference lives in the owner's own settings, which every one of the owner's Omarchy machines
+shares, as plain lines in `~/.config/hypr/input.lua`. This repo no longer installs it: the `linux/input/k114s-mac-swipes`
+installer and its marked block were retired the same day, after the block was removed from this Mac, so only one copy of
+each gesture is ever loaded (Hyprland rejects a second gesture on the same fingers and direction). Owner-observed while the
+installer ran: the swipes go the right way, and `hyprctl configerrors` was empty (agent-run).
 
+To get the same swipes on another K114s, add these lines to `~/.config/hypr/input.lua`, which loads after Omarchy's
+defaults. Each default is unset first:
+
+```lua
+for _, f in ipairs({ 3, 4 }) do
+  hl.gesture({ fingers = f, direction = "left", action = "unset" })
+  hl.gesture({ fingers = f, direction = "right", action = "unset" })
+end
+hl.gesture({ fingers = 3, direction = "left", action = function() hl.dispatch(hl.dsp.focus({ workspace = "r+1" })) end })
+hl.gesture({ fingers = 3, direction = "right", action = function() hl.dispatch(hl.dsp.focus({ workspace = "r-1" })) end })
+hl.gesture({ fingers = 4, direction = "left", action = function() hl.dispatch(hl.dsp.window.move({ workspace = "r+1" })) end })
+hl.gesture({ fingers = 4, direction = "right", action = function() hl.dispatch(hl.dsp.window.move({ workspace = "r-1" })) end })
+```

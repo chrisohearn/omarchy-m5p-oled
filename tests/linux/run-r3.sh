@@ -6,7 +6,7 @@
 T=$(cd "$(dirname "$0")" && pwd)
 status=0; total_pass=0; total_fail=0; skipped=0
 for f in "$T"/k114s-syntax.sh "$T"/test-r3-guard.sh "$T"/test-r3-recovery.sh "$T"/test-r3-check.sh "$T"/test-r3-release.sh "$T"/test-r3-install.sh "$T"/test-r3-pacman.sh "$T"/test-r3-pacman-sig.sh "$T"/test-runbook-stop.sh "$T"/test-esp-trim.sh \
-    "$T"/test-boot-once.sh "$T"/test-gpu-guard.sh "$T"/test-promotion-runbook.sh "$T"/test-sleep-gates.sh "$T"/test-display-trials-runbook.sh "$T"/test-display-d5-d9-runbook.sh "$T"/test-initramfs-no-appledrm.sh "$T"/test-dcp-colour.sh "$T"/test-greeter-colour.sh "$T"/test-cm-trial.sh "$T"/test-upower-percentage.sh "$T"/test-mac-swipes.sh "$T"/test-edr-cap.sh "$T"/../hardware/test-display-check.sh; do
+    "$T"/test-boot-once.sh "$T"/test-gpu-guard.sh "$T"/test-promotion-runbook.sh "$T"/test-sleep-gates.sh "$T"/test-display-trials-runbook.sh "$T"/test-display-d5-d9-runbook.sh "$T"/test-initramfs-no-appledrm.sh "$T"/test-dcp-colour.sh "$T"/test-greeter-colour.sh "$T"/test-cm-trial.sh "$T"/test-upower-percentage.sh "$T"/test-edr-cap.sh "$T"/../hardware/test-display-check.sh; do
   [ -f "$f" ] || continue
   # the r3a-trial tests take the path of their one file, not LINUX_DIR
   case ${f##*/} in
