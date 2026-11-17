@@ -1,0 +1,42 @@
+#!/bin/bash
+# Turn the K114s OLED off after idle (issue #22): hypridle with k114s-panel-off.conf, as the user unit k114s-panel-off.service.
+#   usage: k114s-panel-off [--install | --undo | --check]       (default --install; user session, no sudo)
+# Needs the hypridle package (Arch extra). Installs the config to ~/.config/hypr/k114s-panel-off.conf and the unit to
+# ~/.config/systemd/user/, then enables and (re)starts it. Omarchy's own idle, screensaver and lock settings are untouched.
+#   Environment (tests): K114S_CONFIG_DIR (default ~/.config), K114S_SYSTEMCTL (default systemctl), K114S_HYPRIDLE
+#   (default /usr/bin/hypridle).
+set -u
+here=$(cd "$(dirname "$0")" && pwd)
+cfg=${K114S_CONFIG_DIR:-$HOME/.config}; sc=${K114S_SYSTEMCTL:-systemctl}; hi=${K114S_HYPRIDLE:-/usr/bin/hypridle}
+conf_src=$here/k114s-panel-off.conf; unit_src=$here/k114s-panel-off.service
+conf=$cfg/hypr/k114s-panel-off.conf; unit=$cfg/systemd/user/k114s-panel-off.service; name=k114s-panel-off.service
+die() { echo "k114s-panel-off: $*" >&2; exit 1; }
+[ -s "$conf_src" ] && [ -s "$unit_src" ] || die "no $conf_src or $unit_src"
+same() { [ -f "$2" ] && cmp -s "$1" "$2"; }
+put() { # put SRC DEST: atomic copy, mode 644
+  mkdir -p "$(dirname "$2")" || die "cannot create $(dirname "$2")"
+  local t; t=$(mktemp "$2.XXXXXX") || die "cannot stage $2"
+  cp "$1" "$t" && chmod 644 "$t" && mv "$t" "$2" || { rm -f "$t"; die "cannot write $2"; }
+}
+case ${1:---install} in
+  --check)
+    [ -x "$hi" ] || die "hypridle is not installed ($hi): sudo pacman -S hypridle"
+    same "$conf_src" "$conf" || die "$conf is missing or differs from the repository's: bash $0"
+    same "$unit_src" "$unit" || die "$unit is missing or differs from the repository's: bash $0"
+    [ "$("$sc" --user is-enabled "$name" 2>/dev/null)" = enabled ] || die "$name is not enabled: bash $0"
+    [ "$("$sc" --user is-active "$name" 2>/dev/null)" = active ] || die "$name is not running: systemctl --user status $name"
+    echo "k114s-panel-off: installed and running ($conf)" ;;
+  --install)
+    [ -x "$hi" ] || die "hypridle is not installed ($hi): sudo pacman -S hypridle; nothing was changed"
+    put "$conf_src" "$conf"; put "$unit_src" "$unit"
+    "$sc" --user daemon-reload || die "systemctl --user daemon-reload failed"
+    "$sc" --user enable "$name" >/dev/null 2>&1 || die "cannot enable $name"
+    "$sc" --user restart "$name" || die "cannot start $name (systemctl --user status $name)"
+    echo "k114s-panel-off: installed ($conf, $unit); the panel turns off after 5 minutes idle" ;;
+  --undo)
+    "$sc" --user disable --now "$name" >/dev/null 2>&1
+    rm -f "$conf" "$unit"
+    "$sc" --user daemon-reload >/dev/null 2>&1
+    echo "k114s-panel-off: removed ($conf, $unit)" ;;
+  *) die "usage: k114s-panel-off [--install | --undo | --check]" ;;
+esac
