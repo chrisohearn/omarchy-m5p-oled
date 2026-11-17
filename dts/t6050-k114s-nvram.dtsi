@@ -1,0 +1,50 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s (MacBook Pro 14-inch OLED, M5 Pro, Mac17,13): the boot NOR and its NVRAM partition, for
+ * asahi-bless and the "Restart into macOS once" menu row (issue #64, docs/platform-audit.md).
+ *
+ * ADT (this Mac, macOS 27.2 26B8125): /arm-io/qspi (qspi,qspimc) has one child, spinor (chip select
+ * 0), with the child anvram (nvram,nor): reg 0x700000, 0xc0000, 12 banks of 64 KiB
+ * (nvram-bank-count 12, nvram-bank-size 0x10000). The controller node, its clock and power state
+ * come from t6050-die0.dtsi.
+ *
+ * Copied from rolotrealanis98/m5pro-linux contrib/pending/nvram 0001 (Rolando Trevino, the J716s
+ * node, itself after t6050-j775d.dts): the partition's reg is static, so no loader fill-in is
+ * needed. Only the partition is described (no MTD_PARTITIONED_MASTER), so the rest of the NOR
+ * (iBoot, syscfg) has no device node. spi-apple-qspi reads freely and refuses every program and
+ * erase unless its K114s board row qualifies the flash's JEDEC ID and root clears the read_only
+ * module parameter. Single-wire, as on the J775D and J713: spi-nor then sends no quad-enable
+ * status write at probe.
+ *
+ * Nothing here is enabled unless the including tree defines K114S_R3_NVRAM.
+ */
+#ifdef K114S_R3_NVRAM
+/ {
+	aliases {
+		nvram = &nvram;
+	};
+};
+
+&qspi {
+	status = "okay";
+
+	flash@0 {
+		compatible = "jedec,spi-nor";
+		reg = <0>;
+		spi-max-frequency = <25000000>;
+		spi-rx-bus-width = <1>;
+		spi-tx-bus-width = <1>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			nvram: partition@700000 {
+				label = "nvram";
+				reg = <0x700000 0xc0000>;
+			};
+		};
+	};
+};
+#endif

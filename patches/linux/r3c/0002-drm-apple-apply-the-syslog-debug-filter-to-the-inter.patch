@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <address-in-upstream-commit@localhost>
+Date: Wed, 11 Nov 2026 11:51:39 -0700
+Subject: [PATCH] drm/apple: apply the syslog debug filter to the internal
+ panel's DCP too
+
+The filter that demotes known-benign firmware syslog records was only in
+the external H17P RTKit ops, so the TAOC fallback record still logged once
+a second on the internal panel.
+
+The apple-dcp host test's syslog check expects the hook on both RTKit
+ops now.
+
+Signed-off-by: Jens Axboe <address-in-upstream-commit@localhost>
+[thomas: update the apple-dcp host test to the new policy]
+Signed-off-by: Thomas Glanzmann <address-in-upstream-commit@localhost>
+(cherry picked from commit 8847a289036a656b360475b334d77db3ad0b879e)
+[k114s: aurora-silicon/linux pull request 1646 (open, head 907bb7ec5990), commit 2 of 3. Tested upstream on a K116s; not booted on a K114s]
+
+(r3c: re-cut on integration/aurora 677be395, where dcp.c gained link_report_rtkit_ops between rtkit_ops and the helper; the internal panel's rtkit_ops takes the filter, link_report_rtkit_ops is left as upstream has it.)
+---
+ drivers/gpu/drm/apple/dcp.c                           | 11 ++++++-----
+ tools/testing/selftests/drivers/gpu/apple-dcp/boot.py |  7 ++++---
+ 2 files changed, 10 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/gpu/drm/apple/dcp.c b/drivers/gpu/drm/apple/dcp.c
+index 45972f18a3..911f4a7154 100644
+--- a/drivers/gpu/drm/apple/dcp.c
++++ b/drivers/gpu/drm/apple/dcp.c
+@@ -1861,7 +1861,13 @@ static bool dcp_rtk_syslog_mode_set(void *cookie, const char *context, const cha
+ 	return false;
+ }
+ 
++static bool dcp_rtk_syslog_is_debug(void *cookie, const char *context, const char *message)
++{
++	return dcp_h17p_syslog_is_debug(context, message);
++}
++
+ static struct apple_rtkit_ops rtkit_ops = {
++	.syslog_is_debug = dcp_rtk_syslog_is_debug,
+ 	.crashed = dcp_rtk_crashed,
+ 	.recv_message = dcp_recv_msg,
+ 	.shmem_setup = dcp_rtk_shmem_setup,
+@@ -1877,11 +1883,6 @@ static const struct apple_rtkit_ops link_report_rtkit_ops = {
+ 	.shmem_destroy = dcp_rtk_shmem_destroy,
+ };
+ 
+-static bool dcp_rtk_syslog_is_debug(void *cookie, const char *context, const char *message)
+-{
+-	return dcp_h17p_syslog_is_debug(context, message);
+-}
+-
+ static const struct apple_rtkit_ops external_h17p_rtkit_ops = {
+ 	.flags = APPLE_RTKIT_COPROC_PLACES_BUFFERS,
+ 	.syslog_is_debug = dcp_rtk_syslog_is_debug,
+diff --git a/tools/testing/selftests/drivers/gpu/apple-dcp/boot.py b/tools/testing/selftests/drivers/gpu/apple-dcp/boot.py
+index e634c2f04e..666f756e4f 100644
+--- a/tools/testing/selftests/drivers/gpu/apple-dcp/boot.py
++++ b/tools/testing/selftests/drivers/gpu/apple-dcp/boot.py
+@@ -97,9 +97,10 @@ def syslog(root):
+     dcp = (root / 'drivers/gpu/drm/apple/dcp.c').read_text()
+     header = (root / 'drivers/gpu/drm/apple/dcp-syslog.h').read_text()
+     helper = header[header.index('static inline bool'):header.index('\n#endif')]
+-    # The policy belongs only to the external H17P transport. Other RTKit
+-    # clients, including the panel and older DCP firmware, keep info logging.
+-    assert '.syslog_is_debug' not in block(dcp, 'static struct apple_rtkit_ops rtkit_ops =')
++    # The policy covers both DCP transports, the internal panel's and the
++    # external H17P one. It demotes only the known records it matches, so other
++    # records, other firmware and other RTKit clients keep info logging.
++    assert '.syslog_is_debug = dcp_rtk_syslog_is_debug' in block(dcp, 'static struct apple_rtkit_ops rtkit_ops =')
+     assert '.syslog_is_debug = dcp_rtk_syslog_is_debug' in block(dcp, 'static const struct apple_rtkit_ops external_h17p_rtkit_ops =')
+     return r'''
+ #include <assert.h>
+-- 
+2.56.1
+

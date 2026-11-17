@@ -1,0 +1,261 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 09:53:04 +0000
+Subject: [PATCH] soc: apple: aop: Send the 14-inch M5 Max sensor its 193-byte
+ calibration
+
+The 14-inch M5 Max firmware asks for a setup buffer on the ALS endpoint
+(0x21) and does not start the sensor until that endpoint has had its
+calibration. The driver only took T8140's 80-byte message, and the board
+named no calibration file, so the step was skipped ("the sensor stays
+off") and every illuminance read returned ENODATA.
+
+On that board the firmware accepts a 216-byte message instead: the
+operation code, the blob length 193, the sensor's 193-byte blob and
+zeros, answered with status 0. 56-byte bodies and a zero length were
+rejected with 0xc2. Build that message from the 193-byte file
+(als_calibration_message, a pure function) and name the file in the
+K114c device tree only: the M5 Pro firmware never asks for the endpoint.
+
+Test: tools/asahi/aop-als-calibration-tests.py checks the 80-byte
+pass-through, the 216-byte layout and the refused sizes; fourteen mutants
+of the builder are killed. On a 14-inch M5 Max booted with the driver change and the same
+firmware-name property in its device tree (a hand-built board DTB, not the
+tree's t6050-k114c.dtb), in_illuminance_input read 12.2 to 12.8 lux for
+36 seconds with no ENODATA and no warning-level aop lines.
+
+Signed-off-by: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+(cherry picked from commit 242ce586c508bcdccc2a7031f02a72ca661e22f3)
+---
+ .../bindings/iio/light/apple,aop-als.yaml     |  4 +
+ arch/arm64/boot/dts/apple/t6050-k114c.dts     |  9 ++
+ drivers/soc/apple/aop.rs                      | 40 ++++++--
+ tools/asahi/aop-als-calibration-tests.py      | 96 +++++++++++++++++++
+ tools/asahi/run-host-tests.py                 |  1 +
+ 5 files changed, 141 insertions(+), 9 deletions(-)
+ create mode 100755 tools/asahi/aop-als-calibration-tests.py
+
+diff --git a/Documentation/devicetree/bindings/iio/light/apple,aop-als.yaml b/Documentation/devicetree/bindings/iio/light/apple,aop-als.yaml
+index f714c1c7e1..d267fc0f77 100644
+--- a/Documentation/devicetree/bindings/iio/light/apple,aop-als.yaml
++++ b/Documentation/devicetree/bindings/iio/light/apple,aop-als.yaml
+@@ -34,6 +34,10 @@ properties:
+           - apple,t8112-aop-als
+       - const: apple,aop-als
+ 
++  firmware-name:
++    maxItems: 1
++    description: Calibration file the driver sends the sensor over the AOP setup port.
++
+ required:
+   - compatible
+ 
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114c.dts b/arch/arm64/boot/dts/apple/t6050-k114c.dts
+index 13ea865ba5..ed0f3eb2e5 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k114c.dts
+@@ -311,6 +311,15 @@ &aop {
+ 	status = "okay";
+ };
+ 
++/*
++ * This board's AOP firmware asks for the sensor's setup buffer and starts the sensor only once the
++ * setup port has had its calibration: the 193-byte blob the driver sends again as the sensor's
++ * property later. Boards whose firmware never asks (the 14-inch M5 Pro) must not name one.
++ */
++&aop_als {
++	firmware-name = "apple/aop-als-cal.bin";
++};
++
+ /*
+  * The microphone array: ADT audio-hp-mic, three microphones on leap-s RX0 through the
+  * proxy ADMAC (Linux channel 1, as on J813), captured by the AOP audio service's own card.
+diff --git a/drivers/soc/apple/aop.rs b/drivers/soc/apple/aop.rs
+index 3df2214e6d..188ee5971c 100644
+--- a/drivers/soc/apple/aop.rs
++++ b/drivers/soc/apple/aop.rs
+@@ -211,6 +211,9 @@
+ const ALS_CALIBRATION_LEN: usize = 80;
+ const ALS_CALIBRATION_OPERATION: u64 = 0x0746_b8d6_6515_2e31;
+ const ALS_CALIBRATION_BODY_LEN: u64 = 56;
++/// The VD6286's calibration blob and the message that carries it (see `als_calibration_message`).
++const ALS_SENSOR_BLOB_LEN: usize = 193;
++const ALS_SENSOR_MESSAGE_LEN: usize = 216;
+ 
+ mod aop_ring;
+ 
+@@ -263,6 +266,28 @@ fn le_u64(b: &[u8], off: usize) -> u64 {
+     u64::from(le_u32(b, off)) | u64::from(le_u32(b, off + 4)) << 32
+ }
+ 
++/// The calibration file as the message the firmware takes on the ALS endpoint. T8140's file is
++/// that 80-byte message already. The 14-inch M5 Max's sensor takes the 193-byte blob its
++/// firmware keeps for the VD6286 in a longer one: the operation code, the blob's length, the
++/// blob and zeros, 216 bytes in all. Returns the message and its length.
++fn als_calibration_message(data: &[u8]) -> Option<([u8; ALS_SENSOR_MESSAGE_LEN], usize)> {
++    let mut message = [0u8; ALS_SENSOR_MESSAGE_LEN];
++    if data.len() == ALS_CALIBRATION_LEN
++        && le_u64(data, 0) == ALS_CALIBRATION_OPERATION
++        && le_u64(data, 8) == ALS_CALIBRATION_BODY_LEN
++    {
++        message[..ALS_CALIBRATION_LEN].copy_from_slice(data);
++        Some((message, ALS_CALIBRATION_LEN))
++    } else if data.len() == ALS_SENSOR_BLOB_LEN {
++        message[..8].copy_from_slice(&ALS_CALIBRATION_OPERATION.to_le_bytes());
++        message[8..16].copy_from_slice(&(ALS_SENSOR_BLOB_LEN as u64).to_le_bytes());
++        message[16..16 + ALS_SENSOR_BLOB_LEN].copy_from_slice(data);
++        Some((message, ALS_SENSOR_MESSAGE_LEN))
++    } else {
++        None
++    }
++}
++
+ #[inline(always)]
+ fn mem_sync() {
+     // SAFETY: a full-system barrier touches no memory or registers of ours.
+@@ -2761,22 +2786,19 @@ fn setup_als_calibration(&self) -> Result<()> {
+                 return Ok(());
+             }
+         };
+-        let data = calibration.data();
+-        if data.len() != ALS_CALIBRATION_LEN
+-            || le_u64(data, 0) != ALS_CALIBRATION_OPERATION
+-            || le_u64(data, 8) != ALS_CALIBRATION_BODY_LEN
+-        {
++        let Some((message, message_len)) = als_calibration_message(calibration.data()) else {
+             dev_err!(
+                 self.dev,
+-                "ALS calibration {:?} is not an {}-byte calibration message",
++                "ALS calibration {:?} is neither an {}-byte calibration message nor a {}-byte sensor blob",
+                 &*name,
+-                ALS_CALIBRATION_LEN
++                ALS_CALIBRATION_LEN,
++                ALS_SENSOR_BLOB_LEN
+             );
+             return Err(EINVAL);
+-        }
++        };
+         let status = self.setup_request(
+             SETUP_ALS_EP,
+-            data,
++            &message[..message_len],
+             &[SETUP_REPLY_READY, SETUP_REPLY_READY_ALT],
+         )?;
+         if status != 0 {
+diff --git a/tools/asahi/aop-als-calibration-tests.py b/tools/asahi/aop-als-calibration-tests.py
+new file mode 100755
+index 0000000000..a09704a162
+--- /dev/null
++++ b/tools/asahi/aop-als-calibration-tests.py
+@@ -0,0 +1,96 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-only OR MIT
++"""Exercise the production ALS calibration message builder: the 80-byte message and the 193-byte sensor blob."""
++from pathlib import Path
++import subprocess
++import tempfile
++
++ROOT = Path(__file__).resolve().parents[2]
++
++
++def source():
++    aop = (ROOT / 'drivers/soc/apple/aop.rs').read_text()
++    consts = '\n'.join(line for line in aop.splitlines() if line.startswith('const ALS_'))
++    readers = aop[aop.index('fn le_u32('):aop.index('/// The calibration file as the message')]
++    start = aop.index('fn als_calibration_message(')
++    builder = aop[start:aop.index('\n}\n', start) + 3]
++    return consts + '\n' + readers + builder + TESTS
++
++
++TESTS = r'''
++fn op_message(len: usize) -> Vec<u8> {
++    let mut m = vec![0x5au8; len];
++    m[..8].copy_from_slice(&0x0746_b8d6_6515_2e31u64.to_le_bytes());
++    m[8..16].copy_from_slice(&56u64.to_le_bytes());
++    m
++}
++
++#[test]
++fn t8140_message_passes_through() {
++    let m = op_message(80);
++    let (out, len) = als_calibration_message(&m).unwrap();
++    assert_eq!(len, 80);
++    assert_eq!(&out[..80], &m[..]);
++}
++
++#[test]
++fn t8140_message_with_wrong_op_or_body_length_is_refused() {
++    let mut m = op_message(80);
++    m[0] ^= 1;
++    assert!(als_calibration_message(&m).is_none());
++    let mut m = op_message(80);
++    m[8] = 57;
++    assert!(als_calibration_message(&m).is_none());
++}
++
++#[test]
++fn sensor_blob_is_framed_in_216_bytes() {
++    let blob: Vec<u8> = (0..193u32).map(|i| (i as u8) | 1).collect();
++    let (out, len) = als_calibration_message(&blob).unwrap();
++    assert_eq!(len, 216);
++    assert_eq!(le_u64(&out, 0), 0x0746_b8d6_6515_2e31);
++    assert_eq!(le_u64(&out, 8), 193);
++    assert_eq!(&out[16..209], &blob[..]);
++    assert!(out[209..216].iter().all(|b| *b == 0));
++}
++
++#[test]
++fn other_sizes_are_refused() {
++    for n in [0usize, 1, 56, 79, 81, 192, 194, 216, 4096] {
++        let m = vec![0u8; n];
++        assert!(als_calibration_message(&m).is_none(), "{n}");
++    }
++}
++'''
++
++
++def main():
++    code = source()
++    mutations = {
++        'blob-length-field': ('(ALS_SENSOR_BLOB_LEN as u64).to_le_bytes()', '56u64.to_le_bytes()'),
++        'blob-offset': ('message[16..16 + ALS_SENSOR_BLOB_LEN]', 'message[15..15 + ALS_SENSOR_BLOB_LEN]'),
++        'frame-length': ('Some((message, ALS_SENSOR_MESSAGE_LEN))', 'Some((message, ALS_SENSOR_BLOB_LEN + 16))'),
++        'op-unchecked': ('le_u64(data, 0) == ALS_CALIBRATION_OPERATION', 'true'),
++        'body-unchecked': ('le_u64(data, 8) == ALS_CALIBRATION_BODY_LEN', 'true'),
++        'blob-size-loose': ('data.len() == ALS_SENSOR_BLOB_LEN', 'data.len() >= ALS_SENSOR_BLOB_LEN'),
++    }
++    with tempfile.TemporaryDirectory(prefix='aop-als-cal-') as directory:
++        directory = Path(directory)
++        for name, text in [('production', code)] + [
++                (name, code.replace(old, new)) for name, (old, new) in mutations.items()]:
++            assert text != code or name == 'production', name
++            path = directory / 'cal.rs'
++            path.write_text(text)
++            binary = directory / 'cal'
++            subprocess.run(['rustc', '--edition=2021', '--test', '-Adead_code', str(path), '-o', str(binary)], check=True)
++            result = subprocess.run([str(binary)], text=True, capture_output=True)
++            if name == 'production':
++                print(result.stdout)
++                assert result.returncode == 0, result.stdout + result.stderr
++            else:
++                assert result.returncode == 101 and 'panicked at' in result.stdout + result.stderr, (name, result)
++                print('killed:', name)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tools/asahi/run-host-tests.py b/tools/asahi/run-host-tests.py
+index 0cfb923dbc..51f57ab078 100755
+--- a/tools/asahi/run-host-tests.py
++++ b/tools/asahi/run-host-tests.py
+@@ -69,6 +69,7 @@ ASAHI_TESTS = {
+     'test-m3-mailbox.py': [([], PASS)],
+     'test-j613-dcp-power.py': [([], PASS)],
+     'aop-als-channel-tests.py': [([], PASS)],
++    'aop-als-calibration-tests.py': [([], PASS)],
+     'aop-bootargs-tests.py': [([], PASS)],
+     'mtp-pm-tests.py': [(out(), PASS),
+                          (out() + ['--old-transport', '4db3a5a22c43'], PASS)],
+-- 
+2.56.1
+

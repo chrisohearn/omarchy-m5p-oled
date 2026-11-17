@@ -41,10 +41,11 @@ info() { sed -n "s/^$1 = //p" "$w/.PKGINFO"; }
 case $rel in
   *-k114s-r3b-ARCH) want=linux-k114s-r3b ;;
   *-k114s-r3a-ARCH) want=linux-k114s ;;
+  *-k114s-r3c-ARCH) want=linux-k114s ;;   # r3c takes the r3a slot (docs/r3c-kernel.md)
   *) want= ;;
 esac
 name=$(info pkgname); base=$(info pkgbase)
-[ -n "$want" ] && [ "$name" = "$want" ] && ok "package name $name fits release $rel" || no "package name '$name' for release $rel (want '${want:-a k114s r3a or r3b release}')"
+[ -n "$want" ] && [ "$name" = "$want" ] && ok "package name $name fits release $rel" || no "package name '$name' for release $rel (want '${want:-a k114s r3a, r3b or r3c release}')"
 [ "$base" = "$name" ] && ok "pkgbase $base equals the package name" || no "pkgbase '$base' is not the package name '$name'"
 [ "$(cat "$m/pkgbase" 2>/dev/null)" = "$name" ] && ok "module directory pkgbase file is $name" || no "module directory pkgbase file is '$(cat "$m/pkgbase" 2>/dev/null)', not '$name'"
 [ -f "$w/usr/share/$name/config-$rel" ] && [ "$(ls "$w/usr/share")" = "$name" ] && ok "config at usr/share/$name/config-$rel" || no "config not (only) at usr/share/$name/config-$rel"
@@ -69,29 +70,48 @@ strings -a "$m/vmlinuz" | grep -q "Linux version $rel " && ok "vmlinuz banner na
 ver=$(info pkgver); drm=$(find "$m" -name appledrm.ko | head -1)
 if [ -n "$drm" ] && strings -a "$drm" | grep -q 'brightness requests below %u nits are raised to %u nits'; then floor=yes; else floor=no; fi
 case $ver in
-  *.b[0-9]*|*.c[0-9]*) [ $floor = yes ] && ok "version $ver: appledrm carries the brightness floor (brightness 0006)" || no "version $ver: appledrm lacks the brightness floor (brightness 0006)" ;;
+  *.b[0-9]*|*.c[0-9]*|*.r3c*) [ $floor = yes ] && ok "version $ver: appledrm carries the brightness floor (brightness 0006)" || no "version $ver: appledrm lacks the brightness floor (brightness 0006)" ;;
   *) echo "info version $ver: appledrm brightness floor $floor" ;;
 esac
-# The HDR build (version ...r3b.c<N>, docs/r3-hdr.md) must carry the Display P3 default and the EDR cap at 500 nits.
+# The HDR build (version ...r3b.c<N>, docs/r3-hdr.md) must carry the Display P3 default and the EDR cap at 500 nits;
+# r3c (docs/r3c-kernel.md) carries the same series.
 case $ver in
-  *.c[0-9]*)
+  *.c[0-9]*|*.r3c*)
     if [ -n "$drm" ] && strings -a "$drm" | grep -q 'EDID primaries default to Display P3'; then ok "version $ver: appledrm carries the Display P3 default (hdr 0001)"
     else no "version $ver: appledrm lacks the Display P3 default (hdr 0001)"; fi
     if [ -n "$drm" ] && modinfo -F parm "$drm" | grep -q '^fw27_panel_edr_max_nits:.*(default: 500)'; then ok "version $ver: appledrm caps panel EDR at 500 nits by default (hdr 0002, 0003)"
     else no "version $ver: appledrm lacks the 500-nit EDR cap (hdr 0002, 0003)"; fi ;;
 esac
-# From r3b.c3 (docs/r3-vrr.md) appledrm also has the VRR minimum parameter, at the old 24 Hz by default.
+# From r3b.c3 (docs/r3-hdr.md, hdr 0004) appledrm offers no EDR when a cap is set and the SDR maximum is unknown; r3c too.
+case $ver in
+  *.c[3-9]*|*.r3c*)
+    if [ -n "$drm" ] && strings -a "$drm" | grep -q 'panel EDR off: cap %u nits set and the SDR maximum is unknown'; then ok "version $ver: appledrm turns EDR off for a cap with an unknown SDR maximum (hdr 0004)"
+    else no "version $ver: appledrm lacks the unknown-SDR EDR guard (hdr 0004)"; fi ;;
+esac
+# From r3b.c3 (docs/r3-vrr.md) appledrm also has the VRR minimum parameter, at the old 24 Hz by default. r3c drops it
+# on purpose (docs/r3c-kernel.md): nothing sets it and panel VRR is blocked, so r3c is not matched here.
 case $ver in
   *.c[3-9]*)
     if [ -n "$drm" ] && modinfo -F parm "$drm" | grep -q '^fw27_panel_vrr_min:.*(default: 24)'; then ok "version $ver: appledrm has fw27_panel_vrr_min, default 24 (vrr 0001)"
     else no "version $ver: appledrm lacks fw27_panel_vrr_min with default 24 (vrr 0001)"; fi ;;
 esac
-# From r3b.c4 (docs/r3-touchid.md) apple-sep's T6050 profile admits the K114s; without it the driver refuses this Mac.
+# From r3b.c4 (docs/r3-touchid.md) apple-sep's T6050 profile admits the K114s; without it the driver refuses this Mac. r3c too.
 case $ver in
-  *.c[4-9]*)
+  *.c[4-9]*|*.r3c*)
     sep=$(find "$m" -name apple-sep.ko | head -1)
     if [ -n "$sep" ] && strings -a "$sep" | grep -q 'apple,k114s'; then ok "version $ver: apple-sep admits apple,k114s (sep 0001)"
     else no "version $ver: apple-sep does not admit apple,k114s (sep 0001)"; fi ;;
+esac
+# r3c (docs/r3c-kernel.md) also admits the K114s NVRAM row in spi-apple-qspi (r3c 0007) and sends the light sensor's
+# 193-byte calibration (r3c 0004, aop.ko).
+case $ver in
+  *.r3c*)
+    q=$(find "$m" -name spi-apple-qspi.ko | head -1)
+    if [ -n "$q" ] && strings -a "$q" | grep -q -x 'apple,k114s'; then ok "version $ver: spi-apple-qspi has the K114s NVRAM row (r3c 0007)"
+    else no "version $ver: spi-apple-qspi lacks the K114s NVRAM row (r3c 0007)"; fi
+    a=$(find "$m" -name 'aop.ko' -path '*soc/apple*' | head -1)
+    if [ -n "$a" ] && strings -a "$a" | grep -q 'sensor blob'; then ok "version $ver: aop carries the 193-byte calibration message (r3c 0004)"
+    else no "version $ver: aop lacks the 193-byte calibration message (r3c 0004)"; fi ;;
 esac
 if [ $fail != 0 ]; then echo "check-package: FAILED"
 elif [ $skipped != 0 ]; then echo "check-package: all run checks passed; $skipped skipped ($other is not installed)"

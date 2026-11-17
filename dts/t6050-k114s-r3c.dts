@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s r3c tree (docs/r3c-kernel.md): the configured video-decode tree (t6050-k114s-r3b-avd.dts,
+ * unchanged) built on the r3c kernel's includes (aurora-silicon/linux integration/aurora 677be395
+ * plus betizzel/omarchy-m5 v272-18), plus:
+ * - the ambient light sensor's calibration (issue #67): the base's aop_als child of the AOP, which
+ *   the sound tree already runs, is named this Mac's 193-byte factory calibration. The r3c kernel
+ *   carries aurora-silicon/linux #1983, which sends that blob; without it the driver wants an
+ *   80-byte message. If this Mac's AOP firmware never asks for the calibration, the driver logs a
+ *   warning and the AOP, the microphones and the jack carry on ("a failure here costs the sensor,
+ *   not the AOP", drivers/soc/apple/aop.rs);
+ * - the boot NOR's NVRAM partition (issue #64, t6050-k114s-nvram.dtsi), read-only until the
+ *   flash's ID is confirmed and root opts in.
+ * Neither touches a pin, so the sound tree's gpio-reserved-ranges and its speaker barriers stand.
+ */
+#include "t6050-k114s-r3b-avd.dts"
+
+&aop_als {
+	firmware-name = "apple/aop-als-cal.bin";
+};
+
+#define K114S_R3_NVRAM
+#include "t6050-k114s-nvram.dtsi"
