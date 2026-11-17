@@ -1,0 +1,44 @@
+# K114s r3c kernel (docs/r3c-kernel.md): our K114s series on betizzel/omarchy-m5's v272-18 kernel (release line after
+# omarchy-j714s-9), plus the light sensor and NVRAM patches.
+#
+# Base, built exactly as the recipe builds it: aurora-silicon/linux 677be395b9d2 (integration/aurora) +
+#   installer/recipes/linux-aurora-j714s linux-j714s-27.2.patch at betizzel/omarchy-m5 1bc6e1523b (pkgrel 18;
+#   patches/j714s-27.2/linux 0001-0021 applied one by one with `git am --3way` give the same git tree, f401b56bd5db).
+# Then:
+#   1. localversion.10-pkgrel   -17.v272-18-k114s-r3c   (release 7.3.0-17.v272-18-k114s-r3c-ARCH)
+#   2. the patches below, with `git am --3way`, in this order
+#   3. configuration: betizzel's v272-18 config + patches/linux/config/k114s-r3.config, then olddefconfig
+# Package: linux-k114s 7.3.0.r3c-1 (K114S_CAND=r3c): it takes the r3a slot (r3a retired, owner's decision 2026-11-17).
+#
+# 1. from r3b.c4, unchanged (they apply as they are)
+r3b/0001-HID-dockchannel-hid-clamp-Report-Size-items-where-th.patch
+r3b/0002-HID-dockchannel-hid-pad-short-reports-to-the-clamped.patch
+r3b/0003-HID-magicmouse-drop-the-GD-Mouse-usages-on-dockchann.patch
+r3b/0004-HID-magicmouse-parse-the-0x5a-MTP-report-of-the-K114.patch
+sound/0004-ASoC-apple-macaudio-Add-K114-with-the-speakers-off.patch
+# r3b/0005, re-cut: the base now qualifies the K116s and the J714s; this adds only the K114s
+r3c/0001-PCI-apple-qualify-the-K114s-for-suspend-to-idle-over.patch
+brightness/0001-drm-apple-answer-the-PMU-temperature-for-every-panel.patch
+# brightness/0002, re-cut: dcp.c gained link_report_rtkit_ops between rtkit_ops and the helper
+r3c/0002-drm-apple-apply-the-syslog-debug-filter-to-the-inter.patch
+brightness/0003-drm-apple-take-the-27.2-D590-notification-as-a-no-op.patch
+brightness/0005-dt-bindings-display-apple-dcp-optional-panel-brightn.patch
+# brightness/0006, re-cut: only the dcp_set_brightness() hunk moved (the base passes a local 'suspended')
+r3c/0003-drm-apple-hold-brightness-requests-at-the-panel-s-fl.patch
+hdr/0001-drm-apple-describe-an-internal-panel-without-a-known.patch
+hdr/0002-drm-apple-cap-the-panel-peak-a-firmware-27-panel-s-E.patch
+hdr/0003-drm-apple-K114s-no-panel-EDR-above-500-nits-by-defau.patch
+sleep-lid/0007-power-supply-macsmc-skip-an-unreadable-manufacture-d.patch
+hdr/0004-drm-apple-no-EDR-when-a-cap-is-set-and-the-SDR-maxim.patch
+sep/0001-soc-apple-sep-Admit-the-K114s-to-the-T6050-profile.patch
+# 2. new in r3c
+#    the light sensor's 193-byte calibration: aurora-silicon/linux #1983 (Joshua Warren, open), cherry-picked from 242ce586c5
+r3c/0004-soc-apple-aop-Send-the-14-inch-M5-Max-sensor-its-193.patch
+#    NVRAM writes on T6050 (rolotrealanis98/m5pro-linux contrib/pending/nvram 0002 and 0003, Rolando Trevino; GPL-2.0-only)
+r3c/0005-spi-apple-qspi-admit-verified-NVRAM-writes-on-the-J7.patch
+r3c/0006-spi-apple-qspi-log-the-flash-ID-and-status-when-a-wr.patch
+#    ours: the K114s row, fail-closed until its flash ID is confirmed
+r3c/0007-spi-apple-qspi-admit-the-K114s-NVRAM-fail-closed-on-.patch
+#
+# Not carried from r3b.c4: vrr/0001 (fw27_panel_vrr_min). It does not apply on this base and nothing sets the parameter:
+#   panel VRR is blocked on the K114s (#19) and betizzel j714s15 stopped turning fw27_panel_vrr on.
