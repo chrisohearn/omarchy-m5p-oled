@@ -89,7 +89,8 @@ power `nub_gpio0` pin 21, data ready pin 138 rising), `nub_gpio0` and its always
 SEP mailbox and `ps_sep` on (`sep` and `sep_dart` stay disabled: `apple_sep` enables them), and the `sep`
 alias. Pin 138 is exposed; pin 112 stays reserved. `K114S_TOUCHID_WITH_SD` and
 `K114S_TOUCHID_WITH_SOUND` carry the pins of the other fragments, since each replaces
-`gpio-reserved-ranges`.
+`gpio-reserved-ranges`. The two switches are independent: the SD reader adds 81, sound adds 134 and 139
+(since 2026-11-17, docs/r3-mics.md).
 
 `tests/test-touchid-dtb.sh KTREE` (kernel tree `src/r3b`; run after the build environment's `env.sh`):
 - without the switch the tree is byte-identical to r1;

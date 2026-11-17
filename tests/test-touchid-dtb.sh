@@ -43,8 +43,11 @@ cmp -s "$W/r1.dtb" "$W/off.dtb" && echo "ok   without K114S_R3_TOUCHID the tree 
 build on "$(inc '#define K114S_R3_TOUCHID')"
 # the pin variants sit after the SD fragment whose pins they carry (the later gpio-reserved-ranges wins)
 build on-sd "$(printf '%s\n#define K114S_R3_SD\n#include "t6050-k114s-sd.dtsi"\n#define K114S_R3_TOUCHID\n#define K114S_TOUCHID_WITH_SD\n#include "t6050-k114s-touchid.dtsi"\n' "$head")"
-build on-sound "$(printf '%s\n#define K114S_SD_WITH_SOUND\n#define K114S_R3_SD\n#include "t6050-k114s-sd.dtsi"\n#define K114S_R3_TOUCHID\n#define K114S_TOUCHID_WITH_SOUND\n#include "t6050-k114s-touchid.dtsi"\n' "$head")"
-echo "ok   compiles with K114S_R3_TOUCHID (default, WITH_SD, WITH_SOUND)"
+build on-sound "$(printf '%s\n#define K114S_SD_WITH_SOUND\n#define K114S_R3_SD\n#include "t6050-k114s-sd.dtsi"\n#define K114S_R3_TOUCHID\n#define K114S_TOUCHID_WITH_SOUND\n#define K114S_TOUCHID_WITH_SD\n#include "t6050-k114s-touchid.dtsi"\n' "$head")"
+# sound without the SD reader (the sound trial tree t6050-k114s-r3b-sound.dts): 81 stays reserved
+build on-soundonly "$(inc '#define K114S_R3_TOUCHID
+#define K114S_TOUCHID_WITH_SOUND')"
+echo "ok   compiles with K114S_R3_TOUCHID (default, WITH_SD, WITH_SOUND with and without WITH_SD)"
 
 d=$(dump on)
 has() { grep -Eq "$1" <<<"$d" || fail "tree lacks: $2"; echo "ok   $2"; }
@@ -86,8 +89,10 @@ python3 -I "$here/tests/lint-dtb.py" "$W/r1.dtb" "$W/on.dtb" "$W/on-sd.dtb" || f
 # the sound variant is built without the sound file (it needs a generated PMP file), so the lint's
 # "expected" list does not apply; the exposed pins must be the sound pins plus 138 and the SD reader's 81
 out=$(python3 -I "$here/tests/lint-dtb.py" "$W/on-sound.dtb" 2>&1 || true)
-grep -q 'exposed \[80, 81, 134, 138, 139\]' <<<"$out" || fail "sound variant pins"
-echo "ok   pins exposed: 80+138 | +81 with the SD reader | 80,81,134,138,139 with sound; 112 stays reserved"
+grep -q 'exposed \[80, 81, 134, 138, 139\]' <<<"$out" || fail "sound and SD variant pins"
+out=$(python3 -I "$here/tests/lint-dtb.py" "$W/on-soundonly.dtb" 2>&1 || true)
+grep -q 'exposed \[80, 134, 138, 139\]' <<<"$out" || fail "sound-only variant pins (81 must stay reserved without the SD reader)"
+echo "ok   pins exposed: 80+138 | +81 with the SD reader | +134,139 with sound | 80,81,134,138,139 with both; 112 stays reserved"
 
 # a wrong pin must change the compiled value the checks above read
 build neg "$(inc '#define K114S_R3_TOUCHID' '&mesa { enable-gpios = <&nub_gpio0 22 GPIO_ACTIVE_HIGH>; };')"

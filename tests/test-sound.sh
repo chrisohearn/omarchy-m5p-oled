@@ -118,6 +118,14 @@ bad k116-card   '/ { sound { compatible = "apple,k116-macaudio", "apple,macaudio
 bad j714-card   '/ { sound { compatible = "apple,j714-macaudio", "apple,macaudio"; }; };'                     "the J714 card"
 bad spk-id      '/ { sound { speaker-id-gpios = <&pinctrl_ap 136 GPIO_ACTIVE_HIGH>, <&pinctrl_ap 137 GPIO_ACTIVE_HIGH>; }; };' "the speaker-ID pins"
 bad pmp-alias   '/ { aliases { pmp = &pmp0; }; };'                                                           "a pmp alias (the loader would stop the boot)"
+bad spk-irq     '/ { probe { interrupt-parent = <&pinctrl_ap>; interrupts = <106 IRQ_TYPE_LEVEL_LOW>; }; };'  "an interrupt on the amp fault pin (interrupt-parent and interrupts)"
+# the Touch ID fragment after the sound one (the sound trial tree's order): pin 138 is named by the sensor's
+# interrupts under interrupt-parent, and the sound-only pin variant keeps 81 reserved
+{ echo '#define K114S_R1_N1'; echo '#define K114S_R1_USB'; echo '#include "t6050-k114s-common.dtsi"'
+  echo '#include "t6050-k114s-sound.dtsi"'; echo '#define K114S_R3_TOUCHID'; echo '#define K114S_TOUCHID_WITH_SOUND'
+  echo '#include "t6050-k114s-touchid.dtsi"'; } > "$W/bad/sound-touchid.dts"
+expect "dts: sound with the Touch ID fragment compiles" build sound-touchid "$W/bad"
+expect "lint: sound with the Touch ID fragment passes the speaker-safety lint" python3 "$here/tests/lint-sound-dtb.py" "$W/sound-touchid.dtb"
 
 # --- 5. UCM profiles -----------------------------------------------------------------------------------------
 sys=/usr/share/alsa/ucm2
