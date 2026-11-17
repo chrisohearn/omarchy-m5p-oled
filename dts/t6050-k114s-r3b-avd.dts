@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s video decoder tree (docs/r3-avd-decode.md, issue #30): the configured sound tree
+ * (t6050-k114s-r3b-sound.dts, unchanged) plus the AVD fragment (t6050-k114s-avd.dtsi) switched on:
+ * the decoder, its DART, pmgr4 and the FAB1_SOC and AVD_SYS power states. Every value equals this
+ * Mac's ADT (tests/k114s-adt-parity-facts.py). The fragment touches no pin, so the sound tree's
+ * gpio-reserved-ranges stand; the speaker barriers of the sound fragment are unchanged.
+ *
+ * Built against the same includes as the sound tree (P's, docs/r3-display-plan.md 3.2) and with
+ * this Mac's PMP values on the include path, as the sound tree is.
+ */
+#include "t6050-k114s-r3b-sound.dts"
+#define K114S_R3_AVD
+#include "t6050-k114s-avd.dtsi"

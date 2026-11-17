@@ -1,0 +1,36 @@
+#!/bin/bash
+# Point VA-API at the Apple Video Decoder's driver on the K114s (issue #30), so mpv, ffmpeg and other VA-API
+# clients find hardware decode without a variable of their own.
+#   usage: sudo k114s-vaapi [--install | --undo | --check]      (default --install)
+# libva picks its driver from the DRM driver's name, "aurora" on the M5 GPU, and no aurora_drv_video.so exists:
+# libva-v4l2_request-avd installs asahi_drv_video.so (and v4l2_request_drv_video.so). betizzel/omarchy-m5 fixed the
+# same gap with a symlink inside a package (omarchy-aurora-firmware j714s14). This Mac holds that package at an
+# older release, and an unowned file of the same name would make its later update fail, so the fix here is an
+# environment.d file instead: the systemd user manager reads it, and the session's apps inherit LIBVA_DRIVER_NAME.
+# It takes effect at the next login. On a boot without the decoder, VA-API clients fall back to software as before.
+#   Environment (tests): K114S_ROOT (default /).
+set -u
+here=$(cd "$(dirname "$0")" && pwd)
+root=${K114S_ROOT:-}; root=${root%/}
+src=$here/50-k114s-vaapi.conf; dst=$root/etc/environment.d/50-k114s-vaapi.conf
+drv=$root/usr/lib/dri/asahi_drv_video.so
+die() { echo "k114s-vaapi: $*" >&2; exit 1; }
+[ -s "$src" ] || die "no $src"
+case ${1:---install} in
+  --check)
+    [ -e "$drv" ] || die "$drv is missing (libva-v4l2_request-avd not installed?)"
+    [ -f "$dst" ] && cmp -s "$src" "$dst" || die "$dst is missing or differs from the repository's: sudo bash $0"
+    echo "k114s-vaapi: installed ($dst: LIBVA_DRIVER_NAME=asahi)" ;;
+  --install)
+    [ -n "$root" ] || [ "$(id -u)" = 0 ] || die "run with sudo"
+    [ -e "$drv" ] || die "$drv is missing (libva-v4l2_request-avd not installed?); nothing was changed"
+    mkdir -p "$(dirname "$dst")" || die "cannot create $(dirname "$dst")"
+    t=$(mktemp "$dst.XXXXXX") || die "cannot stage $dst"
+    cp "$src" "$t" && chmod 644 "$t" && mv "$t" "$dst" || { rm -f "$t"; die "cannot write $dst"; }
+    echo "k114s-vaapi: installed $dst (LIBVA_DRIVER_NAME=asahi); log out and in, or reboot, for the session to pick it up" ;;
+  --undo)
+    [ -n "$root" ] || [ "$(id -u)" = 0 ] || die "run with sudo"
+    rm -f "$dst"
+    echo "k114s-vaapi: removed $dst (takes effect at the next login)" ;;
+  *) die "usage: k114s-vaapi [--install | --undo | --check]" ;;
+esac
