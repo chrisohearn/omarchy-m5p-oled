@@ -1,7 +1,8 @@
 # Touch ID plan for the K114s (issue #49)
 
 Status: **working since 2026-11-16.** The right index finger is enrolled. It matches before and after a reboot,
-another finger is refused, and sudo, polkit and the lock screen accept it (section "Phases 3 to 7: the result").
+another finger is refused, and sudo and the lock screen accept it (owner-tested); polkit is configured the same way but
+no admin prompt has been tried yet (section "Phases 3 to 7: the result").
 Kernel r3b.c4; the Touch ID tree is the configured Stage 2 (`3cc123d8…`). Still open: the owner's check of
 macOS Touch ID and unlock at the next macOS boot, and the upstream profile line. The plan below was written
 2026-11-15 on the K114s (kernel `7.3.0-17.v272-4-k114s-r3a-ARCH`), owner away. Evidence labels: agent-run,
@@ -123,9 +124,9 @@ Phases 0 to 2 need no Secure Enclave write. Each later phase needs the owner's g
 | 1 | Driver profile: add `apple,k114s` to the T6050 match (like #1649). Build a kernel with it | **done locally 2026-11-16** (`sep/0001`, r3b.c4); upstream after phase 4 | no |
 | 2 | Include the fragment in a trial tree behind the switch; build; compile test | **done 2026-11-16** (`t6050-k114s-r3b-touchid.dts`, Stage 2 `3cc123d8…`) | no |
 | 3 | **Done 2026-11-16 (unattended, Jarvis-acknowledged).** Trial boot of that tree with the driver NOT loaded: confirm `/aliases/sep`, the sensor binds on spi2 only if `apple_sep` opens it (it should not), no regression (Wi-Fi, trackpad, GPU), pin 138 mapped | owner at the Mac | no |
-| 4 | **Done 2026-11-16.** Read-only load: `modprobe apple_sep` with the shipped options, `aurora-sep status`, `aurora-touchid-setup --check`, `apfs-xart-inspect.py` on the iBoot System Container. Expect attach, 12 endpoints, `xart disabled`, keybag unknown (the RAM-tested J714s result) | owner at the Mac | no (options turn writes off) |
-| 5 | **Done 2026-11-16.** Decision to enable; backups of the iBoot System Container's xART store and the macOS FileVault/DFU plan; macOS agent confirms the Mac boots to macOS after the trial | owner | no |
-| 6 | **Done 2026-11-16.** Enable writes, enrol, reboot, verify, wrong finger, re-enrol after reboot; macOS boot check | owner | **yes** |
+| 4 | **Done 2026-11-16.** Read-only load: `modprobe apple_sep` with the shipped options, `aurora-sep status`, `aurora-touchid-setup --check`, `apfs-xart-inspect.py` on the iBoot System Container. Expect attach, the 12 endpoints macOS lists (the K114s also advertises `srep`, so 13 on 2026-11-16), `xart disabled`, keybag unknown (the RAM-tested J714s result) | owner at the Mac | no (options turn writes off) |
+| 5 | **Done 2026-11-16 except the macOS check:** decision, backups and FileVault plan done; macOS not booted since. Decision to enable; backups of the iBoot System Container's xART store and the macOS FileVault/DFU plan; macOS agent confirms the Mac boots to macOS after the trial | owner | no |
+| 6 | **Done 2026-11-16 except the macOS check:** writes on, enrolled, match and no-match, and after a reboot the enrolment was restored and matched without re-enrolling; the macOS boot check is open. Enable writes, enrol, reboot, verify, wrong finger, re-enrol after reboot; macOS boot check | owner | **yes** |
 | 7 | **Done 2026-11-16 (aurora-sep's flow; omarchy-mac still says `unsupported:board`).** omarchy-mac eligibility for T6050 (or keep aurora-sep's own flow); Hyprland lock-screen and sudo prompt | omacom, us | no |
 
 ## Phases 1 and 2: r3b.c4 and the trial tree (2026-11-16)
@@ -230,10 +231,12 @@ It prints the booted tree's state and the driver's profile list and writes nothi
 | Reboot | `Touch ID: restored 1 enrolled identity/identities; enrolment survived reboot`; `verify-match` again; refusals 0 | agent-run, owner touched |
 | sudo, polkit, lock screen | Omarchy's own `setup_pam_config` (`pam_fprintd` behind the `omarchy-hw-laptop-closed` gate) and `omarchy-apply-lock`; backups of `/etc/pam.d/sudo` first | agent-run |
 | The owner's test of sudo and the lock screen with the finger | "Both worked" | owner-observed |
+| polkit (admin dialogs) | configured as above; no admin prompt tried yet | agent-run (configuration only) |
 
 Not done: macOS. On the next macOS boot the owner checks that Touch ID and unlock still work there (the shared root
-record changed). Undo, in order: `rm /etc/modprobe.d/aurora-sep-xart.conf`, `systemctl disable aurora-sep.service`,
-the PAM backups back, reboot. The keybag and enrolment stay in the enclave until `install-aurora-sep.sh
+record changed). Undo, as root, in order: `sudo rm /etc/modprobe.d/aurora-sep-xart.conf`,
+`sudo systemctl disable aurora-sep.service`, `sudo cp` the PAM backups (`/var/lib/k114s-recovery/touchid/pam-before-*/`)
+back and `sudo rm /etc/pam.d/polkit-1` (it did not exist before), then reboot. The keybag and enrolment stay in the enclave until `install-aurora-sep.sh
 --reset-touchid` or a new keybag.
 
 ## Upstream
