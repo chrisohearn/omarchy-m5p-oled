@@ -1,7 +1,10 @@
 # K114s internal microphones: trial plan and upstream report template (issue #38)
 
-Status: offline work done, except a PipeWire replica of the trial with a synthetic 3-channel RawMics source (still open); the recording trial needs the owner at the Mac on a boot with the sound tree
-(card `AppleK114HPAI`). The running kernel today has no sound card (`/proc/asound/cards`: no soundcards).
+Status, 2026-11-17: the trial ran on the sound tree and the microphones work. Results in [docs/r3-mics.md](r3-mics.md).
+Correction found on the hardware: the raw array is a hidden node (the mic graph's rule has `hide-parent = true`,
+which takes every client's permission on it away), so `pw-record --target alsa_input.platform-sound.RawMics` finds
+no target and records nothing. The trial script's raw takes now read `hw:AppleK114HPAI,0` with `arecord`; the PCM
+is free while no app records the microphone. The mono take still goes through PipeWire.
 
 ## Offline evidence (agent-run, read-only)
 
@@ -22,7 +25,7 @@ Upstream's J714s array commit (linux #1557) uses the same single 3-channel captu
     bash tests/hardware/k114s-mic-trial.sh
 
 It records five short takes (quiet, talk, clap left, clap right, mono source), prints per-channel peak,
-RMS, silence and clipping, and the correlation between channels. It plays nothing. Raw takes use `node.dont-fallback` (a missing `RawMics` fails instead of recording the mono source) and `--channel-map AUX0,AUX1,AUX2` (as in `mic.json`); three identical channels are reported BAD. Then play the mono take
+RMS, silence and clipping, and the correlation between channels. It plays nothing. Raw takes read the PCM `hw:AppleK114HPAI,0` (three channels in the order `mic.json`'s capture stream sees them); three identical channels are reported BAD. The mono take uses `node.dont-fallback`, so a missing mono source fails instead of recording another one. Then play the mono take
 through headphones only. Done when three channels carry signal, the mono take is intelligible, and the
 owner confirms by ear (owner-observed).
 

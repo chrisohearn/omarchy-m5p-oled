@@ -23,12 +23,12 @@ on the Mac by the AI agent). States not yet on the Mac (*integrated*, *built*, *
 | GPU (G17S): OpenGL, Hyprland on the GPU | working (owner-observed, agent-run); Vulkan device enumerates, Vulkan clients not tested: [docs/r3-gpu-result.md](docs/r3-gpu-result.md) |
 | Battery, voltages, fans | reading (agent-run); fans read about 2200 and 2375 RPM at desktop load on r3a (agent-run); sustained-load run still open |
 | Updates on Omarchy's Edge channel | guarded after one bad refresh; updates run under the holds, and the space guard passes with 111 MB free against its 88 MB minimum (agent-run, 2026-11-15, after the r3a promotion): [incident](docs/incident-2026-11-14-edge-refresh.md), [what fills the partition](docs/esp-space.md) |
-| Headphone jack, microphones | integrated (on main); the r3a kernel has the modules, but the GPU Stage 2 tree has no sound node, so no card yet |
+| Microphones | working since 2026-11-17: dictation through the built-in microphones (owner-observed); the sound tree is the configured Stage 2, with no path to the speakers ([docs/r3-mics.md](docs/r3-mics.md)). The headphone jack's card exists, untested |
 | Native panel mode, 120 Hz, brightness | designed, not run (display coprocessor step: [docs/r3-display-gpu.md](docs/r3-display-gpu.md)) |
 | Suspend and lid | blocked on purpose: r3a is booted and the GPU mailbox interrupt is proven (about 400/s), but the suspend targets stay masked; open are `sleep-lid/0010` (not in r3a), the PMP nodes and the first attended cycle |
 | Speakers | blocked upstream: no protection data for this model ([why](docs/r3-audio-protection.md)) |
 | USB-C data ports | in the booted device tree; both controllers bind to `dwc3-apple`, but no USB bus has appeared and no device has been plugged in yet (agent-run, re-checked on r3a 2026-11-15) |
-| Touch ID | working since 2026-11-16: the right index finger unlocks sudo, the lock screen and admin prompts (kernel r3b.c4, the Touch ID tree in the Stage 2; [docs/r3-touchid.md](docs/r3-touchid.md)) |
+| Touch ID | working since 2026-11-16: the right index finger unlocks sudo, the lock screen and admin prompts (kernel r3b.c4; the Touch ID tree, and since 2026-11-17 the sound tree that carries it, in the Stage 2; [docs/r3-touchid.md](docs/r3-touchid.md)) |
 | Camera, touchscreen, video decode, SD reader, Thunderbolt, external displays | drafted or ADT-checked offline, never booted (see [docs/matrix.md](docs/matrix.md)) |
 
 Per-subsystem detail, sources and next steps are in [docs/matrix.md](docs/matrix.md).
