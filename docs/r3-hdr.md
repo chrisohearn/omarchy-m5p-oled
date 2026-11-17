@@ -204,3 +204,20 @@ words: "Looked good let's keep it on"):
 Not measured: the panel's real luminance (no meter), whether the firmware tone-maps above the cap, and the power cost of
 HDR output.
 
+
+## 10. 10-bit output, 2026-11-16
+
+With either wide-gamut preset on an 8-bit framebuffer, Hyprland showed "Monitor eDP-1: wide color gamut is enabled but the
+display is not in 10-bit mode" at every session start (owner report). Hyprland has no option that silences it, and the
+driver can do better: on firmware 27 appledrm offers `XR30` and `AR30` (XRGB/ARGB2101010) on the primary plane
+(`modetest -M apple -p`, agent-run; `drivers/gpu/drm/apple/plane.c`, `supports_l10r` is false only for 12.x firmware).
+
+| Check | Result | Label |
+| --- | --- | --- |
+| A 45-second self-reverting runtime trial on r3b.c4: eDP-1 with `cm = "hdredid", bitdepth = 10` through `hyprctl eval`, the revert (`hyprctl reload`) scheduled first as its own user unit | `currentFormat: XRGB2101010`; aquamarine allocated `XR30` buffers; no DCP crash or error line in the kernel log | agent-run |
+| The owner watching the panel during the trial | "Looked normal, keep it" | owner-observed |
+
+So `linux/display/dcp-colour.lua` now asks for `bitdepth = 10` on the eDP-1 rule, for both presets. The trial covered
+hdredid only. dp3 changes Hyprland's colour transform, not the scanout format. Install it with
+`bash "$REPO/linux/display/k114s-dcp-colour"`, then `hyprctl reload`; the warning is gone at the next session start.
+The way back is the previous block (the script replaces a changed block) or a rule without `bitdepth`.
