@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s Touch ID tree (docs/r3-touchid.md, issue #49, phase 3): the promoted brightness tree
+ * (t6050-k114s-r3b-brightness.dts, unchanged) plus the Touch ID fragment (t6050-k114s-touchid.dtsi)
+ * switched on. Built against the same includes as the brightness tree (P's, docs/r3-display-plan.md
+ * 3.2), so the two trees differ by the fragment's nodes and properties alone: the sensor on spi2, the
+ * always-on GPIO bank, the SEP mailbox and power domains, the sep alias, and pin 138 left out of
+ * gpio-reserved-ranges.
+ *
+ * The brightness tree includes neither the SD reader nor the sound fragment, so the fragment's
+ * default pin variant applies (80 and 138 exposed).
+ *
+ * Booting this tree turns no Secure Enclave write on. Nothing loads apple_sep by itself (no module
+ * alias), and aurora-sep's modprobe.d options keep any load read-only (xart_writes=0
+ * provision_keybag=0). Only a kernel whose apple_sep admits apple,k114s (patches/linux/sep/0001, r3b.c4)
+ * attaches to it.
+ */
+#include "t6050-k114s-r3b-brightness.dts"
+#define K114S_R3_TOUCHID
+#include "t6050-k114s-touchid.dtsi"

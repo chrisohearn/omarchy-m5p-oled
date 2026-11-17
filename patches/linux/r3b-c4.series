@@ -1,0 +1,34 @@
+# K114s r3b.c4 kernel: r3b.c3 plus the SEP profile line that admits the K114s (Touch ID, docs/r3-touchid.md).
+#
+# Same base, release suffix and configuration as r3b.c3 (patches/linux/r3b-c3.series): the release stays
+# 7.3.0-17.v272-11-k114s-r3b-ARCH and the package stays linux-k114s-r3b (version 7.3.0.r3b.c4-1), so it upgrades
+# r3b.c3 in place. Only apple-sep.ko differs from r3b.c3 (k114s-cmp-modules), and nothing loads it by itself:
+# - sep/0001 adds apple,k114s to the T6050 profile match of drivers/soc/apple/profile.rs, as aurora-silicon/linux#1649
+#   did for the K116s, with its KUnit case. Without it apple_sep refuses this Mac (ENODEV) even with the Touch ID tree.
+# Build: K114S_LABEL=K114S-R3B-C4 (uname -v), output $K114S_BUILD_ROOT/build/r3b-c4, package K114S_CAND=r3b-c4.
+#
+# 1. the r3b.b1 series (patches/linux/r3b-b1.series), unchanged and in its order
+r3b/0001-HID-dockchannel-hid-clamp-Report-Size-items-where-th.patch
+r3b/0002-HID-dockchannel-hid-pad-short-reports-to-the-clamped.patch
+r3b/0003-HID-magicmouse-drop-the-GD-Mouse-usages-on-dockchann.patch
+r3b/0004-HID-magicmouse-parse-the-0x5a-MTP-report-of-the-K114.patch
+sound/0004-ASoC-apple-macaudio-Add-K114-with-the-speakers-off.patch
+r3b/0005-PCI-apple-qualify-the-K114s-for-suspend-to-idle-over.patch
+# 2. localversion.10-pkgrel  -17.v272-11-k114s-r3b   (as r3b; not a patch file)
+brightness/0001-drm-apple-answer-the-PMU-temperature-for-every-panel.patch
+brightness/0002-drm-apple-apply-the-syslog-debug-filter-to-the-inter.patch
+brightness/0003-drm-apple-take-the-27.2-D590-notification-as-a-no-op.patch
+brightness/0005-dt-bindings-display-apple-dcp-optional-panel-brightn.patch
+brightness/0006-drm-apple-hold-brightness-requests-at-the-panel-s-fl.patch
+# 3. the HDR series (docs/r3-hdr.md), applied with `git am` on top of 1 and 2. 0001 and 0002 are offered upstream
+#    (aurora-silicon/linux#2060); 0003 is K114s-only (the 500-nit default of the cap).
+hdr/0001-drm-apple-describe-an-internal-panel-without-a-known.patch
+hdr/0002-drm-apple-cap-the-panel-peak-a-firmware-27-panel-s-E.patch
+hdr/0003-drm-apple-K114s-no-panel-EDR-above-500-nits-by-defau.patch
+# 4. the battery fix, as r3a carries it (r3a.series), applied with `git am` on top of 1 to 3
+sleep-lid/0007-power-supply-macsmc-skip-an-unreadable-manufacture-d.patch
+# 5. the follow-ups (docs/r3-vrr.md, docs/r3-hdr.md), applied with `git am` on top of 1 to 4
+hdr/0004-drm-apple-no-EDR-when-a-cap-is-set-and-the-SDR-maxim.patch
+vrr/0001-drm-apple-let-the-firmware-27-panel-s-VRR-minimum-be.patch
+# 6. Touch ID (docs/r3-touchid.md), applied with `git am` on top of 1 to 5
+sep/0001-soc-apple-sep-Admit-the-K114s-to-the-T6050-profile.patch

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0+ OR MIT
 /*
  * K114s: Touch ID. The Mesa fingerprint sensor on spi2 and the Secure Enclave (SEP) nodes that
- * the aurora-sep driver needs. DRAFT. NOT booted on a K114s. NOT included by any tree of this
- * repository (docs/r3-touchid.md, issue #49).
+ * the aurora-sep driver needs. Included, switched on, by the trial tree t6050-k114s-r3b-touchid.dts
+ * only (docs/r3-touchid.md, issue #49). NOT booted on a K114s yet.
  *
  * Copy of the J714s nodes of aurora-silicon/linux #1587 (merged 2026-11-12, validated there by
  * enrolling and matching on a J714s) and of the K116s SEP block of #1648. Every value equals this
@@ -16,10 +16,10 @@
  * The base kernel tree already has spi2, nub_gpio0, ps_nub_gpio, ps_spi2, sep, sep_mbox, sep_dart
  * and ps_sep, all disabled; this file turns them on and adds the sensor node.
  *
- * What this file does NOT do, and what is still needed before it can ever be switched on:
- *   - the apple_sep driver does not admit a K114s. Its T6050 profile matches apple,j714s and
- *     apple,k116s only (drivers/soc/apple/profile.rs, aurora-silicon/linux #1649 added the K116s),
- *     so on this Mac the driver refuses to attach. A one-line driver patch is needed first.
+ * What this file does NOT do, and what else is needed:
+ *   - the apple_sep driver upstream does not admit a K114s. Its T6050 profile matches apple,j714s
+ *     and apple,k116s only (drivers/soc/apple/profile.rs, aurora-silicon/linux #1649 added the
+ *     K116s). patches/linux/sep/0001 (kernel r3b.c4) adds apple,k114s; other kernels refuse.
  *   - /aliases/sep is not in the booted tree. The K116s tree has `sep = &sep;`, so the alias is added
  *     here; whether our m1n1 acts on it is unverified (phase 3 trial boot).
  *   - omarchy-mac's touchid-eligibility lists no T6050 board and answers "unsupported:board".

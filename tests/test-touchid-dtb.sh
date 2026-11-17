@@ -12,6 +12,7 @@
 # 4. pin 112 stays reserved in every variant, pin 138 is exposed, no variant exposes more than documented
 # 5. a tree with a wrong sensor pin is told apart (the value checks are not vacuous)
 # 6. the ADT fact checker itself passes a replica and fails on a wrong ADT or tree pin (test-adt-touchid-facts.py)
+# 7. the trial tree t6050-k114s-r3b-touchid.dts differs from the brightness tree it is built on by the fragment alone
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 K=${1:?usage: test-touchid-dtb.sh KTREE}
@@ -93,4 +94,31 @@ build neg "$(inc '#define K114S_R3_TOUCHID' '&mesa { enable-gpios = <&nub_gpio0 
 if "$DTC" -I dtb -O dts "$W/neg.dtb" 2>/dev/null | grep -Eq 'enable-gpios = <0x[0-9a-f]+ 0x15 0x00>'; then fail "wrong pin not detected"; fi
 echo "ok   a wrong power pin is detected"
 python3 -I "$here/tests/test-adt-touchid-facts.py" || exit 1
+
+# the trial tree (phase 3): the brightness tree plus the fragment, and nothing else. Node and property names only,
+# so the check holds on any include tree that has the T6050 K-board nodes.
+build bl '#include "t6050-k114s-r3b-brightness.dts"'
+build trial '#include "t6050-k114s-r3b-touchid.dts"'
+got=$(python3 -I "$here/tests/dtb-node-diff.py" "$W/bl.dtb" "$W/trial.dtb" | sed -E 's/^(ADDED|REMOVED) +([^ ]+).*/\1 \2/; s/^(PROP[+~-]) +([^ ]+) +([^ =:]+).*/\1 \2 \3/' | sed -E 's|power-controller@[0-9a-f]+|power-controller@N|' | sort)
+want=$(sort <<'EOF2'
+ADDED /soc/spi@505108000/fingerprint@0
+PROP+ /aliases sep
+PROP+ /soc@200000000/power-management@280600000/power-controller@N apple,firmware-owned
+PROP+ /soc@200000000/power-management@280900000/power-controller@N apple,firmware-owned
+PROP~ /soc/pinctrl@2881e4000 status
+PROP~ /soc/spi@505108000 clocks
+PROP~ /soc/spi@505108000 status
+PROP~ /soc@200000000/mailbox@502608000 status
+PROP~ /soc@200000000/pinctrl@29c000000 gpio-reserved-ranges
+PROP~ /soc@200000000/power-management@280600000/power-controller@N status
+PROP~ /soc@200000000/power-management@280900000/power-controller@N status
+PROP~ /soc@200000000/power-management@280900000/power-controller@N status
+PROP~ /soc@200000000/power-management@280900000/power-controller@N status
+PROP~ /soc@200000000/power-management@288300000/power-controller@N status
+summary: 1 nodes added, 0 removed
+EOF2
+)
+[ "$got" = "$want" ] || { diff <(echo "$want") <(echo "$got"); fail "the trial tree differs from the brightness tree by more than the fragment"; }
+python3 -I "$here/tests/lint-dtb.py" "$W/trial.dtb" | grep -q 'exposed \[80, 138\]' || fail "trial tree pins"
+echo "ok   the trial tree is the brightness tree plus the fragment (14 node or property changes, pins 80 and 138)"
 echo "test-touchid-dtb: all passed"

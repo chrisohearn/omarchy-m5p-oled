@@ -382,6 +382,25 @@ package (`$K114S_BUILD_ROOT/integrate/release-r3b-c1/`) or the r3a entry.
 | `K114S_CAND=r3b-c3 makepkg`, then `check-package.sh` against `linux-aurora` and `linux-k114s` | all passed, including `fw27_panel_vrr_min, default 24` | agent-run |
 
 Package: `$K114S_BUILD_ROOT/integrate/release-r3b-c3/linux-k114s-r3b-7.3.0.r3b.c3-1-aarch64.pkg.tar.zst`, sha256
-`2b0b8ab77534a4b57e8ec9d2f4ea4532edb17ecf1a3709d47aa4def0026d1759`. Not installed or booted: the install and the VRR test
-are one owner-watched boot (`docs/r3-vrr.md` section 5).
+`2b0b8ab77534a4b57e8ec9d2f4ea4532edb17ecf1a3709d47aa4def0026d1759`. Installed and booted on 2026-11-16, with the owner
+watching the VRR test (`docs/r3-vrr.md` section 5); it is the kernel this Mac boots.
+
+## 12. r3b.c4: the K114s in apple_sep's T6050 profile (2026-11-16)
+
+`patches/linux/r3b-c4.series` is r3b.c3 plus `sep/0001`, which adds `apple,k114s` to the T6050 match of
+`drivers/soc/apple/profile.rs` (and to the profile's name), with a KUnit case, the form aurora-silicon/linux#1649 used
+for the K116s. Without it `apple_sep` refuses this Mac with ENODEV, whatever the tree says (`docs/r3-touchid.md`).
+Nothing loads `apple_sep` by itself (no module alias), so r3b.c4 boots as r3b.c3 does.
+
+| Check | Result | Label |
+| --- | --- | --- |
+| `git am` of hdr/0001-0003, sleep-lid/0007, hdr/0004, vrr/0001, sep/0001 on r3b.b1 `c492e07e75`, from the repository files | tree `61a149bd26d5`, the same as the built tree (head `a28b3546c2`) | agent-run |
+| `K114S_LABEL=K114S-R3B-C4 kmake O=build/r3b-c4 Image modules dtbs` (the r3b.c3 `.config`) | exit 0; 46 warnings, as r3b.c3, none in `drivers/soc/apple`; release `7.3.0-17.v272-11-k114s-r3b-ARCH` | agent-run |
+| `k114s-cmp-modules build/r3b-c4` against the installed r3b.c3 | `DIFF(.text) apple-sep.ko`, 1971 of 1972 SAME | agent-run |
+| KUnit in QEMU (`build/r3b-c4-kunit` with `CONFIG_APPLE_SEP_KUNIT_TEST=y`, `modprobe apple-sep`) | 0 `not ok` in the run (91 suites, 636 pass, 1 skip); `apple_sep_profile` `t8132_selection_is_limited_to_the_m4_airs`, which holds the new `apple,k114s` case, ok; the module logs "no platform profile for this SoC" on the `virt` machine, as expected | emulator/replica |
+| `K114S_CAND=r3b-c4 makepkg`, then `check-package.sh` against `linux-aurora` and `linux-k114s` | all passed, including the new `apple-sep admits apple,k114s (sep 0001)`; the same check fails on r3b.c3's module (no `apple,k114s` string), and `makepkg` refuses `K114S_CAND=r3b-c4` on the r3b.c3 tree | agent-run |
+
+Package: `$K114S_BUILD_ROOT/integrate/release-r3b-c4/linux-k114s-r3b-7.3.0.r3b.c4-1-aarch64.pkg.tar.zst`, sha256
+`6c31688348498005820ee484310a41d7c2f7a5e4653b3887313898e26fd0b9ec`. Not installed yet: the install and the trial boot are
+`docs/r3-touchid.md`, phases 3 and 4.
 

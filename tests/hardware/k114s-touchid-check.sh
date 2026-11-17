@@ -15,7 +15,7 @@ txt() { tr '\0' ' ' <"$1" 2>/dev/null; }
 
 sensor=""
 for n in "$dt"/soc/*/fingerprint@* "$dt"/soc@*/*/fingerprint@*; do [ -e "$n/compatible" ] && sensor=$n; done
-if [ -n "$sensor" ]; then say ok "booted tree has a sensor node: apple,mesa-fingerprint"; else say state: "booted tree has no sensor node (the fragment dts/t6050-k114s-touchid.dtsi is in no booted tree)"; fi
+if [ -n "$sensor" ]; then say ok "booted tree has a sensor node: apple,mesa-fingerprint"; else say state: "booted tree has no sensor node (boot the trial tree dts/t6050-k114s-r3b-touchid.dts: docs/r3-touchid.md, phase 3)"; fi
 spi=$(ls -d "$dt"/soc/spi@505108000 2>/dev/null)
 [ -n "$spi" ] && say info "spi2 node present, status: $(txt "$spi/status")"
 nub=$(ls -d "$dt"/soc/pinctrl@2881e4000 2>/dev/null)
@@ -29,9 +29,9 @@ m=$(modinfo -n apple_sep 2>/dev/null)
 if [ -n "$m" ]; then
   case $m in *.zst) rd='zstd -dc' ;; *.xz) rd='xz -dc' ;; *) rd=cat ;; esac
   if $rd "$m" 2>/dev/null | strings | grep -q 'apple,k114s'; then say ok "installed apple_sep admits apple,k114s"
-  else say state: "installed apple_sep does not name apple,k114s (T6050 profile: j714s and k116s only); it would refuse this Mac"; fi
+  else say state: "installed apple_sep does not name apple,k114s (T6050 profile: j714s and k116s only); it would refuse this Mac: install r3b.c4 (patches/linux/sep/0001)"; fi
 else say state: "no apple_sep module installed"; fi
-if lsmod | grep -q '^apple_sep'; then say info "apple_sep is loaded"; else say info "apple_sep is not loaded (as it should be before the owner decides)"; fi
+if lsmod | grep -q '^apple_sep'; then say info "apple_sep is loaded"; else say info "apple_sep is not loaded (nothing loads it by itself)"; fi
 [ -e /var/lib/aurora-sep-keybag.bin ] && say info "a Linux identity keybag exists" || say info "no Linux identity keybag (nothing has written enclave state)"
 
 e=/usr/lib/omarchy-mac/touchid-eligibility
