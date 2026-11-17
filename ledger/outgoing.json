@@ -29,6 +29,48 @@
       "follow_up": "add the r2 boot results (pass or fail) to the same thread once the owner has booted it",
       "acknowledged": null,
       "maintainer_feedback": []
+    },
+    {
+      "id": "k114s-mics-2026-11-17",
+      "destination": "aurora-silicon/linux discussion 142 (MacBook Pro, M5 family: hardware reports)",
+      "url": "https://github.com/aurora-silicon/linux/discussions/142#discussioncomment-19670714",
+      "posted": "2026-11-17T04:52:00Z",
+      "account": "chrisohearn",
+      "kind": "hardware confirmation",
+      "result": "K114S: the three built-in microphones capture on the K116s sound nodes of #1648 (f25b8eb19c92), with this Mac's PMP values; PMP and AOP up; dictation through a filter-chain source transcribed exactly (owner-observed); speakers left off",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3b.c4-1 (betizzel/omarchy-m5 v272-11 series on aurora-silicon/linux integration/aurora, plus this repository's patches)",
+        "loader": "Aura Stage 2 pin beceb683 (betizzel m1n1 pin)",
+        "device_tree_sha256": "de9fa4b6763459015761c8c99c32f2eb9afe9f3555d345331a3d1010ef1c52c0",
+        "stage2_sha256": "0990b168fc535073d186a1b7b6b98b2831ec39aa544ffb731950f1361d361f3a"
+      },
+      "not_claimed": "headphone jack, speakers, suspend with the PMP and AOP, beamforming, the array layout",
+      "state": "submitted",
+      "read_back": "read back through the GraphQL API after posting (author chrisohearn, title line intact)",
+      "follow_up": "none planned",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "k114s-mics-2026-11-17-xlink",
+      "destination": "aurora-silicon/linux #1648 (K116s tree; its microphone commit says 'Not tested on the hardware yet')",
+      "url": "https://github.com/aurora-silicon/linux/pull/1648#issuecomment-6938695462",
+      "posted": "2026-11-17T04:53:00Z",
+      "account": "chrisohearn",
+      "kind": "cross-link to k114s-mics-2026-11-17",
+      "result": "points the microphone commit's thread at the K114S report",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3b.c4-1 (betizzel/omarchy-m5 v272-11 series on aurora-silicon/linux integration/aurora, plus this repository's patches)",
+        "loader": "Aura Stage 2 pin beceb683 (betizzel m1n1 pin)",
+        "device_tree_sha256": "de9fa4b6763459015761c8c99c32f2eb9afe9f3555d345331a3d1010ef1c52c0",
+        "stage2_sha256": "0990b168fc535073d186a1b7b6b98b2831ec39aa544ffb731950f1361d361f3a"
+      },
+      "not_claimed": "as k114s-mics-2026-11-17",
+      "state": "submitted",
+      "read_back": "comment URL returned by the API",
+      "follow_up": "none",
+      "acknowledged": null,
+      "maintainer_feedback": []
     }
   ]
 }
