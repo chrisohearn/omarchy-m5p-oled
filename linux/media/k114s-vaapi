@@ -30,7 +30,7 @@ case ${1:---install} in
     echo "k114s-vaapi: installed $dst (LIBVA_DRIVER_NAME=asahi); log out and in, or reboot, for the session to pick it up" ;;
   --undo)
     [ -n "$root" ] || [ "$(id -u)" = 0 ] || die "run with sudo"
-    rm -f "$dst"
+    rm -f "$dst"; [ ! -e "$dst" ] || die "cannot remove $dst (read-only or immutable?); the override is still in place"
     echo "k114s-vaapi: removed $dst (takes effect at the next login)" ;;
   *) die "usage: k114s-vaapi [--install | --undo | --check]" ;;
 esac
