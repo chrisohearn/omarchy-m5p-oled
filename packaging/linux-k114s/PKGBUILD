@@ -97,6 +97,8 @@ package() {
   if [[ $_cand == r3c ]]; then
     grep -q 'dcp_bl_set_minimum' "$_src/drivers/gpu/drm/apple/dcp_backlight.h" &&
       grep -q 'fw27_panel_edr_max_nits = 500;' "$_src/drivers/gpu/drm/apple/dcp.c" &&
+      grep -q 'dcp_panel_color_target' "$_src/drivers/gpu/drm/apple/dcp-display-metadata.c" &&
+      grep -q 'panel EDR off: cap %u nits set and the SDR maximum is unknown' "$_src/drivers/gpu/drm/apple/dcp.c" &&
       grep -A3 '^static int macsmc_battery_get_date' "$_src/drivers/power/supply/macsmc-power.c" | grep -q 'return -ENODATA;' &&
       grep -q 'apple,k114s' "$_src/drivers/soc/apple/profile.rs" &&
       grep -q 'ALS_SENSOR_BLOB_LEN: usize = 193;' "$_src/drivers/soc/apple/aop.rs" &&

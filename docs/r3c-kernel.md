@@ -39,9 +39,13 @@ the driver said "no ALS calibration named in the device tree; the sensor stays o
 calibration, `apple/aop-als-cal.bin`, is already installed (193 bytes, the vendor firmware extract). The base driver
 only takes T8140's 80-byte message; #1983 builds the 216-byte message the 14-inch M5 Max firmware accepts from a
 193-byte blob. Its author names the file only in the K114c tree, noting that "the 14-inch M5 Pro" firmware never asks
-for the endpoint; whether this Mac's firmware asks is what the trial shows. If it does not, the driver logs a warning
-and goes on: the call site is written so that "a failure here costs the sensor, not the AOP" (`drivers/soc/apple/aop.rs`),
-so the microphones and the jack are not at stake. `#1929` (the CT817 enable sequence) is not carried: #1983 alone gave
+for the endpoint. This Mac's firmware does ask: `setup_als_calibration()` returns silently when the firmware has not
+announced the ALS endpoint (0x21), and only after that check prints "no ALS calibration named in the device tree",
+which r3b.c4 printed here (agent-run, the same function in both kernels). A firmware that does not announce the
+endpoint skips the step without a line. A calibration the firmware refuses, or a file that is missing or the wrong
+size, is logged ("ALS calibration failed ...") and costs only the sensor: the call site goes on to the AOP's other
+services (`drivers/soc/apple/aop.rs`, "a failure here costs the sensor, not the AOP"), so the microphones and the
+jack are not at stake. `#1929` (the CT817 enable sequence) is not carried: #1983 alone gave
 readings on the K114c (upstream-reported).
 
 ## 3. The NVRAM read path (issue #64)
@@ -93,7 +97,7 @@ includes, plus the calibration name and the NVRAM fragment. Neither touches a pi
 | `tools/asahi/qspi-nvram-tests.py` with the K114s row | 32 PASS, 0 FAIL | agent-run |
 | QEMU `k114s-qemu-smoke shell` | PASS, banner `#1 SMP PREEMPT K114S-R3C` | emulator/replica |
 | QEMU, every module (`k114s-qemu-smoke modules`) | `ok=1965 failed=7`, the same seven as every earlier kernel; no Oops, BUG or WARNING | emulator/replica |
-| `packaging/linux-k114s/check-package.sh` (with the build's `Module.symvers`) | all passed; it now maps an r3c release to `linux-k114s` | agent-run |
+| `packaging/linux-k114s/check-package.sh` (with the build's `Module.symvers`) | all passed. It maps an r3c release to `linux-k114s`, and r3c versions get the same binary checks as r3b.c4 (the brightness floor, the Display P3 default, the 500-nit EDR cap, the unknown-SDR EDR guard, the SEP admission) except the dropped VRR minimum, plus the K114s NVRAM row and the 193-byte calibration message | agent-run |
 
 ## 6. The trial
 
