@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * K114s sound tree (docs/r3-mics.md, issue #38): the configured Touch ID tree
+ * (t6050-k114s-r3b-touchid.dts, unchanged) plus the Stage A sound fragment (t6050-k114s-sound.dtsi):
+ * the PMP, the AOP, the microphone array and the headphone jack. NO SPEAKERS: the fragment has no
+ * amplifier node, no shutdown regulator, no Speaker link and no spkr or sense channel, and pins 106,
+ * 107, 136 and 137 stay reserved (tests/lint-sound-dtb.py checks the compiled tree).
+ *
+ * Built against the same includes as the Touch ID tree (P's, docs/r3-display-plan.md 3.2), so the two
+ * trees differ by the sound fragment's nodes and properties alone. Needs this Mac's PMP values,
+ * t6050-k114s-pmp-tunables.dtsi (build/k114s-adt.py pmp-dtsi), on the include path at build time; the
+ * file is one Mac's data and is not part of this repository, so the build fails without it.
+ *
+ * Both fragments replace the AP bank's gpio-reserved-ranges. The Touch ID fragment comes last and
+ * carries the sound pins through K114S_TOUCHID_WITH_SOUND: exposed 80, 134, 138, 139 (81 stays
+ * reserved: this tree has no SD reader).
+ */
+#define K114S_TOUCHID_WITH_SOUND
+#include "t6050-k114s-r3b-brightness.dts"
+#include "t6050-k114s-sound.dtsi"
+#define K114S_R3_TOUCHID
+#include "t6050-k114s-touchid.dtsi"

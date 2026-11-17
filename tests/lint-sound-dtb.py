@@ -135,7 +135,26 @@ def lint(f):
             err(f"jack codec pins {sorted(SOUND_PINS - exposed)} are reserved")
         ap_ph = cells(ap_props.get("phandle", b""))[:1]
         named = set()
+
+        def irq_parent(path):
+            # the interrupt-parent in force at a node: its own, else the nearest ancestor's
+            while True:
+                ip = cells(nodes.get(path or "/", {}).get("interrupt-parent", b""))[:1]
+                if ip or path in ("", "/"):
+                    return ip
+                path = path.rsplit("/", 1)[0]
+
         for p, pr in nodes.items():
+            # interrupts = <pin flags ...> under an interrupt-parent that is the AP pin controller
+            if "interrupts" in pr and ap_ph and irq_parent(p) == ap_ph:
+                n = cells(ap_props.get("#interrupt-cells", b""))[:1]
+                if not n:
+                    err(f"{p} interrupts: the AP pin controller has no #interrupt-cells")
+                else:
+                    for pin in cells(pr["interrupts"])[0::n[0]]:
+                        named.add(pin)
+                        if pin in FORBIDDEN_PINS:
+                            err(f"{p} interrupts names AP pin {pin} ({FORBIDDEN_PINS[pin]})")
             for name, v in pr.items():
                 # <&controller pin flags ...> lists: walk them by each controller's cell count
                 if name.endswith(("-gpios", "-gpio")) or name in ("gpios", "gpio"):

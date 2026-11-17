@@ -31,8 +31,8 @@
  * Pin 138 is exposed through gpio-reserved-ranges, as #1587 does for the J714s: while it is
  * reserved gpiolib refuses the interrupt (rc=-6). Pin 112 stays reserved (SError on read). This
  * file replaces gpio-reserved-ranges, so it carries the pins of the other fragments through two
- * switches: K114S_TOUCHID_WITH_SD (80, 81, 138 exposed) and K114S_TOUCHID_WITH_SOUND (80, 81,
- * 134, 138, 139 exposed; covers the SD reader too). With neither: 80 and 138.
+ * independent switches: K114S_TOUCHID_WITH_SD (adds 81) and K114S_TOUCHID_WITH_SOUND (adds 134 and
+ * 139). With neither: 80 and 138; with both: 80, 81, 134, 138, 139.
  *
  * Include order: this file replaces gpio-reserved-ranges, so include it after t6050-k114s-sd.dtsi
  * and t6050-k114s-sound.dtsi (the later one wins).
@@ -48,8 +48,10 @@
 };
 
 &pinctrl_ap {
-#if defined(K114S_TOUCHID_WITH_SOUND)
+#if defined(K114S_TOUCHID_WITH_SOUND) && defined(K114S_TOUCHID_WITH_SD)
 	gpio-reserved-ranges = <0 80>, <82 52>, <135 3>, <140 81>;
+#elif defined(K114S_TOUCHID_WITH_SOUND)
+	gpio-reserved-ranges = <0 80>, <81 53>, <135 3>, <140 81>;
 #elif defined(K114S_TOUCHID_WITH_SD)
 	gpio-reserved-ranges = <0 80>, <82 56>, <139 82>;
 #else
