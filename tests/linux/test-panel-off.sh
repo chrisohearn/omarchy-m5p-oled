@@ -15,7 +15,7 @@ case \$1 in
   daemon-reload) exit 0 ;;
   enable) touch "$st/\$2.enabled" ;;
   disable) shift; [ "\$1" = --now ] && shift; rm -f "$st/\$1.enabled" "$st/\$1.active" ;;
-  restart) [ -e "$BASE/fail-start" ] && exit 1; touch "$st/\$2.active" ;;
+  restart) [ -e "$BASE/fail-start" ] && exit 1; [ -e "$BASE/skip-start" ] && exit 0; touch "$st/\$2.active" ;;
   is-enabled) [ -e "$st/\$2.enabled" ] && echo enabled || { echo disabled; exit 1; } ;;
   is-active) [ -e "$st/\$2.active" ] && echo active || { echo inactive; exit 3; } ;;
 esac
@@ -34,6 +34,7 @@ bash "$S" >/dev/null 2>&1; ok "install puts the repository's config back" "$(cmp
 rm "$st/k114s-panel-off.service.active"; bash "$S" --check >/dev/null 2>&1; ok "a stopped unit is not 'installed'" $? 1
 bash "$S" >/dev/null 2>&1
 touch "$BASE/fail-start"; rm "$st/k114s-panel-off.service.active"; bash "$S" >/dev/null 2>&1; ok "a unit that cannot start makes install fail" $? 1; rm "$BASE/fail-start"
+touch "$BASE/skip-start"; rm -f "$st/k114s-panel-off.service.active"; bash "$S" >/dev/null 2>&1; ok "a start skipped by the unit's condition makes install fail (#178)" $? 1; rm "$BASE/skip-start"
 K114S_HYPRIDLE=$BASE/bin/nope bash "$S" >/dev/null 2>&1; ok "no hypridle: install refuses" $? 1
 bash "$S" --undo >/dev/null 2>&1; ok "undo removes both files and the unit" "$? $(test -e "$conf"; echo $?) $(test -e "$unit"; echo $?) $(test -e "$st/k114s-panel-off.service.enabled"; echo $?)" "0 1 1 1"
 bash "$S" --bogus >/dev/null 2>&1; ok "an unknown option fails" $? 1
