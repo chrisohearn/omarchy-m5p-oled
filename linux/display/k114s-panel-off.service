@@ -1,0 +1,15 @@
+# K114s OLED panel off on idle (issue #22): hypridle with this repository's config only, so Omarchy's own idle,
+# screensaver and lock are left as they are. Installed by linux/display/k114s-panel-off.
+[Unit]
+Description=K114s OLED: panel off after idle (hypridle)
+PartOf=graphical-session.target
+After=graphical-session.target
+ConditionEnvironment=WAYLAND_DISPLAY
+
+[Service]
+ExecStart=/usr/bin/hypridle -c %h/.config/hypr/k114s-panel-off.conf
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target
