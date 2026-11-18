@@ -163,10 +163,14 @@ merge_sides() {
 #   nobase    no NAME.base/ (or no git): no three-way merge possible
 #   badbase   NAME.base/ does not match the patch
 #   conflict  the change overlaps Omarchy's own change to those lines; nothing written
+#   partial   some of the files already have the change and others do not (Omarchy shipped part
+#             of it): nothing written, since a later take-out could not tell the parts apart
 #   noop      the merge leaves every file as it is (the change is already there, or already out)
 #   clean     the merge is clean and changes the files; written with "write"
+#   failed    a write failed; every file written so far was put back as it was
 three_way() {
-  local p=$1 dir=$2 mode=$3 w f from to rc state=noop
+  local p=$1 dir=$2 mode=$3 w f from to rc state=noop done=0 todo=0
+  local -a written=()
   w=$(mktemp -d "${TMPDIR:-/tmp}/k114s-omarchy-merge.XXXXXX") || { echo nobase; return; }
   merge_sides "$p" "$w"; rc=$?
   if (( rc == 1 )); then echo nobase; rm -rf "$w"; return; fi
@@ -178,13 +182,25 @@ three_way() {
     if ! git merge-file -p -q "$ROOT/usr/$f" "$w/$from/$f" "$w/$to/$f" > "$w/out/$f" 2>/dev/null; then
       state=conflict; break
     fi
-    cmp -s "$w/out/$f" "$ROOT/usr/$f" || state=clean
+    if ! cmp -s "$w/out/$f" "$ROOT/usr/$f"; then todo=1
+    elif ! cmp -s "$w/base/$f" "$w/new/$f"; then done=1; fi
   done < <(patch_files "$p")
+  if [[ $state != conflict ]] && (( todo )); then
+    if (( done )); then state=partial; else state=clean; fi
+  fi
   if [[ $state == clean && $mode == write ]]; then
-    # Same inode, owner and mode: only the contents change, as with patch.
+    # Same inode, owner and mode: only the contents change, as with patch. Every file is copied
+    # first, and if any write fails, each file written so far (and the failed one) is put back.
     while read -r f; do
-      cmp -s "$w/out/$f" "$ROOT/usr/$f" || cat "$w/out/$f" > "$ROOT/usr/$f" || { state=failed; break; }
+      cmp -s "$w/out/$f" "$ROOT/usr/$f" && continue
+      mkdir -p "$(dirname "$w/keep/$f")"
+      cp "$ROOT/usr/$f" "$w/keep/$f" || { state=failed; break; }
+      written+=("$f")
+      cat "$w/out/$f" > "$ROOT/usr/$f" || { state=failed; break; }
     done < <(patch_files "$p")
+    if [[ $state == failed ]]; then
+      for f in "${written[@]}"; do cat "$w/keep/$f" > "$ROOT/usr/$f" 2>/dev/null; done
+    fi
   fi
   rm -rf "$w"
   echo "$state"

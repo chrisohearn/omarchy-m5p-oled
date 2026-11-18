@@ -88,6 +88,20 @@ ok "merge conflict: one notification naming the patch" "$(wc -l < "$NOTES" | tr 
 # Without a base folder, a patch that no longer fits is also notified.
 r=$(mk); inst "$r" >/dev/null; orig "$r"; sed -i 's/^key=user$/key=account/' "$r/usr/bin/omarchy-a"
 out=$(applyn "$r"); ok "no base, does not fit: notified" "$(grep -c '0001-test: Omarchy changed those lines' "$NOTES")" 1
+# A write that fails part-way (the second file read-only; root ignores the mode) puts back the first.
+if [ "$(id -u)" != 0 ]; then
+  r=$(mk); inst "$r" "$M" >/dev/null; orig "$r"; sed -i 's/^# end$/# finish/' "$r/usr/bin/omarchy-a" "$r/usr/bin/omarchy-b"; shipped "$r"
+  before=$(sumof "$r"); chmod 444 "$r/usr/bin/omarchy-b"; out=$(applyn "$r"); rc=$?; chmod 755 "$r/usr/bin/omarchy-b"
+  ok "merge write fails: exit 0, reported, both files as they were" "$rc:$(grep -c 'could not write the three-way merge' <<<"$out"):$(sumof "$r")" "0:1:$before"
+  ok "merge write fails: notified" "$(grep -c '0001-test: failed while applying' "$NOTES")" 1
+fi
+# Omarchy ships the fix in one file and changes only context in the other: nothing is written,
+# and --undo leaves Omarchy's own fix alone.
+r=$(mk); inst "$r" "$M" >/dev/null; orig "$r"; sed -i 's/^key=user$/key=user-org/' "$r/usr/bin/omarchy-a"; sed -i 's/^# end$/# finish/' "$r/usr/bin/omarchy-b"; shipped "$r"
+before=$(sumof "$r"); out=$(applyn "$r")
+ok "partly shipped: reported, nothing written" "$(grep -c '0001-test: Omarchy ships part of this change' <<<"$out"):$(sumof "$r")" "1:$before"
+ok "partly shipped: notified" "$(grep -c '0001-test: Omarchy ships part of it now' "$NOTES")" 1
+out=$(inst "$r" "$M" --undo); ok "partly shipped, undo: Omarchy's fix kept, nothing changed" "$(sumof "$r")" "$before"
 # A base folder that does not match its patch is refused by the installer.
 bad=$BASE/badbase; cp -r "$M" "$bad"; sed -i 's/^key=user$/key=other/' "$bad/0001-test.base/bin/omarchy-a"
 r=$(mk); out=$(inst "$r" "$bad"); ok "bad base: install refused, nothing applied" "$?:$(grep -c 'base folder that does not match' <<<"$out"):$(sumof "$r")" "1:1:$ORIG"

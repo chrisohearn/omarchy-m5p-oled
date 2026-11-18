@@ -2,8 +2,9 @@ Key a Claude account by user and organization.
 
 Source: omacom/omarchy pull request 18681 (head 560ce87ad93b), the bin/ part only, reconciled
 here with quattro's login seating and collector locking at a490d5bdb (the omarchy-dev
-4.0.0.r8044 build), plus one line: signing in again as an account also checks the
-organization. The same change as pull request 16144, carried onto quattro. Commits 9806db5f
+4.0.0.r8044 build), plus one change: signing in again as an account also checks the
+organization, using the organization its login names when an older registry entry has none.
+The same change as pull request 16144, carried onto quattro. Commits 9806db5f
 and 35148783 by Michele Di Giovanni (mikjkd), d0cbc870 by Viktor Tar (viktortar98), 07fb5230
 and 560ce87a by Omarchybot.
 License: as Omarchy (MIT).
@@ -15,7 +16,7 @@ Applied to /usr/bin by linux/omarchy-patches-apply: exactly, or as a three-way m
 Retire this file once Omarchy ships the fix (see docs/omarchy-patches.md).
 
 diff --git a/bin/omarchy-agent-account-state b/bin/omarchy-agent-account-state
-index ce3d27a13..6b3a0f5cf 100755
+index ce3d27a13..eb73de39d 100755
 --- a/bin/omarchy-agent-account-state
 +++ b/bin/omarchy-agent-account-state
 @@ -176,6 +176,7 @@ def identity(provider: str, home: Path) -> dict[str, str]:
@@ -64,12 +65,20 @@ index ce3d27a13..6b3a0f5cf 100755
        # A retry may already have registered this login under another home.
        shutil.rmtree(home)
        return None
-@@ -821,7 +835,7 @@ def relogin(provider: str, target: str, pending: Path) -> dict[str, Any]:
+@@ -821,7 +835,15 @@ def relogin(provider: str, target: str, pending: Path) -> dict[str, Any]:
        account = find(registry, target)
        if not account:
          raise AccountError(f"No {PROVIDERS[provider]['name']} account named {target}")
 -      if account.get("accountId") and account["accountId"] != found["accountId"]:
-+      if account.get("accountId") and not same_account(account, found):
++      known = dict(account)
++      # A registry written before organizations were recorded has no orgId;
++      # the login it holds still names one, and a sign-in in another of the
++      # user's organizations must not replace it.
++      if not known.get("orgId"):
++        current = identity(provider, login_home(provider, registry, account))
++        if current["accountId"] and current["accountId"] == known.get("accountId"):
++          known["orgId"] = current.get("orgId", "")
++      if account.get("accountId") and not same_account(known, found):
          raise AccountError(tr("omarchy-i18n agents.wrongAccount", "That's %1, not %2. Try again, and sign in as %2.", found["email"] or found["accountId"], label_of(account)))
        home = login_home(provider, registry, account)
        if home != primary_home(provider):

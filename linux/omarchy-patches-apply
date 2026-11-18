@@ -23,14 +23,15 @@ say() { echo "K114s Omarchy fixes: $*"; }
 skipped=()
 
 # One notification for the run, to each signed-in desktop user. Best effort: it never fails the
-# hook. K114S_NOTIFY_CMD (tests) is run with the summary and body instead.
+# hook. In a fake root only (K114S_ROOT set, as in the tests), K114S_NOTIFY_CMD is run with the
+# summary and body instead; on the machine itself it is ignored, so the hook never runs it as root.
 notify_skipped() {
   (( ${#skipped[@]} )) || return 0
   local summary body bus uid user
   summary="Omarchy update: ${#skipped[@]} K114s fix(es) not applied"
   body="$(printf '%s\n' "${skipped[@]}")Omarchy's own behaviour is back for these until the patch is refreshed (docs/omarchy-patches.md)."
-  if [[ -n ${K114S_NOTIFY_CMD:-} ]]; then
-    "$K114S_NOTIFY_CMD" "$summary" "$body" >/dev/null 2>&1 || true
+  if [[ -n $ROOT ]]; then
+    [[ -n ${K114S_NOTIFY_CMD:-} ]] && { timeout 10 "$K114S_NOTIFY_CMD" "$summary" "$body" >/dev/null 2>&1 || true; }
     return 0
   fi
   [[ -z $ROOT ]] && command -v notify-send >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1 || return 0
@@ -38,7 +39,7 @@ notify_skipped() {
     [[ -S $bus ]] || continue
     uid=$(basename "$(dirname "$bus")")
     (( uid >= 1000 )) || continue
-    user=$(id -nu "$uid" 2>/dev/null) || continue
+    user=$(timeout 5 id -nu "$uid" 2>/dev/null) || continue
     timeout 5 runuser -u "$user" -- env DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
       notify-send -u critical -a "K114s Omarchy fixes" "$summary" "$body" >/dev/null 2>&1 || true
   done
@@ -83,8 +84,11 @@ for p in "${patches[@]}"; do
       conflict)
         say "$name: does not fit this Omarchy build: Omarchy changed the same lines, and the three-way merge from its base conflicts. Nothing was written. Check whether Omarchy now has the fix, then refresh or retire the patch (docs/omarchy-patches.md)."
         skipped+=("$name: Omarchy changed the same lines.") ;;
+      partial)
+        say "$name: Omarchy ships part of this change itself now, and the rest does not fit as it stands. Nothing was written. Refresh or retire the patch (docs/omarchy-patches.md)."
+        skipped+=("$name: Omarchy ships part of it now.") ;;
       failed)
-        say "$name: FAILED while writing the three-way merge; reinstall the Omarchy package to restore its files"
+        say "$name: could not write the three-way merge; the files written were put back as they were. Nothing changed."
         skipped+=("$name: failed while applying.") ;;
       badbase)
         say "$name: does not fit this Omarchy build, and its base folder does not match it. Nothing was written. Refresh the patch and its base (docs/omarchy-patches.md)."

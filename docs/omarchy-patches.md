@@ -81,11 +81,16 @@ Each patch is checked as a whole before anything is written, and without fuzz:
 - **applied by a three-way merge**: the patch no longer fits exactly, but its base folder merges
   cleanly with Omarchy's changes. The record is written as for **applied**, and later runs report
   **in place (merged with this Omarchy build's changes)**.
+- **Omarchy ships part of this change itself now**: with a base folder, some of the files already
+  have the change and the others still need it. Nothing is written, because a later take-out could
+  not tell Omarchy's part from this machine's. Refresh or retire the patch.
 - **does not fit this Omarchy build**: Omarchy changed those lines (with a base folder: the same
   lines, so the merge conflicts). Nothing is written, and the update carries on, with that fix
   missing until the patch is refreshed or retired.
 
-A patch that does not fit, or fails while applying, also raises one desktop notification after the
+A merge writes its files only after every one of them merged cleanly. If a write still fails, each
+file already written is put back as it was, and the patch counts as not applied. A patch that does
+not fit, is partly shipped or fails while applying also raises one desktop notification after the
 update, to each signed-in user, naming it: Omarchy's own behaviour is back until it is refreshed.
 The notification is best effort and never fails the hook.
 
@@ -143,8 +148,11 @@ sudo env K114S_OMARCHY_PATCHES_SRC="$W/src" bash linux/omarchy-patches-install
 omarchy-restart-shell
 ```
 
-Both apply to `v4.5.0` without fuzz, and `tests/linux/test-omarchy-patches.sh` passes with only
-those two in the source against an export of that tag (74 checks). The K114s patches (0003 and
+Both applied to `v4.5.0` without fuzz then, and `tests/linux/test-omarchy-patches.sh` passed with only
+those two in the source against an export of that tag (74 checks). The 0001 refreshed on 2026-11-18
+targets the Edge build (r8044) and does not fit `v4.5.0`. Do not run the install there again with
+it: a refresh would take the working 0001 out and skip the new one. That machine keeps the 0001 it
+has until its stable build carries the Edge code 0001 now expects. The K114s patches (0003 and
 later) must never go there. The hook keeps the installed copies through Omarchy updates. A change
 to 0001 or 0002 here reaches that machine only when the install is run there again, with the same
 narrowed source: a plain install from the checkout would add the K114s patches.
