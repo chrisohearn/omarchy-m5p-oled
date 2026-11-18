@@ -1,8 +1,9 @@
 # r3c: the K114s kernel on betizzel's v272-18, with the light sensor and NVRAM pieces
 
-Status 2026-11-17: **built, packaged, emulator-tested; not booted on the K114s.** The owner asked to "check all repos
-and adopt their code" (intake 2026-11-17, kernel v272-18, lid sleep, camera, deep sleep and the release 9 packages).
-r3c is the kernel half of that. Evidence labels: **agent-run**, **emulator/replica**, **upstream-reported**.
+**r3c and its Stage 2 (`677f04ca…`) are the verified default on the K114s.** Both the one-boot trial and
+the first normal boot passed (section 6). The light sensor reports lux, and the full NVRAM partition reads. The owner asked to "check all repos and adopt their code" (intake 2026-11-17:
+kernel v272-18, lid sleep, camera, deep sleep and the release 9 packages). r3c is the kernel half of that. Evidence
+labels: **agent-run**, **emulator/replica**, **upstream-reported**.
 
 ## 1. What r3c is
 
@@ -41,12 +42,22 @@ only takes T8140's 80-byte message; #1983 builds the 216-byte message the 14-inc
 193-byte blob. Its author names the file only in the K114c tree, noting that "the 14-inch M5 Pro" firmware never asks
 for the endpoint. This Mac's firmware does ask: `setup_als_calibration()` returns silently when the firmware has not
 announced the ALS endpoint (0x21), and only after that check prints "no ALS calibration named in the device tree",
-which r3b.c4 printed here (agent-run, the same function in both kernels). A firmware that does not announce the
-endpoint skips the step without a line. A calibration the firmware refuses, or a file that is missing or the wrong
-size, is logged ("ALS calibration failed ...") and costs only the sensor: the call site goes on to the AOP's other
-services (`drivers/soc/apple/aop.rs`, "a failure here costs the sensor, not the AOP"), so the microphones and the
-jack are not at stake. `#1929` (the CT817 enable sequence) is not carried: #1983 alone gave
-readings on the K114c (upstream-reported).
+which r3b.c4 printed here (agent-run, the same function in both kernels). What the boot log shows, by outcome
+(`setup_als_calibration()` in `drivers/soc/apple/aop.rs` on r3c):
+
+| Outcome | Kernel log | Sensor |
+| --- | --- | --- |
+| The firmware never announces the ALS endpoint | nothing | no calibration sent |
+| No `firmware-name` in the tree (r3b.c4 here) | "no ALS calibration named in the device tree; the sensor stays off" | off |
+| The file is missing | `ALS calibration "apple/aop-als-cal.bin" not available (...); the sensor stays off` (warning) | off |
+| The file is neither 80 nor 193 bytes | "ALS calibration ... is neither an 80-byte calibration message nor a 193-byte sensor blob", then "ALS calibration failed (EINVAL)" | off |
+| The firmware refuses it | "ALS calibration rejected (status ...)", then "ALS calibration failed (EIO)" | off |
+| Accepted | nothing | reports lux |
+
+None of these stops the AOP: the call site goes on to its other services (`aop.rs`, "a failure here costs the
+sensor, not the AOP"), so the microphones and the jack are not at stake. `owner-session-r3c/r3c-check.sh` prints
+the boot-log lines containing "ALS calibration". `#1929` (the CT817 enable
+sequence) is not carried: #1983 alone gave readings on the K114c (upstream-reported).
 
 ## 3. The NVRAM read path (issue #64)
 
@@ -57,10 +68,11 @@ partition's `reg` is static, so no loader fill-in is needed. Only the partition 
 has no device node.
 
 Writes are gated twice: `spi_apple_qspi.read_only` (on by default; root must clear it for one call) and the board row.
-`r3c/0007` adds a K114s row with the J716s's GigaDevice ID `0xc88317` **by assumption**: the K114s's flash ID has not
-been read. If it differs, the existing JEDEC check refuses every program and erase before WREN, so the first boot can
-only read and report the real ID. No block-protect bit is tolerated. The startup-disk tools themselves (one-time
-"Restart into macOS once", never the default) come later, after a read-only probe on this Mac.
+`r3c/0007` adds a K114s row with the J716s's GigaDevice ID `0xc88317`. When the row was written, this was an
+assumption: the K114s's flash ID had not been read. Had it differed, the existing JEDEC check would have refused every
+program and erase before WREN. The trial boot read the real ID (`/sys/bus/spi/devices/spi1.0/spi-nor/jedec_id` is
+`c88317c88317`, agent-run 2026-11-17), which matches the row. The write gate also rejects any block-protect bit. The remaining test is to parse
+the boot variables read-only before trying a one-time restart into macOS.
 
 ## 4. The tree
 
@@ -105,10 +117,48 @@ A one-boot trial of both halves together: the r3c tree through `m1n1/boot-ctxr-r
 through a Limine one-shot (`k114s-boot-once arm Omarchy/linux-k114s --with-stage2-trial`). Both are spent by the boot
 that takes them, so a hang is followed by the configured Stage 2 on the default entry (r3b). It has to be armed from a
 normal boot, and it needs r3c installed first, which retires r3a, so the order is: a plain boot of the proven default,
-then the install, then the armed boot. Each reboot has its own acknowledgement. Not yet run.
+then the install, then the armed boot. Each reboot has its own acknowledgement.
 
-What the trial must show: the speaker gates; the cards, the microphone, video decode, Touch ID, Wi-Fi, Bluetooth, the
+What the trial had to show: the speaker gates; the cards, the microphone, video decode, Touch ID, Wi-Fi, Bluetooth, the
 battery and the GPU desktop as on r3b; whether the light sensor reports lux; the NVRAM partition readable and the
 flash's real ID. Lid sleep (suspend-to-idle) is a separate, attended step after promotion. The camera and deep sleep
 need a new loader (the K114s ISP row of `patches/aura/camera/0001`, aura #214's T6050 sleep controller wake sources)
 and are a second trial.
+
+### Results (2026-11-17)
+
+The plain boot of r3b came up at 17:41Z on the AVD Stage 2's normal path. r3c was installed in the r3a slot, and the
+trial was armed from that boot. The trial boot's kernel started at 18:05:54Z.
+
+| Check | Result | Label |
+| --- | --- | --- |
+| The trial took both halves | `/chosen/aurora,trial` = `m1n1/boot-ctxr-r3c.bin`; kernel `7.3.0-17.v272-18-k114s-r3c-ARCH`, `#1 SMP PREEMPT K114S-R3C`; the Limine one-shot was consumed and `aura-try` reads spent | agent-run |
+| Speaker gates | tree-check, the `/sound` compatible `apple,k114-macaudio`, `speaker-readiness` exit 0, no amplifier I2C address; cards `AppleK114` and `AppleK114HPAI` | agent-run |
+| Kernel log | no error-like line that the r3b boot did not have; 0 Oops, BUG, trace or WARNING lines | agent-run |
+| Light sensor | `aop-sensors-als` `in_illuminance_input` 2502, 2504, 2508 lux over 3 s; 4928 later in the same boot, as the room light changed. No "ALS calibration" line: the firmware asked (r3b.c4 printed its line) and accepted the 193-byte blob (section 2) | agent-run |
+| NVRAM | `mtd1: 000c0000 00001000 "nvram"`; flash ID `c88317c88317`, the row's `0xc88317`; `spi_apple_qspi.read_only` = `Y`. Nothing was written | agent-run |
+| Video decode | H.264, HEVC and VP9 at 1920x1080: hardware frames equal software (md5), with `LIBVA_DRIVER_NAME` set to `asahi`, to `v4l2_request`, and unset; `/dev/video10`, `/dev/media0` | agent-run |
+| Touch ID, microphone, Wi-Fi, Bluetooth, battery, GPU | the sensor node and `aurora-sep` active; the default input records live audio; `wlan0` up; Bluetooth powered; battery capacity read, 0 `manufacture_year` lines; Hyprland on `renderD128` | agent-run |
+| P9 | holds | agent-run |
+
+**Promoted** at 19:49Z, with the owner's go-ahead in T3. `r3c-promote.sh` ran from the trial boot:
+- both pinned trees are the r3c tree (`a92c679a…`);
+- `update-boot-ctxr` wrote `m1n1/boot-ctxr.bin` = `677f04ca…`, the trial file byte for byte;
+- `default_entry` is `Omarchy/linux-k114s`;
+- the trial copy is off the ESP.
+
+r3b.c4 stays in the menu as the way back. P9 now pins the r3c files (owner-approved).
+
+### First normal boot
+
+The owner updated and rebooted successfully on November 17 local time (00:12:35 UTC on November 18). The running
+kernel was r3c, the one-boot marker was absent, and P9 confirmed the configured Stage 2, both pinned trees and the
+Limine default. The live device tree still exposes no amplifier or speaker channel. The IIO sensor reported
+1,446 lux. All 786,432 bytes of the named NVRAM partition read through the read-only MTD device, and the driver
+write gate stayed closed (`read_only=Y`). The MTD index differed from the trial, so identify the partition by name.
+
+Still open:
+- the owner's light-sensor cover test;
+- lid sleep, twice, on battery;
+- Bluetooth audio with the paired AirPods (#41);
+- the camera and deep-sleep trial.
