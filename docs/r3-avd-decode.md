@@ -2,7 +2,9 @@
 
 Status 2026-11-17: **hardware video decode works.** The AVD tree booted as a one-boot trial, H.264, HEVC and VP9
 decode on the Apple Video Decoder bit-identical to software, mpv uses it by default, and the owner judged a real film
-"looks right, smooth". The AVD tree is now the configured Stage 2; its first normal-path boot has not happened yet.
+"looks right, smooth". The AVD tree became the configured Stage 2, and its first normal-path boot followed at
+2026-11-17 17:41Z ([r3c-kernel.md](r3c-kernel.md) section 6). The r3c Stage 2 (`677f04ca…`) that replaced it the same day
+keeps the decoder, and the r3c kernel carries #1936. What remains is in "Still open" at the end.
 
 ## The trial tree (2026-11-17)
 
@@ -64,12 +66,15 @@ then armed from that normal boot with the unchanged script, acknowledged by Jarv
 file. Before-copies of the sound Stage 2 (`0990b168…`) and both trees (`de9fa4b6…`) are in
 `/var/lib/k114s-recovery/avd/promote-before/` (root-only). The speaker gates and P9 held afterwards.
 
-**Not tested:** the AVD Stage 2's first normal-path boot (next reboot); 10-bit HEVC and sizes above 1080p (upstream
+**Not tested then:** the AVD Stage 2's first normal-path boot (done later the same day, 17:41Z); 10-bit HEVC and sizes above 1080p (upstream
 #1995); AV1 (not in `hwdec-codecs`); the browser. Chromium keeps Omarchy's Apple default
 `--disable-features=AcceleratedVideoDecoder`, as on M1 and M2 Macs, so browser video stays on software decode.
-aurora-silicon/linux #1936 (ring-wrap arithmetic) is still not in the installed kernel.
+aurora-silicon/linux #1936 (ring-wrap arithmetic) was not in that kernel; r3c, the default since 2026-11-17, has it
+(merge `514ae1f4`).
 
-## Facts read today (agent-run, read-only)
+## Facts read before the trial (2026-11-17, agent-run, read-only)
+
+A record of the boot before the AVD tree; the decoder nodes and devices it lacked now exist (see "Results").
 
 | Fact | Result |
 |---|---|
@@ -86,10 +91,12 @@ The issue text (and the audit row for #63) say the file is `hwdec=auto-safe`. Th
 Mac is now the omarchy-mac Apple default, so no change is needed to ship it. Because mpv falls back to software when
 VAAPI does not initialise, the default is harmless on a boot without the decoder. Decision: keep the Apple default
 as it is. Do not add anything of ours to it. `hwdec=vaapi-copy` only becomes true hardware decode once the AVD tree is
-the default boot and the test below passes. Zero-copy `hwdec=vaapi` stays off (omarchy-mac documents the green-frame
+the default boot and the decode test passes, which both happened on 2026-11-17 (see "Results"). Zero-copy `hwdec=vaapi` stays off (omarchy-mac documents the green-frame
 problem with gpu-next on Asahi; unverified on the M5).
 
-## Owner steps (the boot trial is the owner's)
+## Trial procedure (2026-11-17, done)
+
+The steps the trial followed, kept as a record. Do not repeat the trial: the decoder is in the default tree.
 
 1. Build the trial tree `dts/t6050-k114s-r3b-avd.dts` (the configured sound tree plus the AVD fragment; section "The
    trial tree") with `build/make-stage2.sh`, in its own worktree. Boot it as one `aura-try` boot, with the checks of
@@ -106,15 +113,15 @@ problem with gpu-next on Asahi; unverified on the M5).
    no VA-API driver and quietly decodes in software, so a playback check would pass without the decoder. (Installed on
    this Mac 2026-11-17 before the trial boot.) Then play one real H.264 or HEVC file in mpv and say whether it looks
    right and does not stutter; `mpv --msg-level=vd=v` prints `Using hardware decoding (vaapi-copy)` when the decoder is used.
-5. Report the outcome on #30. A pass moves the matrix row to "boot-tested"; only then is the AVD fragment a
-   candidate for the default tree.
+5. Report the outcome on #30. The pass moved the matrix row to "boot-tested" and the AVD fragment into the default
+   tree.
 
 `bash tests/hardware/k114s-avd-decode-test.sh --software-only` runs on any boot and proves the script itself
-(clip, software md5). It was run today at 640x360: all three codecs produce an md5, exit 0. On the current boot
-without `--software-only` it prints SKIP (no `/dev/media*`) and exits 3.
+(clip, software md5). It was run on 2026-11-17 at 640x360: all three codecs produce an md5, exit 0. On a boot
+without the decoder, without `--software-only`, it prints SKIP (no `/dev/media*`) and exits 3.
 
-## Not done and why
+## Still open
 
-- Boot trial and playback judgement: owner at the Mac.
+- 10-bit HEVC and sizes above 1080p (upstream #1995): untested upstream and here.
+- AV1 (not in `hwdec-codecs`) and browser video (Chromium keeps hardware decode off on Apple Silicon).
 - The base's psreg-to-reg[46] mapping for pmgr4: upstream's step, not derivable from the ADT.
-- 10-bit HEVC (#1995) and above 1080p: untested upstream.

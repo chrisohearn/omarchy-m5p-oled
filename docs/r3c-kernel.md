@@ -1,7 +1,8 @@
 # r3c: the K114s kernel on betizzel's v272-18, with the light sensor and NVRAM pieces
 
 **r3c and its Stage 2 (`677f04ca…`) are the verified default on the K114s.** Both the one-boot trial and
-the first normal boot passed (section 6). The light sensor reports lux, and the full NVRAM partition reads. The owner asked to "check all repos and adopt their code" (intake 2026-11-17:
+the first normal boot passed (section 6). The light sensor reports lux. The trial found the NVRAM partition and its
+flash ID, and the first normal boot read the full partition. The owner asked to "check all repos and adopt their code" (intake 2026-11-17:
 kernel v272-18, lid sleep, camera, deep sleep and the release 9 packages). r3c is the kernel half of that. Evidence
 labels: **agent-run**, **emulator/replica**, **upstream-reported**.
 
@@ -50,7 +51,7 @@ which r3b.c4 printed here (agent-run, the same function in both kernels). What t
 | The firmware never announces the ALS endpoint | nothing | no calibration sent |
 | No `firmware-name` in the tree (r3b.c4 here) | "no ALS calibration named in the device tree; the sensor stays off" | off |
 | The file is missing | `ALS calibration "apple/aop-als-cal.bin" not available (...); the sensor stays off` (warning) | off |
-| The file is neither 80 nor 193 bytes | "ALS calibration ... is neither an 80-byte calibration message nor a 193-byte sensor blob", then "ALS calibration failed (EINVAL)" | off |
+| The file is not a valid calibration: neither 193 bytes nor an 80-byte message with T8140's operation code and body length (`als_calibration_message()`; an 80-byte file with a wrong header is refused the same way) | "ALS calibration ... is neither an 80-byte calibration message nor a 193-byte sensor blob", then "ALS calibration failed (EINVAL)" | off |
 | The firmware refuses it | "ALS calibration rejected (status ...)", then "ALS calibration failed (EIO)" | off |
 | Accepted | nothing | reports lux |
 
@@ -120,8 +121,8 @@ normal boot, and it needs r3c installed first, which retires r3a, so the order i
 then the install, then the armed boot. Each reboot has its own acknowledgement.
 
 What the trial had to show: the speaker gates; the cards, the microphone, video decode, Touch ID, Wi-Fi, Bluetooth, the
-battery and the GPU desktop as on r3b; whether the light sensor reports lux; the NVRAM partition readable and the
-flash's real ID. Lid sleep (suspend-to-idle) is a separate, attended step after promotion. The camera and deep sleep
+battery and the GPU desktop as on r3b; whether the light sensor reports lux; the NVRAM partition present and the
+flash's real ID (a full read of the partition was left to the first normal boot). Lid sleep (suspend-to-idle) is a separate, attended step after promotion. The camera and deep sleep
 need a new loader (the K114s ISP row of `patches/aura/camera/0001`, aura #214's T6050 sleep controller wake sources)
 and are a second trial.
 
@@ -147,7 +148,9 @@ trial was armed from that boot. The trial boot's kernel started at 18:05:54Z.
 - `default_entry` is `Omarchy/linux-k114s`;
 - the trial copy is off the ESP.
 
-r3b.c4 stays in the menu as the way back. P9 now pins the r3c files (owner-approved).
+At that promotion, r3b.c4 stayed in the menu as the way back, and P9 began pinning the r3c files (owner-approved).
+The two-slot rollout on 2026-11-18 later reused that slot for the r3c upstream build; section 7 gives the current
+default and fallback.
 
 ### First normal boot
 
@@ -157,9 +160,12 @@ Limine default. The live device tree still exposes no amplifier or speaker chann
 1,446 lux. All 786,432 bytes of the named NVRAM partition read through the read-only MTD device, and the driver
 write gate stayed closed (`read_only=Y`). The MTD index differed from the trial, so identify the partition by name.
 
+Sleep at that boot: r3c admits the K114s for suspend-to-idle (`r3c/0001`), and `suspend.target`, `hibernate.target`,
+`hybrid-sleep.target` and `suspend-then-hibernate.target` stay masked until the attended procedure.
+
 Still open:
 - the owner's light-sensor cover test;
-- lid sleep, twice, on battery;
+- lid sleep, twice, on battery only, with the owner attending (the targets are unmasked only for it);
 - Bluetooth audio with the paired AirPods (#41);
 - the camera and deep-sleep trial.
 
