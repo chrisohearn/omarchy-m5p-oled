@@ -41,6 +41,7 @@ and keep their authors and licenses.
 | `patches/linux/sleep-lid/0007` | aurora-silicon/linux pull request 1615, commit `089b082fa329` | Joshua Warren | GPL-2.0 (Linux kernel) |
 | `patches/linux/sleep-lid/0008` | aurora-silicon/linux pull request 1789, commit `f61eb4550a95` | Jens Axboe; Thomas Glanzmann | GPL-2.0+ OR MIT (device tree) |
 | `patches/linux/sleep-lid/0009`, `0010` | aurora-silicon/linux pull request 1844, commits `41c359da8175`, `788441e0890e` | Erik Bourget; Diljit Singh | GPL-2.0 (Linux kernel) |
+| `patches/linux/r3c-upstream/0001`–`0003` | Aurora Linux #2113 (`53c1f63d2306`, `d0dcfe84f6c1`) and #2117 (`c68d95314973`). The authorship address is replaced by `address-in-upstream-commit@localhost` | Diljit Singh (DjDeveloperr) | GPL-2.0 (Linux kernel) |
 | `patches/linux/sound/0001` | aurora-silicon/linux commit `45f4de446485`, pull request 1648 | Jens Axboe | GPL-2.0 (Linux kernel) |
 | `patches/linux/sound/0002`, `0003` | aurora-silicon/linux commits `ad10208a01c6`, `48243e8f3d32`, pull request 1787 | Jens Axboe | GPL-2.0 (Linux kernel) |
 | `patches/linux/sound/0004` | this repository (the K114 card, speakers off) | this repository | GPL-2.0 (Linux kernel) |

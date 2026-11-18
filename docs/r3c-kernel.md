@@ -162,3 +162,46 @@ Still open:
 - lid sleep, twice, on battery;
 - Bluetooth audio with the paired AirPods (#41);
 - the camera and deep-sleep trial.
+
+## 7. Offline upstream recovery candidate
+
+The follow-up series in [`patches/linux/r3c-upstream.series`](../patches/linux/r3c-upstream.series)
+applies after `r3c.series`, on the same v272-18 base and config. It covers two merged Aurora Linux fixes:
+
+- [#2113](https://github.com/aurora-silicon/linux/pull/2113) preserves T6050 N1 Wi-Fi and Bluetooth state when the
+  kernel refuses suspend. The two commits cover ownership, recovery and cfg80211 callback ordering. Bluetooth
+  headset audio still needs SCO transport.
+- [#2117](https://github.com/aurora-silicon/linux/pull/2117) waits for backlight policy before restoring the panel
+  level. The normal r3c boot on this K114s logged one premature backlight restore warning.
+
+For a build that can be distinguished from the installed r3c kernel, apply the follow-up patches and use a
+separate output directory:
+
+```sh
+while IFS= read -r patch; do
+    case "$patch" in ''|'#'*) continue ;; esac
+    git am --3way "$K114S_REPO/patches/linux/$patch"
+done < "$K114S_REPO/patches/linux/r3c-upstream.series"
+printf '%s\n' '-17.v272-18-k114s-r3c-upstream' > localversion.10-pkgrel
+mkdir -p "$O"
+cp "$R3C_OBJ/.config" "$O/.config"
+export KBUILD_BUILD_TIMESTAMP="$(date -Ru)"
+kmake O="$O" olddefconfig
+kmake O="$O" Image modules dtbs
+```
+
+The kernel tree after applying the three patches is `c7cb77152d8d4c886b5fc19e3588da2bf8f36c9e`.
+
+The archived series reconstructs the same kernel tree. The candidate config is byte-identical to r3c and
+passes all 385 requirements. The four upstream Centauri and backlight host fixtures pass with GCC and Clang,
+and the unchanged NVRAM safety suite passes all 32 checks. The Image, all 1,972 modules and DTBs build.
+The Image SHA-256 is `cc66c35d70d020ac4a4f28d2db82ce443f33d28e834a677b1372386eb0947622`.
+
+QEMU boots `7.3.0-17.v272-18-k114s-r3c-upstream-ARCH` to userspace. Its module sweep loads 1,965 modules and
+reports the same seven failures as the original r3c baseline. The Mac still boots the original r3c, where P9
+and the live speaker gate pass.
+
+The configured r3c device tree and speaker protections are outside this source delta. Hardware validation
+remains pending. For an attended trial, check cold-boot brightness and Wi-Fi and Bluetooth across an
+approved suspend-to-idle cycle. The J716c deep-sleep correction
+[#2177](https://github.com/aurora-silicon/linux/pull/2177) belongs to the newer sleep series.
