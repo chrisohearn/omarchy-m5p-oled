@@ -163,14 +163,14 @@ Still open:
 - Bluetooth audio with the paired AirPods (#41);
 - the camera and deep-sleep trial.
 
-## 7. Offline upstream recovery candidate
+## 7. Upstream recovery backports
 
 The follow-up series in [`patches/linux/r3c-upstream.series`](../patches/linux/r3c-upstream.series)
 applies after `r3c.series`, on the same v272-18 base and config. It covers two merged Aurora Linux fixes:
 
-- [#2113](https://github.com/aurora-silicon/linux/pull/2113) preserves T6050 N1 Wi-Fi and Bluetooth state when the
-  kernel refuses suspend. The two commits cover ownership, recovery and cfg80211 callback ordering. Bluetooth
-  headset audio still needs SCO transport.
+- The N1 backport adds ownership tracking and recovery when firmware-managed suspend fails. The recovery
+  worker can recreate the PCI functions and register Wi-Fi and Bluetooth again. Bluetooth headset audio still
+  needs SCO transport. [Aurora Linux #2113](https://github.com/aurora-silicon/linux/pull/2113)
 - [#2117](https://github.com/aurora-silicon/linux/pull/2117) waits for backlight policy before restoring the panel
   level. The normal r3c boot on this K114s logged one premature backlight restore warning.
 
@@ -198,10 +198,24 @@ and the unchanged NVRAM safety suite passes all 32 checks. The Image, all 1,972 
 The Image SHA-256 is `cc66c35d70d020ac4a4f28d2db82ce443f33d28e834a677b1372386eb0947622`.
 
 QEMU boots `7.3.0-17.v272-18-k114s-r3c-upstream-ARCH` to userspace. Its module sweep loads 1,965 modules and
-reports the same seven failures as the original r3c baseline. The Mac still boots the original r3c, where P9
-and the live speaker gate pass.
+reports the same seven failures as the original r3c baseline.
 
-The configured r3c device tree and speaker protections are outside this source delta. Hardware validation
-remains pending. For an attended trial, check cold-boot brightness and Wi-Fi and Bluetooth across an
-approved suspend-to-idle cycle. The J716c deep-sleep correction
-[#2177](https://github.com/aurora-silicon/linux/pull/2177) belongs to the newer sleep series.
+### K114s boot evidence
+
+On 2026-11-18 UTC, this Image passed two Limine one-shot trials and a normal boot as the default.
+All three boots used the configured r3c Stage 2 and passed P9 and the speaker gate. The panel ran
+at 120 Hz, and backlight restore logged no errors. Wi-Fi connected, Bluetooth powered on,
+and the ambient light sensor reported lux. PipeWire streamed from the built-in microphone.
+The AVD hardware decode test matched software frames at 1080p for H.264, HEVC, and VP9.
+
+The new default entry is `Omarchy/linux-k114s-r3b`. The original r3c image remains selectable as
+`Omarchy/linux-k114s`. Both images matched their recorded hashes after the default boot.
+
+### Firmware sleep proof
+
+The Centauri refusal recovery requires a firmware-managed suspend and the PCI root port property
+`apple,function-warm-reset`. The K114s tree lacks that property, and this build has
+`CONFIG_APPLE_SOC_SLEEP` disabled. Host fixtures cover the recovery worker. An attended
+suspend-to-idle cycle would check radio continuity. A hardware test of refusal recovery requires
+both a supported firmware-managed sleep path and the root port property. The J716c deep-sleep
+correction belongs to the newer sleep series. [Aurora Linux #2177](https://github.com/aurora-silicon/linux/pull/2177)
