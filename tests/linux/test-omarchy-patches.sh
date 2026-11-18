@@ -79,7 +79,8 @@ out=$(applyn "$r"); nok "merge: exact fit raises no notification" "$(wc -c < "$N
 # Omarchy changes a context line next to the fix (the fuzz case above): merged, not refused.
 orig "$r"; sed -i 's/^# end$/# finish/' "$r/usr/bin/omarchy-b"; shipped "$r"
 out=$(applyn "$r"); ok "merge: nearby change merged" "$(grep -c '0001-test: applied by a three-way merge' <<<"$out"):$(tr '\n' ' ' < "$r/usr/bin/omarchy-b")" "1:#!/bin/bash # two cache=user-org echo \"\$cache\" # finish "
-nok "merge: no notification, no .orig or .rej" "$(wc -c < "$NOTES" | tr -d ' '):$(leftovers "$r")" "0:0"
+nok "merge: no notification" "$(wc -c < "$NOTES" | tr -d ' ')" 0
+ok "merge: no .orig or .rej" "$(leftovers "$r")" 0
 out=$(applyn "$r"); ok "merge: next run says in place" "$(grep -c '0001-test: in place (merged' <<<"$out")" 1
 ok "merge: modes kept" "$(stat -c %a "$r/usr/bin/omarchy-b")" 755
 out=$(inst "$r" "$M" --undo); ok "merge: undo takes the merged change out, keeps Omarchy's" "$(grep -c '0001-test: taken out' <<<"$out"):$(tr '\n' ' ' < "$r/usr/bin/omarchy-b")" "1:#!/bin/bash # two cache=user echo \"\$cache\" # finish "

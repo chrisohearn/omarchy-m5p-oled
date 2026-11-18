@@ -3,8 +3,9 @@ Key a Claude account by user and organization.
 Source: omacom/omarchy pull request 18681 (head 560ce87ad93b), the bin/ part only, reconciled
 here with quattro's login seating and collector locking at a490d5bdb (the omarchy-dev
 4.0.0.r8044 build), plus one change: signing in again as an account also checks the
-organization (from its login's profile when an older registry entry has none), and never takes
-a login that is already another registered account's.
+organization (from its login's profile when an older registry entry has none), refuses a login
+that names no organization when the account's is known, and never takes a login that is already
+another registered account's.
 The same change as pull request 16144, carried onto quattro. Commits 9806db5f
 and 35148783 by Michele Di Giovanni (mikjkd), d0cbc870 by Viktor Tar (viktortar98), 07fb5230
 and 560ce87a by Omarchybot.
@@ -17,7 +18,7 @@ Applied to /usr/bin by linux/omarchy-patches-apply: exactly, or as a three-way m
 Retire this file once Omarchy ships the fix (see docs/omarchy-patches.md).
 
 diff --git a/bin/omarchy-agent-account-state b/bin/omarchy-agent-account-state
-index ce3d27a13..c356b31d9 100755
+index ce3d27a13..b9afef497 100755
 --- a/bin/omarchy-agent-account-state
 +++ b/bin/omarchy-agent-account-state
 @@ -176,6 +176,7 @@ def identity(provider: str, home: Path) -> dict[str, str]:
@@ -88,7 +89,7 @@ index ce3d27a13..c356b31d9 100755
  def relogin(provider: str, target: str, pending: Path) -> dict[str, Any]:
    pending = pending.resolve()
    if provider not in SEATED or pending.parent != (accounts_root() / provider / ".pending").resolve():
-@@ -821,8 +850,18 @@ def relogin(provider: str, target: str, pending: Path) -> dict[str, Any]:
+@@ -821,8 +850,20 @@ def relogin(provider: str, target: str, pending: Path) -> dict[str, Any]:
        account = find(registry, target)
        if not account:
          raise AccountError(f"No {PROVIDERS[provider]['name']} account named {target}")
@@ -97,7 +98,9 @@ index ce3d27a13..c356b31d9 100755
 +      # organization match; and a login that is already another registered
 +      # account's never becomes this one's too.
 +      known = {**account, "orgId": recorded_org(provider, registry, account)}
-+      if account.get("accountId") and not same_account(known, found):
++      # A login that names no organization cannot show it is this account's
++      # when this account's organization is known.
++      if account.get("accountId") and (not same_account(known, found) or (known["orgId"] and not found.get("orgId"))):
          raise AccountError(tr("omarchy-i18n agents.wrongAccount", "That's %1, not %2. Try again, and sign in as %2.", found["email"] or found["accountId"], label_of(account)))
 +      for other in registry["accounts"]:
 +        if other is account:
