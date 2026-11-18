@@ -163,13 +163,16 @@ merge_sides() {
 #   nobase    no NAME.base/ (or no git): no three-way merge possible
 #   badbase   NAME.base/ does not match the patch
 #   conflict  the change overlaps Omarchy's own change to those lines; nothing written
-#   partial   some of the files already have the change and others do not (Omarchy shipped part
-#             of it): nothing written, since a later take-out could not tell the parts apart
+#   partial   the merge would change the files, but taking the change out again would not give
+#             them back exactly: part of it is already there (Omarchy shipped some hunks, in this
+#             file or another). Nothing written: a later take-out would remove Omarchy's part too
 #   noop      the merge leaves every file as it is (the change is already there, or already out)
 #   clean     the merge is clean and changes the files; written with "write"
 #   failed    a write failed; every file written so far was put back as it was
+#   stuck     a write failed and putting a file back failed too; the originals are kept in
+#             NAME.rescue/ beside the patch
 three_way() {
-  local p=$1 dir=$2 mode=$3 w f from to rc state=noop done=0 todo=0
+  local p=$1 dir=$2 mode=$3 w f from to rc state=noop todo=0
   local -a written=()
   w=$(mktemp -d "${TMPDIR:-/tmp}/k114s-omarchy-merge.XXXXXX") || { echo nobase; return; }
   merge_sides "$p" "$w"; rc=$?
@@ -182,11 +185,16 @@ three_way() {
     if ! git merge-file -p -q "$ROOT/usr/$f" "$w/$from/$f" "$w/$to/$f" > "$w/out/$f" 2>/dev/null; then
       state=conflict; break
     fi
-    if ! cmp -s "$w/out/$f" "$ROOT/usr/$f"; then todo=1
-    elif ! cmp -s "$w/base/$f" "$w/new/$f"; then done=1; fi
+    cmp -s "$w/out/$f" "$ROOT/usr/$f" || todo=1
   done < <(patch_files "$p")
   if [[ $state != conflict ]] && (( todo )); then
-    if (( done )); then state=partial; else state=clean; fi
+    state=clean
+    # The merge must be undoable: taking the change out of the result again gives back every
+    # file exactly as it is now. If not, part of the change is already in them.
+    while read -r f; do
+      git merge-file -p -q "$w/out/$f" "$w/$to/$f" "$w/$from/$f" 2>/dev/null | cmp -s - "$ROOT/usr/$f" ||
+        { state=partial; break; }
+    done < <(patch_files "$p")
   fi
   if [[ $state == clean && $mode == write ]]; then
     # Same inode, owner and mode: only the contents change, as with patch. Every file is copied
@@ -199,7 +207,12 @@ three_way() {
       cat "$w/out/$f" > "$ROOT/usr/$f" || { state=failed; break; }
     done < <(patch_files "$p")
     if [[ $state == failed ]]; then
-      for f in "${written[@]}"; do cat "$w/keep/$f" > "$ROOT/usr/$f" 2>/dev/null; done
+      for f in "${written[@]}"; do
+        cmp -s "$w/keep/$f" "$ROOT/usr/$f" || cat "$w/keep/$f" > "$ROOT/usr/$f" 2>/dev/null || state=stuck
+      done
+      if [[ $state == stuck ]]; then
+        rm -rf "${p%.patch}.rescue"; cp -r "$w/keep" "${p%.patch}.rescue" 2>/dev/null
+      fi
     fi
   fi
   rm -rf "$w"

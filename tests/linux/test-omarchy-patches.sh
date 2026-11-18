@@ -102,6 +102,22 @@ before=$(sumof "$r"); out=$(applyn "$r")
 ok "partly shipped: reported, nothing written" "$(grep -c '0001-test: Omarchy ships part of this change' <<<"$out"):$(sumof "$r")" "1:$before"
 ok "partly shipped: notified" "$(grep -c '0001-test: Omarchy ships part of it now' "$NOTES")" 1
 out=$(inst "$r" "$M" --undo); ok "partly shipped, undo: Omarchy's fix kept, nothing changed" "$(sumof "$r")" "$before"
+y() { tr '\n' ' ' < "$1/usr/bin/omarchy-y"; }
+# Two hunks in one file: Omarchy ships the first and changes context near the second. Taking the
+# merged change out again would remove Omarchy's hunk too, so nothing is written.
+two=$BASE/two; mkdir -p "$two/0001-two.base/bin"
+mkpatch "$two/0001-two.patch" omarchy-y '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n' '1\nTWO\n3\n4\n5\n6\n7\n8\n9\n10\nELEVEN\n12\n'
+printf '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n' > "$two/0001-two.base/bin/omarchy-y"
+r=$(mk); printf '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n' > "$r/usr/bin/omarchy-y"; shipped "$r"; inst "$r" "$two" >/dev/null
+# (git merge-file treats changes on adjacent lines as a conflict, so Omarchy's lie three lines away.)
+printf '1\nTWO\n3\n4\n5\n6\n7\neight\n9\n10\n11\n12\n' > "$r/usr/bin/omarchy-y"; shipped "$r"
+out=$(applyn "$r"); ok "partly shipped in one file: reported, nothing written" "$(grep -c '0001-two: Omarchy ships part of this change' <<<"$out"):$(y "$r")" "1:1 TWO 3 4 5 6 7 eight 9 10 11 12 "
+out=$(inst "$r" "$two" --undo); ok "partly shipped in one file, undo: Omarchy's hunk kept" "$(y "$r")" "1 TWO 3 4 5 6 7 eight 9 10 11 12 "
+# Two hunks, Omarchy changes context near both and ships neither: merged, and undo gives Omarchy's file.
+r=$(mk); printf '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n' > "$r/usr/bin/omarchy-y"; shipped "$r"; inst "$r" "$two" >/dev/null
+printf '1\n2\n3\n4\nfive\n6\n7\neight\n9\n10\n11\n12\n' > "$r/usr/bin/omarchy-y"; shipped "$r"
+out=$(applyn "$r"); ok "two hunks, context changed: merged" "$(y "$r")" "1 TWO 3 4 five 6 7 eight 9 10 ELEVEN 12 "
+out=$(inst "$r" "$two" --undo); ok "two hunks, context changed, undo: Omarchy's file" "$(y "$r")" "1 2 3 4 five 6 7 eight 9 10 11 12 "
 # A base folder that does not match its patch is refused by the installer.
 bad=$BASE/badbase; cp -r "$M" "$bad"; sed -i 's/^key=user$/key=other/' "$bad/0001-test.base/bin/omarchy-a"
 r=$(mk); out=$(inst "$r" "$bad"); ok "bad base: install refused, nothing applied" "$?:$(grep -c 'base folder that does not match' <<<"$out"):$(sumof "$r")" "1:1:$ORIG"
@@ -130,11 +146,11 @@ y() { tr '\n' ' ' < "$1/usr/bin/omarchy-y"; }
 sharedroot() { local r; r=$(mk); printf '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n' > "$r/usr/bin/omarchy-y"; shipped "$r"; inst "$r" "$share" >/dev/null
   printf '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\nELEVEN\n12\n' > "$r/usr/bin/omarchy-y"; shipped "$r"; echo "$r"; }
 r=$(sharedroot); out=$(apply "$r")
-ok "shared file, one merged: ours re-applied" "$(y "$r")" "1 TWO 3 4 5 6 7 8 9 10 ELEVEN 12 "
+ok "shared file, one merged: ours re-applied" "$(tr '\n' ' ' < "$r/usr/bin/omarchy-y")" "1 TWO 3 4 5 6 7 8 9 10 ELEVEN 12 "
 ok "shared file, one merged: merged one reported" "$(grep -c '0002-merged: Omarchy ships this change itself now' <<<"$out")" 1
-out=$(inst "$r" "$share" --undo); ok "shared file, undo: only ours taken out" "$(y "$r")" "1 2 3 4 5 6 7 8 9 10 ELEVEN 12 "
+out=$(inst "$r" "$share" --undo); ok "shared file, undo: only ours taken out" "$(tr '\n' ' ' < "$r/usr/bin/omarchy-y")" "1 2 3 4 5 6 7 8 9 10 ELEVEN 12 "
 r=$(sharedroot); apply "$r" >/dev/null; keep=$BASE/keep; mkdir -p "$keep"; cp "$share/0001-ours.patch" "$keep/"
-out=$(inst "$r" "$keep"); ok "shared file, merged one retired: Omarchy's fix kept" "$(y "$r")" "1 TWO 3 4 5 6 7 8 9 10 ELEVEN 12 "
+out=$(inst "$r" "$keep"); ok "shared file, merged one retired: Omarchy's fix kept" "$(tr '\n' ' ' < "$r/usr/bin/omarchy-y")" "1 TWO 3 4 5 6 7 8 9 10 ELEVEN 12 "
 ok "shared file, merged one retired: its record gone" "$(markers "$r")" "0001-ours.applied "
 
 # Omarchy already ships one of two patches on a shared file: later refreshes never adopt it,
@@ -142,7 +158,7 @@ ok "shared file, merged one retired: its record gone" "$(markers "$r")" "0001-ou
 r=$(mk); printf '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\nELEVEN\n12\n' > "$r/usr/bin/omarchy-y"; shipped "$r"
 out=$(inst "$r" "$share"); ok "already shipped: reported, not recorded" "$(grep -c '0002-merged: Omarchy ships' <<<"$out"):$(markers "$r")" "1:0001-ours.applied "
 out=$(inst "$r" "$share"); ok "already shipped, second refresh: still not adopted" "$(grep -c 'recorded as applied' <<<"$out"):$(markers "$r")" "0:0001-ours.applied "
-out=$(inst "$r" "$share" --undo); ok "already shipped, undo: Omarchy's change kept" "$(y "$r")" "1 2 3 4 5 6 7 8 9 10 ELEVEN 12 "
+out=$(inst "$r" "$share" --undo); ok "already shipped, undo: Omarchy's change kept" "$(tr '\n' ' ' < "$r/usr/bin/omarchy-y")" "1 2 3 4 5 6 7 8 9 10 ELEVEN 12 "
 
 # Only files the Omarchy package installed may be changed: no created or deleted files.
 newf=$BASE/newf; mkdir -p "$newf"; printf 'hello\n' > "$BASE/mp/created"

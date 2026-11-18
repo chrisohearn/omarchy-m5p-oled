@@ -81,15 +81,18 @@ Each patch is checked as a whole before anything is written, and without fuzz:
 - **applied by a three-way merge**: the patch no longer fits exactly, but its base folder merges
   cleanly with Omarchy's changes. The record is written as for **applied**, and later runs report
   **in place (merged with this Omarchy build's changes)**.
-- **Omarchy ships part of this change itself now**: with a base folder, some of the files already
-  have the change and the others still need it. Nothing is written, because a later take-out could
-  not tell Omarchy's part from this machine's. Refresh or retire the patch.
+- **Omarchy ships part of this change itself now**: with a base folder, the merge would change the
+  files, but taking the change out of the result again would not give them back exactly: some of
+  it (a hunk, in the same file or another) is already there. Nothing is written, because a later
+  take-out would remove Omarchy's part too. Refresh or retire the patch.
 - **does not fit this Omarchy build**: Omarchy changed those lines (with a base folder: the same
   lines, so the merge conflicts). Nothing is written, and the update carries on, with that fix
   missing until the patch is refreshed or retired.
 
 A merge writes its files only after every one of them merged cleanly. If a write still fails, each
-file already written is put back as it was, and the patch counts as not applied. A patch that does
+file already written is put back as it was, and the patch counts as not applied. If putting a file
+back fails too, copies of the originals are kept in `<patch>.rescue/` beside the installed patch,
+and the hook says to reinstall the Omarchy package. A patch that does
 not fit, is partly shipped or fails while applying also raises one desktop notification after the
 update, to each signed-in user, naming it: Omarchy's own behaviour is back until it is refreshed.
 The notification is best effort and never fails the hook.
@@ -139,20 +142,24 @@ files (0003, 0004) have no counterpart in an omacom/omarchy tree, so that run sk
 
 0001 and 0002 are not specific to the K114s. A second machine of the owner's (x86_64, Omarchy
 stable 4.5.0, package `omarchy`) runs those two only, installed on 2026-11-15 from a copy of
-this repository with the source narrowed to them:
+this repository with the source narrowed to them.
+
+**The 0001 refreshed on 2026-11-18 targets the Edge build (r8044) and does not fit `v4.5.0`.**
+Installing it there would take the working 0001 out and skip the new one. Until that machine's
+stable build carries the Edge code the new 0001 expects, a reinstall there uses the 0001 it was
+written for, from commit `050dd93`, as below. The K114s patches (0003 and later) must never go
+there; a plain install from the checkout would add them.
 
 ```bash
 W=$(mktemp -d); mkdir "$W/src"
-cp patches/omarchy/0001-*.patch patches/omarchy/0002-*.patch "$W/src/"
+git show 050dd93:patches/omarchy/0001-claude-account-by-user-and-organization.patch \
+  > "$W/src/0001-claude-account-by-user-and-organization.patch"   # the stable-build 0001
+cp patches/omarchy/0002-*.patch "$W/src/"
 sudo env K114S_OMARCHY_PATCHES_SRC="$W/src" bash linux/omarchy-patches-install
 omarchy-restart-shell
 ```
 
-Both applied to `v4.5.0` without fuzz then, and `tests/linux/test-omarchy-patches.sh` passed with only
-those two in the source against an export of that tag (74 checks). The 0001 refreshed on 2026-11-18
-targets the Edge build (r8044) and does not fit `v4.5.0`. Do not run the install there again with
-it: a refresh would take the working 0001 out and skip the new one. That machine keeps the 0001 it
-has until its stable build carries the Edge code 0001 now expects. The K114s patches (0003 and
-later) must never go there. The hook keeps the installed copies through Omarchy updates. A change
-to 0001 or 0002 here reaches that machine only when the install is run there again, with the same
-narrowed source: a plain install from the checkout would add the K114s patches.
+Both applied to `v4.5.0` without fuzz on 2026-11-15, and `tests/linux/test-omarchy-patches.sh`
+passed with only those two in the source against an export of that tag (74 checks). The hook
+keeps the installed copies through Omarchy updates. A change to 0002 here reaches that machine
+only when the install is run there again.
