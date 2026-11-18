@@ -1,0 +1,5 @@
+# Offline follow-up. Apply after patches/linux/r3c.series, in this order.
+# Aurora Linux #2113 (0001 and 0002) and #2117 (0003).
+r3c-upstream/0001-centauri-retain-ownership-across-failed-suspend.patch
+r3c-upstream/0002-centauri-pair-cfg80211-suspend-with-stateless-resume.patch
+r3c-upstream/0003-dcp-defer-initial-backlight-restore.patch
