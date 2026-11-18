@@ -151,12 +151,13 @@ written for, from commit `050dd93`, as below. The K114s patches (0003 and later)
 there; a plain install from the checkout would add them.
 
 ```bash
-W=$(mktemp -d); mkdir "$W/src"
-git show 050dd93:patches/omarchy/0001-claude-account-by-user-and-organization.patch \
-  > "$W/src/0001-claude-account-by-user-and-organization.patch"   # the stable-build 0001
-cp patches/omarchy/0002-*.patch "$W/src/"
-sudo env K114S_OMARCHY_PATCHES_SRC="$W/src" bash linux/omarchy-patches-install
-omarchy-restart-shell
+W=$(mktemp -d) && mkdir "$W/src" &&
+  git cat-file -e 050dd93 &&   # a shallow clone may lack it: git fetch --unshallow first
+  git show 050dd93:patches/omarchy/0001-claude-account-by-user-and-organization.patch \
+    > "$W/src/0001-claude-account-by-user-and-organization.patch" &&   # the stable-build 0001
+  cp patches/omarchy/0002-*.patch "$W/src/" &&
+  sudo env K114S_OMARCHY_PATCHES_SRC="$W/src" bash linux/omarchy-patches-install &&
+  omarchy-restart-shell
 ```
 
 Both applied to `v4.5.0` without fuzz on 2026-11-15, and `tests/linux/test-omarchy-patches.sh`

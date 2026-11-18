@@ -71,36 +71,54 @@ M=$BASE/merge; mkdir -p "$M/0001-test.base/bin"; cp "$SRC/0001-test.patch" "$M/"
 cp "$BASE/a/usr/bin/omarchy-a" "$BASE/a/usr/bin/omarchy-b" "$M/0001-test.base/bin/"
 NOTES=$BASE/notes; NOTIFY=$BASE/notify; printf '#!/bin/bash\nprintf "%%s|%%s\\n" "$1" "$2" >> %s\n' "$NOTES" > "$NOTIFY"; chmod 755 "$NOTIFY"
 applyn() { : > "$NOTES"; K114S_NOTIFY_CMD=$NOTIFY K114S_ROOT=$1 bash "$1/usr/local/lib/omarchy-k114s/omarchy-patches-apply" 2>&1; }
+# The notification command is never run as root, so its checks only hold for a normal user.
+nok() { if [ "$(id -u)" = 0 ]; then echo "SKIP $1 (root: the notification command is not run)"; else ok "$@"; fi; }
 r=$(mk); out=$(inst "$r" "$M"); ok "merge: install with a base succeeds, applied exactly" "$?:$(sumof "$r")" "0:$FIXED"
 ok "merge: base folder installed" "$(test -f "$r/usr/local/lib/omarchy-k114s/omarchy-patches/0001-test.base/bin/omarchy-a" && echo yes)" yes
-out=$(applyn "$r"); ok "merge: exact fit raises no notification" "$(wc -c < "$NOTES" | tr -d ' ')" 0
+out=$(applyn "$r"); nok "merge: exact fit raises no notification" "$(wc -c < "$NOTES" | tr -d ' ')" 0
 # Omarchy changes a context line next to the fix (the fuzz case above): merged, not refused.
 orig "$r"; sed -i 's/^# end$/# finish/' "$r/usr/bin/omarchy-b"; shipped "$r"
 out=$(applyn "$r"); ok "merge: nearby change merged" "$(grep -c '0001-test: applied by a three-way merge' <<<"$out"):$(tr '\n' ' ' < "$r/usr/bin/omarchy-b")" "1:#!/bin/bash # two cache=user-org echo \"\$cache\" # finish "
-ok "merge: no notification, no .orig or .rej" "$(wc -c < "$NOTES" | tr -d ' '):$(leftovers "$r")" "0:0"
+nok "merge: no notification, no .orig or .rej" "$(wc -c < "$NOTES" | tr -d ' '):$(leftovers "$r")" "0:0"
 out=$(applyn "$r"); ok "merge: next run says in place" "$(grep -c '0001-test: in place (merged' <<<"$out")" 1
 ok "merge: modes kept" "$(stat -c %a "$r/usr/bin/omarchy-b")" 755
 out=$(inst "$r" "$M" --undo); ok "merge: undo takes the merged change out, keeps Omarchy's" "$(grep -c '0001-test: taken out' <<<"$out"):$(tr '\n' ' ' < "$r/usr/bin/omarchy-b")" "1:#!/bin/bash # two cache=user echo \"\$cache\" # finish "
 # Omarchy changes the very line the fix changes: a conflict. Nothing written, and a notification.
 r=$(mk); inst "$r" "$M" >/dev/null; orig "$r"; sed -i 's/^key=user$/key=account/' "$r/usr/bin/omarchy-a"; shipped "$r"; changed=$(sumof "$r")
 out=$(applyn "$r"); ok "merge conflict: reported, nothing written (the other file too)" "$(grep -c 'three-way merge from its base conflicts' <<<"$out"):$(sumof "$r")" "1:$changed"
-ok "merge conflict: one notification naming the patch" "$(wc -l < "$NOTES" | tr -d ' '):$(grep -c '0001-test: Omarchy changed the same lines' "$NOTES")" "1:1"
+nok "merge conflict: one notification naming the patch" "$(wc -l < "$NOTES" | tr -d ' '):$(grep -c '0001-test: Omarchy changed the same lines' "$NOTES")" "1:1"
 # Without a base folder, a patch that no longer fits is also notified.
 r=$(mk); inst "$r" >/dev/null; orig "$r"; sed -i 's/^key=user$/key=account/' "$r/usr/bin/omarchy-a"
-out=$(applyn "$r"); ok "no base, does not fit: notified" "$(grep -c '0001-test: Omarchy changed those lines' "$NOTES")" 1
+out=$(applyn "$r"); nok "no base, does not fit: notified" "$(grep -c '0001-test: Omarchy changed those lines' "$NOTES")" 1
 # A write that fails part-way (the second file read-only; root ignores the mode) puts back the first.
 if [ "$(id -u)" != 0 ]; then
   r=$(mk); inst "$r" "$M" >/dev/null; orig "$r"; sed -i 's/^# end$/# finish/' "$r/usr/bin/omarchy-a" "$r/usr/bin/omarchy-b"; shipped "$r"
   before=$(sumof "$r"); chmod 444 "$r/usr/bin/omarchy-b"; out=$(applyn "$r"); rc=$?; chmod 755 "$r/usr/bin/omarchy-b"
   ok "merge write fails: exit 0, reported, both files as they were" "$rc:$(grep -c 'could not write the three-way merge' <<<"$out"):$(sumof "$r")" "0:1:$before"
-  ok "merge write fails: notified" "$(grep -c '0001-test: failed while applying' "$NOTES")" 1
+  nok "merge write fails: notified" "$(grep -c '0001-test: failed while applying' "$NOTES")" 1
+fi
+# A write fails and putting the first file back fails too (a cat that cannot read the saved copy):
+# the originals are kept in the rescue folder, or in the kept work folder if that cannot be written.
+if [ "$(id -u)" != 0 ]; then
+  shim=$BASE/shim; mkdir -p "$shim"; printf '#!/bin/bash\ncase "$1" in */keep/*) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v cat)" > "$shim/cat"; chmod 755 "$shim/cat"
+  stuck() { local r; r=$(mk); inst "$r" "$M" >/dev/null; orig "$r"; sed -i 's/^# end$/# finish/' "$r/usr/bin/omarchy-a" "$r/usr/bin/omarchy-b"; shipped "$r"; echo "$r"; }
+  r=$(stuck); keep=$(cat "$r/usr/bin/omarchy-a"); chmod 444 "$r/usr/bin/omarchy-b"
+  out=$(PATH=$shim:$PATH K114S_ROOT=$r bash "$r/usr/local/lib/omarchy-k114s/omarchy-patches-apply" 2>&1); rc=$?; chmod 755 "$r/usr/bin/omarchy-b"
+  d=$r/usr/local/lib/omarchy-k114s/omarchy-patches/0001-test.rescue
+  ok "stuck: exit 0, says where the originals are" "$rc:$(grep -c "Copies of the originals are in $d/" <<<"$out")" "0:1"
+  ok "stuck: rescue copy holds the original" "$(cat "$d/bin/omarchy-a")" "$keep"
+  r=$(stuck); keep=$(cat "$r/usr/bin/omarchy-a"); chmod 444 "$r/usr/bin/omarchy-b"; chmod 555 "$r/usr/local/lib/omarchy-k114s/omarchy-patches"
+  out=$(PATH=$shim:$PATH TMPDIR=$BASE K114S_ROOT=$r bash "$r/usr/local/lib/omarchy-k114s/omarchy-patches-apply" 2>&1); rc=$?
+  chmod 755 "$r/usr/bin/omarchy-b" "$r/usr/local/lib/omarchy-k114s/omarchy-patches"
+  w=$(sed -n 's#.*Copies of the originals are in \(.*\)/\. Reinstall.*#\1#p' <<<"$out")
+  ok "stuck, rescue folder not writable: work folder kept with the original" "$rc:$(test -n "$w" && cat "$w/bin/omarchy-a")" "0:$keep"
 fi
 # Omarchy ships the fix in one file and changes only context in the other: nothing is written,
 # and --undo leaves Omarchy's own fix alone.
 r=$(mk); inst "$r" "$M" >/dev/null; orig "$r"; sed -i 's/^key=user$/key=user-org/' "$r/usr/bin/omarchy-a"; sed -i 's/^# end$/# finish/' "$r/usr/bin/omarchy-b"; shipped "$r"
 before=$(sumof "$r"); out=$(applyn "$r")
 ok "partly shipped: reported, nothing written" "$(grep -c '0001-test: Omarchy ships part of this change' <<<"$out"):$(sumof "$r")" "1:$before"
-ok "partly shipped: notified" "$(grep -c '0001-test: Omarchy ships part of it now' "$NOTES")" 1
+nok "partly shipped: notified" "$(grep -c '0001-test: Omarchy ships part of it now' "$NOTES")" 1
 out=$(inst "$r" "$M" --undo); ok "partly shipped, undo: Omarchy's fix kept, nothing changed" "$(sumof "$r")" "$before"
 y() { tr '\n' ' ' < "$1/usr/bin/omarchy-y"; }
 # Two hunks in one file: Omarchy ships the first and changes context near the second. Taking the

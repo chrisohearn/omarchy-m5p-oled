@@ -169,8 +169,9 @@ merge_sides() {
 #   noop      the merge leaves every file as it is (the change is already there, or already out)
 #   clean     the merge is clean and changes the files; written with "write"
 #   failed    a write failed; every file written so far was put back as it was
-#   stuck     a write failed and putting a file back failed too; the originals are kept in
-#             NAME.rescue/ beside the patch
+#   stuck DIR a write failed and putting a file back failed too; DIR holds the originals:
+#             NAME.rescue/ beside the patch, or, if that cannot be written, the work folder,
+#             which is then kept
 three_way() {
   local p=$1 dir=$2 mode=$3 w f from to rc state=noop todo=0
   local -a written=()
@@ -211,11 +212,17 @@ three_way() {
         cmp -s "$w/keep/$f" "$ROOT/usr/$f" || cat "$w/keep/$f" > "$ROOT/usr/$f" 2>/dev/null || state=stuck
       done
       if [[ $state == stuck ]]; then
-        rm -rf "${p%.patch}.rescue"; cp -r "$w/keep" "${p%.patch}.rescue" 2>/dev/null
+        rm -rf "${p%.patch}.rescue" 2>/dev/null
+        if cp -r "$w/keep" "${p%.patch}.rescue" 2>/dev/null; then
+          state="stuck ${p%.patch}.rescue"
+        else
+          # Nowhere better to put them: keep the work folder rather than lose the originals.
+          state="stuck $w/keep"; w=""
+        fi
       fi
     fi
   fi
-  rm -rf "$w"
+  [[ -n $w ]] && rm -rf "$w"
   echo "$state"
 }
 # The patch's change is in the files, found by merging rather than by reversing it exactly.

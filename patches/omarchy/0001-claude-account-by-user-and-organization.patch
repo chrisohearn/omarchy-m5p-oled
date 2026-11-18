@@ -3,8 +3,8 @@ Key a Claude account by user and organization.
 Source: omacom/omarchy pull request 18681 (head 560ce87ad93b), the bin/ part only, reconciled
 here with quattro's login seating and collector locking at a490d5bdb (the omarchy-dev
 4.0.0.r8044 build), plus one change: signing in again as an account also checks the
-organization (from its login when an older registry entry has none), and never takes a login
-that is already another registered account's.
+organization (from its login's profile when an older registry entry has none), and never takes
+a login that is already another registered account's.
 The same change as pull request 16144, carried onto quattro. Commits 9806db5f
 and 35148783 by Michele Di Giovanni (mikjkd), d0cbc870 by Viktor Tar (viktortar98), 07fb5230
 and 560ce87a by Omarchybot.
@@ -17,7 +17,7 @@ Applied to /usr/bin by linux/omarchy-patches-apply: exactly, or as a three-way m
 Retire this file once Omarchy ships the fix (see docs/omarchy-patches.md).
 
 diff --git a/bin/omarchy-agent-account-state b/bin/omarchy-agent-account-state
-index ce3d27a13..4bdfb799b 100755
+index ce3d27a13..c356b31d9 100755
 --- a/bin/omarchy-agent-account-state
 +++ b/bin/omarchy-agent-account-state
 @@ -176,6 +176,7 @@ def identity(provider: str, home: Path) -> dict[str, str]:
@@ -66,29 +66,44 @@ index ce3d27a13..4bdfb799b 100755
        # A retry may already have registered this login under another home.
        shutil.rmtree(home)
        return None
-@@ -821,8 +835,25 @@ def relogin(provider: str, target: str, pending: Path) -> dict[str, Any]:
+@@ -808,6 +822,21 @@ def settle(provider: str, registry: dict[str, Any]) -> None:
+ 
+ # A Claude account signed in again in a scratch home, installed where its login
+ # lives under the same locks as a move, and only if it's the same account.
++# The organization an account belongs to: the registry's, or for an entry
++# written before organizations were recorded, the one its login's profile
++# names. Only the profile is read, so a damaged credentials file never hides it.
++def recorded_org(provider: str, registry: dict[str, Any], account: dict[str, Any]) -> str:
++  if account.get("orgId"):
++    return str(account["orgId"])
++  if provider != "claude":
++    return ""
++  profile = read_json(claude_account_file(login_home(provider, registry, account)))
++  oauth = profile.get("oauthAccount") if isinstance(profile, dict) else None
++  if isinstance(oauth, dict) and str(oauth.get("accountUuid") or "") == str(account.get("accountId") or ""):
++    return str(oauth.get("organizationUuid") or "")
++  return ""
++
++
+ def relogin(provider: str, target: str, pending: Path) -> dict[str, Any]:
+   pending = pending.resolve()
+   if provider not in SEATED or pending.parent != (accounts_root() / provider / ".pending").resolve():
+@@ -821,8 +850,18 @@ def relogin(provider: str, target: str, pending: Path) -> dict[str, Any]:
        account = find(registry, target)
        if not account:
          raise AccountError(f"No {PROVIDERS[provider]['name']} account named {target}")
 -      if account.get("accountId") and account["accountId"] != found["accountId"]:
-+      known = dict(account)
-+      # A registry written before organizations were recorded has no orgId;
-+      # the login it holds still names one, and a sign-in in another of the
-+      # user's organizations must not replace it.
-+      if not known.get("orgId"):
-+        try:
-+          current = identity(provider, login_home(provider, registry, account))
-+        except (AttributeError, TypeError):
-+          # A malformed old profile names no organization; the new login replaces it.
-+          current = {"accountId": ""}
-+        if current["accountId"] and current["accountId"] == known.get("accountId"):
-+          known["orgId"] = current.get("orgId", "")
++      # An account is this login's only if the user and, where known, the
++      # organization match; and a login that is already another registered
++      # account's never becomes this one's too.
++      known = {**account, "orgId": recorded_org(provider, registry, account)}
 +      if account.get("accountId") and not same_account(known, found):
          raise AccountError(tr("omarchy-i18n agents.wrongAccount", "That's %1, not %2. Try again, and sign in as %2.", found["email"] or found["accountId"], label_of(account)))
-+      # Whatever this account's organization was, a login that is already
-+      # another registered account's must not become this one's too.
 +      for other in registry["accounts"]:
-+        if other is not account and other.get("orgId") and same_account(other, found):
++        if other is account:
++          continue
++        org = recorded_org(provider, registry, other)
++        if org and same_account({**other, "orgId": org}, found):
 +          raise AccountError(tr("omarchy-i18n agents.wrongAccount", "That's %1, not %2. Try again, and sign in as %2.", label_of(other), label_of(account)))
        home = login_home(provider, registry, account)
        if home != primary_home(provider):

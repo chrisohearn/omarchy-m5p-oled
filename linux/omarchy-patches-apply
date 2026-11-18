@@ -31,7 +31,8 @@ notify_skipped() {
   summary="Omarchy update: ${#skipped[@]} K114s fix(es) not applied"
   body="$(printf '%s\n' "${skipped[@]}")Omarchy's own behaviour is back for these until the patch is refreshed (docs/omarchy-patches.md)."
   if [[ -n $ROOT ]]; then
-    [[ -n ${K114S_NOTIFY_CMD:-} && $(id -u) != 0 ]] &&
+    # Only for a positive uid: an id that fails (no output) never counts as not root.
+    [[ -n ${K114S_NOTIFY_CMD:-} && $(id -u 2>/dev/null) =~ ^[1-9][0-9]*$ ]] &&
       { timeout -k 2 10 "$K114S_NOTIFY_CMD" "$summary" "$body" >/dev/null 2>&1 || true; }
     return 0
   fi
@@ -72,7 +73,8 @@ for p in "${patches[@]}"; do
       skipped+=("$name: failed while applying.")
     fi
   else
-    case $(three_way "$p" fwd write) in
+    result=$(three_way "$p" fwd write)
+    case $result in
       noop)
         if applied_here "$p"; then
           say "$name: in place (merged with this Omarchy build's changes)"
@@ -91,8 +93,8 @@ for p in "${patches[@]}"; do
       failed)
         say "$name: could not write the three-way merge; the files written were put back as they were. Nothing changed."
         skipped+=("$name: failed while applying.") ;;
-      stuck)
-        say "$name: FAILED while writing the three-way merge, and putting the files back failed too. Copies of the originals are in ${p%.patch}.rescue/. Reinstall the Omarchy package to restore its files."
+      stuck\ *)
+        say "$name: FAILED while writing the three-way merge, and putting the files back failed too. Copies of the originals are in ${result#stuck }/. Reinstall the Omarchy package to restore its files."
         skipped+=("$name: failed while applying.") ;;
       badbase)
         say "$name: does not fit this Omarchy build, and its base folder does not match it. Nothing was written. Refresh the patch and its base (docs/omarchy-patches.md)."
