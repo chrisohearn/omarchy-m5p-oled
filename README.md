@@ -25,11 +25,13 @@ on the Mac by the AI agent). States not yet on the Mac (*integrated*, *built*, *
 | Updates on Omarchy's Edge channel | guarded after one bad refresh; updates run under the holds, and the space guard passes with 111 MB free against its 88 MB minimum (agent-run, 2026-11-15, after the r3a promotion): [incident](docs/incident-2026-11-14-edge-refresh.md), [what fills the partition](docs/esp-space.md) |
 | Microphones | working since 2026-11-17: dictation through the built-in microphones (owner-observed); the sound tree is the configured Stage 2, with no path to the speakers ([docs/r3-mics.md](docs/r3-mics.md)). The headphone jack's card exists, untested |
 | Native panel mode, 120 Hz, brightness | designed, not run (display coprocessor step: [docs/r3-display-gpu.md](docs/r3-display-gpu.md)) |
-| Suspend and lid | blocked on purpose: r3a is booted and the GPU mailbox interrupt is proven (about 400/s), but the suspend targets stay masked; open are `sleep-lid/0010` (not in r3a), the PMP nodes and the first attended cycle |
+| Suspend and lid | r3c admits this model for suspend-to-idle. The sleep targets stay masked pending the first attended battery-only lid test ([docs/r3c-kernel.md](docs/r3c-kernel.md)) |
 | Speakers | blocked upstream: no protection data for this model ([why](docs/r3-audio-protection.md)) |
 | USB-C data ports | in the booted device tree; both controllers bind to `dwc3-apple`, but no USB bus has appeared and no device has been plugged in yet (agent-run, re-checked on r3a 2026-11-15) |
 | Touch ID | working since 2026-11-16: the right index finger unlocks sudo, the lock screen and admin prompts (kernel r3b.c4; the Touch ID tree, and since 2026-11-17 the sound tree that carries it, in the Stage 2; [docs/r3-touchid.md](docs/r3-touchid.md)) |
 | Hardware video decode | working since 2026-11-17: H.264, HEVC and VP9 on the Apple Video Decoder, used by mpv by default (owner-observed playback; [docs/r3-avd-decode.md](docs/r3-avd-decode.md)); the browser stays on software decode |
+| Light sensor | working since 2026-11-17: reports lux with the factory calibration on both the trial and the normal r3c boot (agent-run). The cover test is pending ([docs/r3c-kernel.md](docs/r3c-kernel.md)) |
+| Startup disk (NVRAM) | the complete NVRAM partition reads on r3c (agent-run). Writes are disabled, and startup-disk selection is pending ([#64](https://github.com/chrisohearn/omarchy-m5p-oled/issues/64)) |
 | Camera, touchscreen, SD reader, Thunderbolt, external displays | drafted or ADT-checked offline, never booted (see [docs/matrix.md](docs/matrix.md)) |
 
 Per-subsystem detail, sources and next steps are in [docs/matrix.md](docs/matrix.md).
