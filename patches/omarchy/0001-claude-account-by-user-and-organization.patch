@@ -1,19 +1,27 @@
 Key a Claude account by user and organization.
 
-Source: omacom/omarchy pull request 18681 (head 0d6d7c27a790), the bin/ part only; the
-same change as pull request 16144, carried onto quattro. Commits f0ed1e80 and 80e6c0c0 by
-Michele Di Giovanni (mikjkd), 0d6d7c27 by Omarchybot. License: as Omarchy (MIT).
+Source: omacom/omarchy pull request 18681 (head 560ce87ad93b), the bin/ part only, reconciled
+here with quattro's login seating and collector locking at a490d5bdb (the omarchy-dev
+4.0.0.r8044 build), plus one change: signing in again as an account also checks the
+organization (from its login's profile when an older registry entry has none), refuses a login
+that names no organization when the account's is known, and never takes a login that is already
+another registered account's.
+The same change as pull request 16144, carried onto quattro. Commits 9806db5f
+and 35148783 by Michele Di Giovanni (mikjkd), d0cbc870 by Viktor Tar (viktortar98), 07fb5230
+and 560ce87a by Omarchybot.
+License: as Omarchy (MIT).
 
 Why here: the agents panel keys a Claude account by the claude.ai user alone, so one user in
 two organizations (a personal plan and a Team) cannot add the second one ("That's Main ...").
-Applied to /usr/bin with `patch -p1 -d /usr -F0` by linux/omarchy-patches-apply.
+Applied to /usr/bin by linux/omarchy-patches-apply: exactly, or as a three-way merge against
+0001-claude-account-by-user-and-organization.base/, the files it was written for.
 Retire this file once Omarchy ships the fix (see docs/omarchy-patches.md).
 
 diff --git a/bin/omarchy-agent-account-state b/bin/omarchy-agent-account-state
-index 3b2e2ce5bb3..2f928377b01 100755
+index ce3d27a13..b9afef497 100755
 --- a/bin/omarchy-agent-account-state
 +++ b/bin/omarchy-agent-account-state
-@@ -152,6 +152,7 @@ def identity(provider: str, home: Path) -> dict[str, str]:
+@@ -176,6 +176,7 @@ def identity(provider: str, home: Path) -> dict[str, str]:
      login = (read_json(home / ".credentials.json") or {}).get("claudeAiOauth") or {}
      return {
        "accountId": str(account.get("accountUuid") or ""),
@@ -21,7 +29,7 @@ index 3b2e2ce5bb3..2f928377b01 100755
        "email": str(account.get("emailAddress") or ""),
        "org": str(account.get("organizationName") or ""),
        "plan": plan_label(str(login.get("rateLimitTier") or ""), str(login.get("subscriptionType") or "")),
-@@ -190,6 +191,19 @@ def grok_identity(home: Path) -> dict[str, str]:
+@@ -214,6 +215,19 @@ def grok_identity(home: Path) -> dict[str, str]:
    }
  
  
@@ -41,29 +49,86 @@ index 3b2e2ce5bb3..2f928377b01 100755
  # ---------------------------------------------------------------- registry
  
  
-@@ -384,7 +398,7 @@ def register(provider: str, label: str, pending: Path) -> dict[str, Any]:
+@@ -418,7 +432,7 @@ def register(provider: str, label: str, pending: Path) -> dict[str, Any]:
      for account in registry["accounts"]:
-       account.update(identity(provider, account_home(provider, account)))
+       account.update(identity(provider, login_home(provider, registry, account)))
      for account in registry["accounts"]:
 -      if account.get("accountId") == found["accountId"]:
 +      if same_account(account, found):
          shutil.rmtree(pending, ignore_errors=True)
          if found["email"]:
            raise AccountError(tr("omarchy-i18n agents.sameAccountEmail", "That's %1 (%2). Try again, and sign in as the other account in the private window.", account["label"], found["email"]))
-@@ -457,7 +471,7 @@ def recover_home(provider: str, home: Path) -> dict[str, Any] | None:
+@@ -491,7 +505,7 @@ def recover_home(provider: str, home: Path) -> dict[str, Any] | None:
      entry = receipt.get("entry")
      if not isinstance(entry, dict) or entry.get("home") != str(home) or entry.get("id") != home.name:
        return None
--    if any(identity(provider, account_home(provider, a))["accountId"] == found["accountId"] for a in registry["accounts"]):
-+    if any(same_account(identity(provider, account_home(provider, a)), found) for a in registry["accounts"]):
+-    if any(identity(provider, login_home(provider, registry, a))["accountId"] == found["accountId"] for a in registry["accounts"]):
++    if any(same_account(identity(provider, login_home(provider, registry, a)), found) for a in registry["accounts"]):
        # A retry may already have registered this login under another home.
        shutil.rmtree(home)
        return None
+@@ -808,6 +822,21 @@ def settle(provider: str, registry: dict[str, Any]) -> None:
+ 
+ # A Claude account signed in again in a scratch home, installed where its login
+ # lives under the same locks as a move, and only if it's the same account.
++# The organization an account belongs to: the registry's, or for an entry
++# written before organizations were recorded, the one its login's profile
++# names. Only the profile is read, so a damaged credentials file never hides it.
++def recorded_org(provider: str, registry: dict[str, Any], account: dict[str, Any]) -> str:
++  if account.get("orgId"):
++    return str(account["orgId"])
++  if provider != "claude":
++    return ""
++  profile = read_json(claude_account_file(login_home(provider, registry, account)))
++  oauth = profile.get("oauthAccount") if isinstance(profile, dict) else None
++  if isinstance(oauth, dict) and str(oauth.get("accountUuid") or "") == str(account.get("accountId") or ""):
++    return str(oauth.get("organizationUuid") or "")
++  return ""
++
++
+ def relogin(provider: str, target: str, pending: Path) -> dict[str, Any]:
+   pending = pending.resolve()
+   if provider not in SEATED or pending.parent != (accounts_root() / provider / ".pending").resolve():
+@@ -821,8 +850,20 @@ def relogin(provider: str, target: str, pending: Path) -> dict[str, Any]:
+       account = find(registry, target)
+       if not account:
+         raise AccountError(f"No {PROVIDERS[provider]['name']} account named {target}")
+-      if account.get("accountId") and account["accountId"] != found["accountId"]:
++      # An account is this login's only if the user and, where known, the
++      # organization match; and a login that is already another registered
++      # account's never becomes this one's too.
++      known = {**account, "orgId": recorded_org(provider, registry, account)}
++      # A login that names no organization cannot show it is this account's
++      # when this account's organization is known.
++      if account.get("accountId") and (not same_account(known, found) or (known["orgId"] and not found.get("orgId"))):
+         raise AccountError(tr("omarchy-i18n agents.wrongAccount", "That's %1, not %2. Try again, and sign in as %2.", found["email"] or found["accountId"], label_of(account)))
++      for other in registry["accounts"]:
++        if other is account:
++          continue
++        org = recorded_org(provider, registry, other)
++        if org and same_account({**other, "orgId": org}, found):
++          raise AccountError(tr("omarchy-i18n agents.wrongAccount", "That's %1, not %2. Try again, and sign in as %2.", label_of(other), label_of(account)))
+       home = login_home(provider, registry, account)
+       if home != primary_home(provider):
+         prepare_store(provider, account)
 diff --git a/bin/omarchy-agent-account-transfer b/bin/omarchy-agent-account-transfer
-index dc48fc98235..a335b8752b8 100755
+index faeb84d2f..cc6418e80 100755
 --- a/bin/omarchy-agent-account-transfer
 +++ b/bin/omarchy-agent-account-transfer
-@@ -89,6 +89,39 @@ def login_files(provider: str, home: Path) -> dict[str, Any]:
+@@ -58,7 +58,11 @@ if installed and (bundle.get("accounts") or {}).get("namePolicy") == "source":
+     capabilities = json.loads(probe.stdout) if probe.returncode == 0 else {}
+   except ValueError:
+     capabilities = {}
+-  use_installed = isinstance(capabilities, dict) and capabilities.get("sourceNames") is True
++  # A receiver without organizations takes two organizations of one Claude
++  # user for one account; the bundled receiver keeps them apart.
++  providers = bundle["accounts"].get("providers")
++  claude = isinstance(providers, dict) and "claude" in providers
++  use_installed = isinstance(capabilities, dict) and capabilities.get("sourceNames") is True and (capabilities.get("organizations") is True or not claude)
+   if not use_installed:
+     root = os.environ.get("OMARCHY_PATH")
+     local_backend = pathlib.Path(root) / "bin/omarchy-agent-account-state" if root else None
+@@ -107,6 +111,49 @@ def login_files(provider: str, home: Path) -> dict[str, Any]:
    return {name: data for name, data in files.items() if isinstance(data, dict)} if files.get("auth.json") else {}
  
  
@@ -100,10 +165,20 @@ index dc48fc98235..a335b8752b8 100755
 +  return not left_org or not right_org or left_org == right_org
 +
 +
++# The destination's own backend may predate organizations and leave orgId
++# out. Its Claude account file names the organization all the same.
++def home_identity(provider: str, home: Path) -> dict[str, str]:
++  found = accounts.identity(provider, home)
++  if provider == "claude" and not found.get("orgId"):
++    oauth = (accounts.read_json(file_path(provider, home, ".claude.json")) or {}).get("oauthAccount")
++    found["orgId"] = str(oauth.get("organizationUuid") or "") if isinstance(oauth, dict) else ""
++  return found
++
++
  def export_accounts(providers: list[str]) -> dict[str, Any]:
    payload = {"version": 1, "namePolicy": "source", "providers": {}}
    for provider in providers:
-@@ -101,7 +134,10 @@ def export_accounts(providers: list[str]) -> dict[str, Any]:
+@@ -119,7 +166,10 @@ def export_accounts(providers: list[str]) -> dict[str, Any]:
        found = accounts.identity(provider, home)
        files = login_files(provider, home)
        if found["accountId"] and files:
@@ -115,7 +190,7 @@ index dc48fc98235..a335b8752b8 100755
      if entries:
        payload["providers"][provider] = {"active": registry["active"] if any(a["id"] == registry["active"] for a in entries) else entries[0]["id"], "switch": registry["switch"], "threshold": registry["threshold"], "accounts": entries}
    if not payload["providers"]:
-@@ -118,17 +154,21 @@ def validate(payload: Any) -> None:
+@@ -136,17 +186,21 @@ def validate(payload: Any) -> None:
      if not isinstance(registry.get("active"), str) or registry.get("switch") not in accounts.SWITCH_MODES or type(registry.get("threshold")) is not int or not 50 <= registry["threshold"] <= 100:
        raise accounts.AccountError("Invalid account transfer preferences")
      ids = set()
@@ -140,30 +215,45 @@ index dc48fc98235..a335b8752b8 100755
        ids.add(entry["id"])
        files = entry.get("files")
        if not isinstance(files, dict) or not files or not set(files) <= FILES[provider] or not all(isinstance(v, dict) for v in files.values()):
-@@ -259,7 +299,8 @@ def import_provider(provider: str, incoming: dict[str, Any], replace: bool) -> l
-           cleanup_transfers(file_path(provider, accounts.account_home(provider, a), name).parent)
-       was_empty = not any(accounts.identity(provider, accounts.account_home(provider, a))["accountId"] and login_files(provider, accounts.account_home(provider, a)) for a in registry["accounts"])
+@@ -282,7 +336,12 @@ def import_provider(provider: str, incoming: dict[str, Any], replace: bool) -> l
+           cleanup_transfers(file_path(provider, login_home(provider, registry, a), name).parent)
+       was_empty = not any(accounts.identity(provider, login_home(provider, registry, a))["accountId"] and login_files(provider, login_home(provider, registry, a)) for a in registry["accounts"])
        for entry in incoming["accounts"]:
--        existing = next((a for a in registry["accounts"] if accounts.identity(provider, accounts.account_home(provider, a))["accountId"] == entry["accountId"]), None)
+-        existing = next((a for a in registry["accounts"] if accounts.identity(provider, login_home(provider, registry, a))["accountId"] == entry["accountId"]), None)
 +        incoming_identity = entry_identity(provider, entry)
-+        existing = next((a for a in registry["accounts"] if same_identity(accounts.identity(provider, accounts.account_home(provider, a)), incoming_identity)), None)
-         if existing and login_files(provider, accounts.account_home(provider, existing)) and not replace:
++        existing = next((a for a in registry["accounts"] if same_identity(home_identity(provider, login_home(provider, registry, a)), incoming_identity)), None)
++        # A login here with no organization matches each of its user's
++        # organizations, so two copied accounts could otherwise land on it.
++        if existing is not None and any(account is existing for _, account in copied):
++          raise accounts.AccountError(f"Two copied accounts match {existing['label']} here; copy with --replace to replace its login")
+         if existing and login_files(provider, login_home(provider, registry, existing)) and not replace:
            copied.append((entry, existing))
            results.append(("kept", existing))
-@@ -306,7 +347,7 @@ def import_provider(provider: str, incoming: dict[str, Any], replace: bool) -> l
+@@ -330,8 +389,8 @@ def import_provider(provider: str, incoming: dict[str, Any], replace: bool) -> l
+             current.update(data)
              data = current
            write_json(path, data)
-         found = accounts.identity(provider, home)
+-        found = accounts.identity(provider, home)
 -        if found["accountId"] != entry["accountId"] or not login_files(provider, home):
++        found = home_identity(provider, home)
 +        if not same_identity(found, incoming_identity) or not login_files(provider, home):
            raise accounts.AccountError("Transferred credentials do not match their account identity")
-         if not account.get("primary"):
-           accounts.link_shared(provider, home)
+         # ~/.claude can hold an added account's login, and links into itself
+         # would loop.
+@@ -374,7 +433,7 @@ def import_provider(provider: str, incoming: dict[str, Any], replace: bool) -> l
+ def main(args: list[str]) -> int:
+   try:
+     if args == ["capabilities"]:
+-      print(json.dumps({"streamVersion": 1, "sourceNames": True}))
++      print(json.dumps({"streamVersion": 1, "sourceNames": True, "organizations": True}))
+     elif args in (["receiver-command"], ["receiver-command", "--replace"]):
+       command = "/usr/bin/python3 -I -c " + shlex.quote(RECEIVER_BOOTSTRAP)
+       if "--replace" in args:
 diff --git a/bin/omarchy-agent-usage-claude b/bin/omarchy-agent-usage-claude
-index 0b81f76c9ba..db96a3a5908 100755
+index 785083039..c655d1bb6 100755
 --- a/bin/omarchy-agent-usage-claude
 +++ b/bin/omarchy-agent-usage-claude
-@@ -680,9 +680,11 @@ def collect_limits(access_token: str, expires_at_ms: int, refresh_expires_at_ms:
+@@ -682,9 +682,11 @@ def collect_limits(access_token: str, expires_at_ms: int, refresh_expires_at_ms:
  # ---------------------------------------------------------------- accounts
  
  
@@ -176,14 +266,21 @@ index 0b81f76c9ba..db96a3a5908 100755
 +  return str(account.get("accountUuid") or ""), str(account.get("organizationUuid") or "")
  
  
- def account_limits(account: dict[str, Any], force: bool) -> dict[str, Any]:
-@@ -692,8 +694,12 @@ def account_limits(account: dict[str, Any], force: bool) -> dict[str, Any]:
-   # "Work", and the new one must never fall back on the old one's allowance.
+ # Switching moves logins between homes holding this lock, so where each login
+@@ -711,14 +713,18 @@ def account_login(account: dict[str, Any]) -> dict[str, Any]:
+   access_token, expires_at_ms, refresh_expires_at_ms, plan = oauth_login(home)
    # Who the home is signed in as now, not when it was added: a `claude auth
    # login` run in it by hand makes it a different subscription.
--  identity = current_account_id(home)
+-  return {"token": (access_token, expires_at_ms, refresh_expires_at_ms), "plan": plan, "identity": current_account_id(home)}
++  return {"token": (access_token, expires_at_ms, refresh_expires_at_ms), "plan": plan, "identity": current_identity(home)}
+ 
+ 
+ def account_limits(account: dict[str, Any], login: dict[str, Any], force: bool) -> dict[str, Any]:
+-  identity = login["identity"]
++  identity, organization = login["identity"]
+   # Keyed by the subscription, not the label: forget "Work" and add a different
+   # "Work", and the new one must never fall back on the old one's allowance.
 -  key = re.sub(r"[^A-Za-z0-9_-]", "", identity or str(account.get("accountId") or "")) or account["id"]
-+  identity, organization = current_identity(home)
 +  # A home that now names an organization starts a new cache file; the old
 +  # per-user file is left behind rather than reused for a subscription it may
 +  # not describe.
@@ -192,7 +289,7 @@ index 0b81f76c9ba..db96a3a5908 100755
    # The primary home is keyed the same way once it says who it's signed in
    # as, so signing it in to another subscription never inherits the last
    # one's numbers; until then it keeps the single-account cache.
-@@ -733,7 +739,7 @@ def main() -> int:
+@@ -761,7 +767,7 @@ def main() -> int:
      # Keyed by who the home is signed in as, as a registered primary is, so
      # signing in to another subscription never shows the last one's numbers
      # and registering the home later keeps its cache.

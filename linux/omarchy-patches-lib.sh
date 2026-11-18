@@ -67,13 +67,15 @@ origin() {
 # Omarchy package's own files carry the same change (it merged the fix), they are left as they are.
 # Returns 1 only when a reversal that should work fails.
 take_out() {
-  local p=$1 name
+  local p=$1 name how=exact
   name=$(basename "$p" .patch)
-  if ! is_in "$p"; then
+  is_in "$p" || { in_by_merge "$p" && how=merge; } || how=""
+  if [[ -z $how ]]; then
     say "$name: not in the files; nothing to take out"
     rm -f "$(marker "$p")"
   elif applied_here "$p"; then
-    if ! run_patch "$p" -R; then
+    # A change put in by a three-way merge comes out the same way.
+    if [[ $how == exact ]] && ! run_patch "$p" -R || [[ $how == merge && $(three_way "$p" rev write) != clean ]]; then
       say "$name: could not take it out; reinstall the Omarchy package to restore its files"
       return 1
     fi
@@ -109,6 +111,17 @@ migrate() {
   : > "$dest/.records"
 }
 
+# A patch's NAME.base/, when it has one, must hold every file the patch changes, and the patch
+# must apply to them exactly: it is what the three-way merge takes the change from.
+check_base() {
+  local w rc
+  [[ -d $(base_dir "$1") ]] || return 0
+  have_merge || { echo "has a base folder, but git (for git merge-file) is not installed"; return 1; }
+  w=$(mktemp -d "${TMPDIR:-/tmp}/k114s-omarchy-merge.XXXXXX") || return 1
+  merge_sides "$1" "$w"; rc=$?; rm -rf "$w"
+  (( rc == 0 )) || { echo "has a base folder that does not match it (a file missing, or the patch does not apply to it exactly)"; return 1; }
+}
+
 # A patch may only change files the Omarchy package (omarchy, omarchy-dev or omarchy-mac) installed: none it creates or deletes (a
 # file it created could later collide with one the package ships), nothing the package database
 # has no record of.
@@ -121,3 +134,96 @@ check_targets() {
   done < <(patch_files "$p")
   (( n )) || { echo "changes no file"; return 1; }
 }
+
+# Three-way merge. A patch may come with NAME.base/, a copy (paths relative to /usr) of each file
+# it changes as it was in the Omarchy build the patch was written for. When Omarchy has since
+# changed lines near the patch's, so that it no longer applies exactly, git merge-file carries
+# the patch's change (base -> base with the patch) into the current files instead. Any overlap
+# with Omarchy's own change is a conflict: then nothing is written.
+base_dir() { printf '%s.base\n' "${1%.patch}"; }
+have_merge() { command -v git >/dev/null 2>&1; }
+
+# Fills $2/base and $2/new (base with the patch applied exactly). 1: no base or no git; 2: the
+# base does not match the patch (a file is missing, or the patch does not apply to it exactly).
+merge_sides() {
+  local p=$1 w=$2 b f
+  b=$(base_dir "$p")
+  [[ -d $b ]] && have_merge || return 1
+  mkdir -p "$w/base" "$w/new"
+  while read -r f; do
+    [[ -f $b/$f ]] || return 2
+    mkdir -p "$(dirname "$w/base/$f")" "$(dirname "$w/new/$f")"
+    cp "$b/$f" "$w/base/$f"; cp "$b/$f" "$w/new/$f"
+  done < <(patch_files "$p")
+  patch -p1 -d "$w/new" -F0 -s -f --no-backup-if-mismatch -r - -N < "$p" >/dev/null 2>&1 || return 2
+}
+
+# three_way PATCH fwd|rev check|write: merges the patch's change (fwd: base -> new) or its
+# reversal (rev: new -> base) into the files under $ROOT/usr. Prints one of
+#   nobase    no NAME.base/ (or no git): no three-way merge possible
+#   badbase   NAME.base/ does not match the patch
+#   conflict  the change overlaps Omarchy's own change to those lines; nothing written
+#   partial   the merge would change the files, but taking the change out again would not give
+#             them back exactly: part of it is already there (Omarchy shipped some hunks, in this
+#             file or another). Nothing written: a later take-out would remove Omarchy's part too
+#   noop      the merge leaves every file as it is (the change is already there, or already out)
+#   clean     the merge is clean and changes the files; written with "write"
+#   failed    a write failed; every file written so far was put back as it was
+#   stuck DIR a write failed and putting a file back failed too; DIR holds the originals:
+#             NAME.rescue/ beside the patch, or, if that cannot be written, the work folder,
+#             which is then kept
+three_way() {
+  local p=$1 dir=$2 mode=$3 w f from to rc state=noop todo=0
+  local -a written=()
+  w=$(mktemp -d "${TMPDIR:-/tmp}/k114s-omarchy-merge.XXXXXX") || { echo nobase; return; }
+  merge_sides "$p" "$w"; rc=$?
+  if (( rc == 1 )); then echo nobase; rm -rf "$w"; return; fi
+  if (( rc == 2 )); then echo badbase; rm -rf "$w"; return; fi
+  if [[ $dir == fwd ]]; then from=base to=new; else from=new to=base; fi
+  while read -r f; do
+    [[ -f $ROOT/usr/$f ]] || { state=conflict; break; }
+    mkdir -p "$(dirname "$w/out/$f")"
+    if ! git merge-file -p -q "$ROOT/usr/$f" "$w/$from/$f" "$w/$to/$f" > "$w/out/$f" 2>/dev/null; then
+      state=conflict; break
+    fi
+    cmp -s "$w/out/$f" "$ROOT/usr/$f" || todo=1
+  done < <(patch_files "$p")
+  if [[ $state != conflict ]] && (( todo )); then
+    state=clean
+    # The merge must be undoable: taking the change out of the result again gives back every
+    # file exactly as it is now. If not, part of the change is already in them.
+    while read -r f; do
+      git merge-file -p -q "$w/out/$f" "$w/$to/$f" "$w/$from/$f" 2>/dev/null | cmp -s - "$ROOT/usr/$f" ||
+        { state=partial; break; }
+    done < <(patch_files "$p")
+  fi
+  if [[ $state == clean && $mode == write ]]; then
+    # Same inode, owner and mode: only the contents change, as with patch. Every file is copied
+    # first, and if any write fails, each file written so far (and the failed one) is put back.
+    while read -r f; do
+      cmp -s "$w/out/$f" "$ROOT/usr/$f" && continue
+      mkdir -p "$(dirname "$w/keep/$f")"
+      cp "$ROOT/usr/$f" "$w/keep/$f" || { state=failed; break; }
+      written+=("$f")
+      cat "$w/out/$f" > "$ROOT/usr/$f" || { state=failed; break; }
+    done < <(patch_files "$p")
+    if [[ $state == failed ]]; then
+      for f in "${written[@]}"; do
+        cmp -s "$w/keep/$f" "$ROOT/usr/$f" || cat "$w/keep/$f" > "$ROOT/usr/$f" 2>/dev/null || state=stuck
+      done
+      if [[ $state == stuck ]]; then
+        rm -rf "${p%.patch}.rescue" 2>/dev/null
+        if cp -r "$w/keep" "${p%.patch}.rescue" 2>/dev/null; then
+          state="stuck ${p%.patch}.rescue"
+        else
+          # Nowhere better to put them: keep the work folder rather than lose the originals.
+          state="stuck $w/keep"; w=""
+        fi
+      fi
+    fi
+  fi
+  [[ -n $w ]] && rm -rf "$w"
+  echo "$state"
+}
+# The patch's change is in the files, found by merging rather than by reversing it exactly.
+in_by_merge() { [[ $(three_way "$1" fwd check) == noop ]]; }

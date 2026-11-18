@@ -48,6 +48,7 @@ wanted=("$SRC"/*.patch)
 for p in "${wanted[@]}"; do
   [[ $(basename "$p") =~ ^[A-Za-z0-9._-]+\.patch$ ]] || die "unexpected patch name: $p"
   why=$(check_targets "$p") || die "$(basename "$p") $why; patches may only change files the Omarchy package installed. Nothing changed."
+  why=$(check_base "$p") || die "$(basename "$p") $why. Nothing changed."
 done
 # Only now, with the new set known to be good: a refused install leaves a first-version one as it was.
 migrate "$DEST"
@@ -81,8 +82,13 @@ if (( low >= 0 )); then
 fi
 
 rm -f "$DEST"/*.patch
+rm -rf "$DEST"/*.base
 for m in "$DEST"/*.applied; do [[ -e $SRC/$(basename "$m" .applied).patch ]] || rm -f "$m"; done
-for p in "${wanted[@]}"; do install -m 644 "$p" "$DEST/$(basename "$p")"; done
+for p in "${wanted[@]}"; do
+  install -m 644 "$p" "$DEST/$(basename "$p")"
+  b=$(base_dir "$p")
+  if [[ -d $b ]]; then cp -r "$b" "$DEST/"; chmod -R u=rwX,go=rX "$DEST/$(basename "$b")"; fi
+done
 install -m 644 "$HERE/omarchy-patches-lib.sh" "$SHARED"
 install -m 755 "$HERE/omarchy-patches-apply" "$APPLY"
 install -m 644 "$HERE/03-k114s-omarchy-patches.hook" "$HOOK"
