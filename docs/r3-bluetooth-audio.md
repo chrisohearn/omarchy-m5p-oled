@@ -18,6 +18,9 @@ Parity target: Asahi M1/M2 Bluetooth audio (A2DP and HFP through bluez and PipeW
 Not done offline: `btvirt` (a virtual controller) is not packaged on this system, so profile enumeration against a
 virtual peer was not run. WirePlumber's default A2DP codec priority was not checked either (pending; the codec plugins above are installed, the order they are chosen in is unverified). Whether the controller reports mSBC (eSCO) capability shows only once a headset connects.
 
+The normal r3c boot also passed the read-only precheck. RFCOMM loaded, and BlueZ advertised A2DP and HFP.
+No headset was paired when checked, so playback and microphone tests are pending.
+
 ## Owner steps
 
 1. Run `bash tests/hardware/k114s-bt-audio-check.sh --no-save` (read-only; expect 0 BAD).

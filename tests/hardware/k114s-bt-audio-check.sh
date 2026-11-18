@@ -1,5 +1,5 @@
 #!/bin/bash
-# Bluetooth audio check for the K114s on the r3a kernel (issue #41). READ-ONLY: it pairs nothing, changes no
+# Bluetooth audio check for the K114s on the r3a, r3b and r3c kernels (issue #41). READ-ONLY: it pairs nothing, changes no
 # setting, plays nothing, needs no root and never touches the speakers or the jack card, so it also works on
 # the GPU-tree Stage 2 where the sound tree is absent (k114s-r3a-audio-check.sh stops there on its speaker
 # tripwires and so never reaches its attended Bluetooth part).
@@ -29,7 +29,10 @@ cards() { pactl list cards 2>/dev/null | awk '/^Card/ {c=0} /bluez/ {c=1} c && /
 
 echo "== K114s Bluetooth audio check, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 rel=$(uname -r)
-case $rel in *k114s-r3[ab]-ARCH) ok "running kernel $rel" ;; *) bad "kernel is $rel, not r3a or r3b: RFCOMM (hands-free) is not expected" ;; esac
+case $rel in
+  *k114s-r3[abc]-ARCH) ok "running kernel $rel" ;;
+  *) bad "kernel is $rel (expected K114s r3a, r3b or r3c with RFCOMM support)" ;;
+esac
 [ -d /sys/class/bluetooth/hci0 ] && ok "hci0 present" || bad "no hci0"
 drv=$(basename "$(readlink /sys/class/bluetooth/hci0/device/driver 2>/dev/null)" 2>/dev/null)
 [ "$drv" = btcentauri_t6050 ] && ok "hci0 is bound to btcentauri_t6050" || bad "hci0 driver is ${drv:-none}, expected btcentauri_t6050"
