@@ -27,6 +27,7 @@ It installs:
 | Installed as | From |
 | --- | --- |
 | `/usr/local/lib/omarchy-k114s/omarchy-patches/*.patch` | `patches/omarchy/` |
+| `/usr/local/lib/omarchy-k114s/omarchy-patches/*.base/` | `patches/omarchy/*.base/` |
 | `/usr/local/lib/omarchy-k114s/omarchy-patches-apply` | `linux/omarchy-patches-apply` |
 | `/usr/local/lib/omarchy-k114s/omarchy-patches-lib.sh` | `linux/omarchy-patches-lib.sh` |
 | `/etc/pacman.d/hooks/03-k114s-omarchy-patches.hook` | `linux/03-k114s-omarchy-patches.hook` |
@@ -43,6 +44,27 @@ watches), as recorded in the package database. The installer refuses one that cr
 file (a file it created could later collide with one Omarchy ships and stop an update) or that changes
 a file none of those three packages installed, such as one of `omarchy-settings-dev`'s.
 
+## Base folders: the three-way merge
+
+Each patch may have a base folder beside it, `patches/omarchy/NNNN-name.base/`, holding a copy of
+every file the patch changes as it was in the Omarchy build the patch was written for (paths
+relative to `/usr`). When Omarchy has since changed lines near the patch's, so that it no longer
+applies exactly, the hook merges instead: `git merge-file` carries the patch's change (base to base
+with the patch) into Omarchy's new files. A change that only sits near Omarchy's own goes in; one
+that overlaps it is a conflict, and then nothing is written. Taking such a patch out reverses it
+the same way. The installer refuses a base folder that does not hold every file the patch changes
+or that the patch does not apply to exactly.
+
+Write or refresh a base whenever a patch is refreshed against a new Omarchy build:
+
+```bash
+tools/omarchy-patch-base patches/omarchy/NNNN-name.patch [USR_DIR]   # USR_DIR defaults to /usr
+```
+
+`USR_DIR` holds the files the patch was written for, either as Omarchy ships them or with the patch
+in place. For a patch to Omarchy's `bin/` or `shell/`, an export of omacom/omarchy at the build's
+commit works, with `shell/` moved to `share/omarchy/shell`.
+
 ## What the hook does after each update
 
 Each patch is checked as a whole before anything is written, and without fuzz:
@@ -56,8 +78,16 @@ Each patch is checked as a whole before anything is written, and without fuzz:
 - **Omarchy ships this change itself now**: the files have it, but the package has installed new
   versions of them since it was applied here. The change in them is the package's own. Nothing is
   written. Retire the patch.
-- **does not fit this Omarchy build**: Omarchy changed those lines. Nothing is written, and the
-  update carries on, with that fix missing until the patch is refreshed or retired.
+- **applied by a three-way merge**: the patch no longer fits exactly, but its base folder merges
+  cleanly with Omarchy's changes. The record is written as for **applied**, and later runs report
+  **in place (merged with this Omarchy build's changes)**.
+- **does not fit this Omarchy build**: Omarchy changed those lines (with a base folder: the same
+  lines, so the merge conflicts). Nothing is written, and the update carries on, with that fix
+  missing until the patch is refreshed or retired.
+
+A patch that does not fit, or fails while applying, also raises one desktop notification after the
+update, to each signed-in user, naming it: Omarchy's own behaviour is back until it is refreshed.
+The notification is best effort and never fails the hook.
 
 The hook runs after the transaction and can never stop an update. It leaves no `.orig` or `.rej`
 files. `pacman -Qkk omarchy-dev` lists the patched files as modified, which is expected.
@@ -84,7 +114,7 @@ the wanted set goes back on from the bottom up.
 
 | Patch | Fixes | Upstream | State |
 | --- | --- | --- | --- |
-| `0001-claude-account-by-user-and-organization.patch` | The agents panel keys a Claude account by the claude.ai user alone. One user who belongs to two organizations (a personal plan and a Team) cannot add the second one ("That's Main ..., sign in as the other account"), and both would share one usage cache. The patch keys the account by user and organization in the account registry, the account copy and the Claude usage cache. | [omacom/omarchy#18681](https://github.com/omacom/omarchy/pull/18681) (head `0d6d7c27a790`), carrying [#16144](https://github.com/omacom/omarchy/pull/16144) onto `quattro` | open upstream; applied here 2026-11-14 |
+| `0001-claude-account-by-user-and-organization.patch` | The agents panel keys a Claude account by the claude.ai user alone. One user who belongs to two organizations (a personal plan and a Team) cannot add the second one ("That's Main ..., sign in as the other account"), and both would share one usage cache. The patch keys the account by user and organization in the account registry, the account copy and the Claude usage cache, and checks the organization when an account signs in again. | [omacom/omarchy#18681](https://github.com/omacom/omarchy/pull/18681) (head `560ce87ad93b`), carrying [#16144](https://github.com/omacom/omarchy/pull/16144) onto `quattro`; reconciled here with quattro's login seating and collector locking at `a490d5bdb` (omarchy-dev `4.0.0.r8044`) | open upstream; applied here 2026-11-14; refreshed 2026-11-18 after r8044 changed its lines |
 | `0002-agents-panel-room-left-pace-and-model-rows.patch` | Local preference, not an upstream fix. In the agents panel every limit meter reads as room left (it drains), as T3 Code's usage view does, so Claude's and Codex's bars move the same way. A hairline marks even pace (the share of the window's time left), and the tooltip says ahead of, on or under pace within 5 points. A model-scoped window such as Fable Weekly gets its own row instead of a tick on the Weekly bar. The usage records still hold the share used. | none (this machine's choice) | applied here 2026-11-15 |
 | `0003-omarchy-mac-k114s-display-cutout.patch` | The bar has no notch floor on the K114s: omarchy-mac's `display-cutouts.json` has no 3024x1986 entry. Two lines: `eDP` (for upstream) and `Unknown-1` (local only: the boot framebuffer's name). `top = 96` is derived, not measured. | to be sent to omacom/omarchy-mac-pkgs ([draft](platform-data.md#upstream-draft-omacomomarchy-mac-pkgs)) | written 2026-11-15, not installed |
 | `0004-omarchy-mac-k-board-audio-names.patch` | The M5 MacBook Pros are K boards (`AppleK114`, `effect_output.k114-mic`), so omarchy-mac's jNNN patterns miss them: the stereo microphone mapper, `audio.json`, the microphone name and the no-suspend rule. | same draft | written 2026-11-15, not installed |
@@ -94,9 +124,11 @@ Tests: `tests/test-platform-data.sh` runs 0003 and 0004 through the installer in
 `tests/linux/test-factory-reset-gate.sh` runs 0005 against the installed command. `tests/linux/test-omarchy-patches.sh linux [OMARCHY_SRC]` runs the mechanism in a fake
 root. With `OMARCHY_SRC`, an omacom/omarchy checkout at the installed revision, it also checks that
 each real patch applies to it without fuzz and comes out again byte for byte. For 0001 against
-`9ac0883` (the Edge build `4.0.0.r7859.g9ac0883`), the pull request's own tests
-(`agent-account-test`, `agent-account-copy-test`, `agent-usage-accounts-test`) also pass, with 58
-assertions (agent-run).
+`a490d5bdb` (the Edge build `4.0.0.r8044`), Omarchy's own account tests pass on the reconciled
+change (`agent-account-test`, `agent-account-copy-test`, `agent-usage-accounts-test`,
+`agent-account-recovery-test`, `agent-account-autoswitch-test`, `agent-account-exec-test`: 128
+checks, one of them new for signing in again in another organization). Patches to omarchy-mac's
+files (0003, 0004) have no counterpart in an omacom/omarchy tree, so that run skips them and says so.
 
 ## On another Omarchy machine
 

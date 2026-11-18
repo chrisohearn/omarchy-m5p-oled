@@ -66,6 +66,32 @@ ok "changed upstream: no .orig or .rej" "$(leftovers "$r")" 0
 orig "$r"; sed -i 's/^# end$/# finish/' "$r/usr/bin/omarchy-b"; fuzzy=$(sumof "$r")
 out=$(apply "$r"); ok "fuzz needed: refused, nothing written" "$(grep -c 'does not fit' <<<"$out"):$(sumof "$r")" "1:$fuzzy"
 
+# Three-way merge: the same patch with a base folder (the files it was written for).
+M=$BASE/merge; mkdir -p "$M/0001-test.base/bin"; cp "$SRC/0001-test.patch" "$M/"
+cp "$BASE/a/usr/bin/omarchy-a" "$BASE/a/usr/bin/omarchy-b" "$M/0001-test.base/bin/"
+NOTES=$BASE/notes; NOTIFY=$BASE/notify; printf '#!/bin/bash\nprintf "%%s|%%s\\n" "$1" "$2" >> %s\n' "$NOTES" > "$NOTIFY"; chmod 755 "$NOTIFY"
+applyn() { : > "$NOTES"; K114S_NOTIFY_CMD=$NOTIFY K114S_ROOT=$1 bash "$1/usr/local/lib/omarchy-k114s/omarchy-patches-apply" 2>&1; }
+r=$(mk); out=$(inst "$r" "$M"); ok "merge: install with a base succeeds, applied exactly" "$?:$(sumof "$r")" "0:$FIXED"
+ok "merge: base folder installed" "$(test -f "$r/usr/local/lib/omarchy-k114s/omarchy-patches/0001-test.base/bin/omarchy-a" && echo yes)" yes
+out=$(applyn "$r"); ok "merge: exact fit raises no notification" "$(wc -c < "$NOTES" | tr -d ' ')" 0
+# Omarchy changes a context line next to the fix (the fuzz case above): merged, not refused.
+orig "$r"; sed -i 's/^# end$/# finish/' "$r/usr/bin/omarchy-b"; shipped "$r"
+out=$(applyn "$r"); ok "merge: nearby change merged" "$(grep -c '0001-test: applied by a three-way merge' <<<"$out"):$(tr '\n' ' ' < "$r/usr/bin/omarchy-b")" "1:#!/bin/bash # two cache=user-org echo \"\$cache\" # finish "
+ok "merge: no notification, no .orig or .rej" "$(wc -c < "$NOTES" | tr -d ' '):$(leftovers "$r")" "0:0"
+out=$(applyn "$r"); ok "merge: next run says in place" "$(grep -c '0001-test: in place (merged' <<<"$out")" 1
+ok "merge: modes kept" "$(stat -c %a "$r/usr/bin/omarchy-b")" 755
+out=$(inst "$r" "$M" --undo); ok "merge: undo takes the merged change out, keeps Omarchy's" "$(grep -c '0001-test: taken out' <<<"$out"):$(tr '\n' ' ' < "$r/usr/bin/omarchy-b")" "1:#!/bin/bash # two cache=user echo \"\$cache\" # finish "
+# Omarchy changes the very line the fix changes: a conflict. Nothing written, and a notification.
+r=$(mk); inst "$r" "$M" >/dev/null; orig "$r"; sed -i 's/^key=user$/key=account/' "$r/usr/bin/omarchy-a"; shipped "$r"; changed=$(sumof "$r")
+out=$(applyn "$r"); ok "merge conflict: reported, nothing written (the other file too)" "$(grep -c 'three-way merge from its base conflicts' <<<"$out"):$(sumof "$r")" "1:$changed"
+ok "merge conflict: one notification naming the patch" "$(wc -l < "$NOTES" | tr -d ' '):$(grep -c '0001-test: Omarchy changed the same lines' "$NOTES")" "1:1"
+# Without a base folder, a patch that no longer fits is also notified.
+r=$(mk); inst "$r" >/dev/null; orig "$r"; sed -i 's/^key=user$/key=account/' "$r/usr/bin/omarchy-a"
+out=$(applyn "$r"); ok "no base, does not fit: notified" "$(grep -c '0001-test: Omarchy changed those lines' "$NOTES")" 1
+# A base folder that does not match its patch is refused by the installer.
+bad=$BASE/badbase; cp -r "$M" "$bad"; sed -i 's/^key=user$/key=other/' "$bad/0001-test.base/bin/omarchy-a"
+r=$(mk); out=$(inst "$r" "$bad"); ok "bad base: install refused, nothing applied" "$?:$(grep -c 'base folder that does not match' <<<"$out"):$(sumof "$r")" "1:1:$ORIG"
+
 # Omarchy merges the fix: its package installs the fixed files. Nothing is written, the hook says
 # to retire the patch, and neither --undo nor a refresh without it takes Omarchy's fix out.
 merged() { local r; r=$(mk); inst "$r" >/dev/null; orig "$r"; fixed "$r"; shipped "$r"; echo "$r"; }
@@ -200,12 +226,17 @@ if [ -n "${2:-}" ]; then
   O=$BASE/omarchy; mkdir -p "$O/usr/share/omarchy"; cp -a "$2/bin" "$O/usr/bin"
   [ -d "$2/shell" ] && cp -a "$2/shell" "$O/usr/share/omarchy/shell"
   shipped "$O"
+  # Patches to omarchy-mac's files (0003, 0004) have no counterpart in an omacom/omarchy tree.
+  R=$BASE/real; mkdir -p "$R"
   for p in "$P"/*.patch; do
-    n=$(basename "$p")
+    n=$(basename "$p"); f=""
+    while read -r f; do [ -f "$O/usr/$f" ] || break; f=""; done < <(sed -n 's#^+++ b/\([^[:space:]]*\).*#\1#p' "$p" | LC_ALL=C sort -u)
+    if [ -n "$f" ]; then echo "SKIP real $n: changes $f, which omacom/omarchy does not ship"; continue; fi
+    cp "$p" "$R/"; [ -d "${p%.patch}.base" ] && cp -r "${p%.patch}.base" "$R/"
     patch -p1 -d "$O/usr" -F0 -s -f --dry-run < "$p" >/dev/null 2>&1; ok "real $n: applies without fuzz" "$?" 0
   done
-  out=$(K114S_ROOT=$O bash "$INSTALL" 2>&1); ok "real patches: install succeeds" "$?" 0
-  ok "real patches: all applied" "$(grep -c ': applied' <<<"$out")" "$(ls "$P"/*.patch | wc -l | tr -d ' ')"
+  out=$(K114S_ROOT=$O K114S_OMARCHY_PATCHES_SRC=$R bash "$INSTALL" 2>&1); ok "real patches: install succeeds" "$?" 0
+  ok "real patches: all applied" "$(grep -c ': applied' <<<"$out")" "$(ls "$R"/*.patch | wc -l | tr -d ' ')"
   for f in "$O"/usr/bin/omarchy-agent-*; do head -1 "$f" | grep -q python && { python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$f" || ok "real: $(basename "$f") parses" 1 0; }; done
   for f in "$O"/usr/share/omarchy/shell/plugins/*/*.qml; do
     [ -x /usr/lib/qt6/bin/qmllint ] || break
@@ -213,7 +244,7 @@ if [ -n "${2:-}" ]; then
     lint=$(/usr/lib/qt6/bin/qmllint "$f" 2>&1); lrc=$?
     if [ "$lrc" != 0 ] || grep -q '\[syntax\]' <<<"$lint"; then ok "real: $(basename "$f") passes qmllint" "$lrc" 0; fi
   done
-  out=$(K114S_ROOT=$O bash "$INSTALL" --undo 2>&1)
+  out=$(K114S_ROOT=$O K114S_OMARCHY_PATCHES_SRC=$R bash "$INSTALL" --undo 2>&1)
   same=same; diff -r "$2/bin" "$O/usr/bin" >/dev/null || same=differs
   [ -d "$2/shell" ] && { diff -r "$2/shell" "$O/usr/share/omarchy/shell" >/dev/null || same=differs; }
   ok "real patches: undo gives the shipped files" "$same" same

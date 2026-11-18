@@ -29,7 +29,8 @@ and keep their authors and licenses.
 | `linux/update-boot-ctxr-k114s` | derived from betizzel/omarchy-m5's J714s `update-boot-ctxr` hook | betizzel and omarchy-m5 contributors; K114s changes here | MIT |
 | `linux/k114s-booted-esp` | the identity test of betizzel/omarchy-m5 `aurora-boot-mounts-generator` (`0abeef96`) | betizzel and omarchy-m5 contributors; adapted here | MIT |
 | `linux/k114s-edge-check` | method of nickfoy/omarchy-m3-max `lib/update_preflight.py` (`8c16310`), rewritten | nickfoy (method) | MIT |
-| `patches/omarchy/0001-claude-account-by-user-and-organization.patch` | omacom/omarchy pull request 18681, head `0d6d7c27a790` (`bin/` only), carrying pull request 16144 | Michele Di Giovanni (mikjkd); Omarchybot | MIT (Omarchy) |
+| `patches/omarchy/0001-claude-account-by-user-and-organization.patch` | omacom/omarchy pull request 18681, head `560ce87ad93b` (`bin/` only), carrying pull request 16144, reconciled with omacom/omarchy `a490d5bdb` | Michele Di Giovanni (mikjkd); Viktor Tar (viktortar98); Omarchybot; reconciliation here | MIT (Omarchy) |
+| `patches/omarchy/*.base/` | unmodified copies of the files each patch changes: omacom/omarchy `a490d5bdb` (0001, 0002, 0005) and the installed omarchy-mac package (0003, 0004) | Omarchy and omarchy-mac authors | MIT (Omarchy, omarchy-mac) |
 | `build/make_k114s_ftab.py` | calls betizzel/omarchy-m5's `omarchy_centauri.py` unchanged | this repository | MIT |
 | `build/validate-config.py` | method of betizzel/omarchy-m5 `installer/recipes/linux-aurora-j714s/validate-config.py` (`886269a`), rewritten and extended | betizzel and omarchy-m5 contributors (method) | MIT |
 | `patches/linux/config/k114s-required.config` | this repository; the lines marked `[recipe]` restate betizzel/omarchy-m5 `j714s-required.config` | this repository; betizzel and omarchy-m5 contributors for those lines | MIT |

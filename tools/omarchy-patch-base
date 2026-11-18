@@ -1,0 +1,29 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled): write a patch's base folder, the three-way merge's source.
+#   tools/omarchy-patch-base patches/omarchy/NNNN-name.patch [USR_DIR]
+# USR_DIR (default /usr) holds the Omarchy files the patch was written for: either as Omarchy
+# ships them (the patch applies exactly) or with the patch in place (it reverses exactly). The
+# base folder, patches/omarchy/NNNN-name.base/, gets each file the patch changes, without the
+# patch. Run it whenever the patch is refreshed against a new Omarchy build.
+set -euo pipefail
+p=$1; usr=${2:-/usr}
+[[ -f $p && $p == *.patch ]] || { echo "usage: $0 PATCH [USR_DIR]" >&2; exit 1; }
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+ROOT=""; say() { echo "$*"; }
+# shellcheck source=../linux/omarchy-patches-lib.sh
+. "$HERE/../linux/omarchy-patches-lib.sh"
+w=$(mktemp -d); trap 'rm -rf "$w"' EXIT
+while read -r f; do
+  [[ -f $usr/$f ]] || { echo "$usr/$f is missing" >&2; exit 1; }
+  mkdir -p "$(dirname "$w/$f")"; cp "$usr/$f" "$w/$f"
+done < <(patch_files "$p")
+if patch -p1 -d "$w" -F0 -s -f --no-backup-if-mismatch -r - -N --dry-run < "$p" >/dev/null 2>&1; then
+  echo "$(basename "$p"): base taken as found"
+elif patch -p1 -d "$w" -F0 -s -f --no-backup-if-mismatch -r - -R < "$p" >/dev/null 2>&1; then
+  echo "$(basename "$p"): base taken with the patch reversed"
+else
+  echo "$(basename "$p") neither applies nor reverses exactly in $usr; nothing written" >&2; exit 1
+fi
+b=$(base_dir "$p"); rm -rf "$b"; mkdir -p "$b"
+while read -r f; do mkdir -p "$(dirname "$b/$f")"; install -m 644 "$w/$f" "$b/$f"; done < <(patch_files "$p")
+echo "wrote $b"
