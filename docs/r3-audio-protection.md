@@ -284,7 +284,7 @@ from the J714 and unused while `enable_speakers` is false; they are an assumptio
    qualification document, and for what Jens Axboe's K116s runs. The first of these that carries
    this model's own data, with protection active, is the point at which the owner can listen.
 
-## Not verified, could not determine
+## Unverified in the November 14 check
 
 - The contents of this Mac's `AID49` tuning: no bundle was collected (root, outside this task).
   That it is `lsm2` with LSID rests on upstream's statements about K114/`AID49`, not on a reading
@@ -312,3 +312,66 @@ from the J714 and unused while `enable_speakers` is false; they are an assumptio
 - IronsideXXVI/omarchy-j604 `speakersafetyd/patches/0002-conf-Add-J604-MacBook-Pro-14-inch-M4.patch`.
 - betizzel/omarchy-m5 `README.md`, `docs/left-out.md`,
   `installer/recipes/speakerguardd-v2-upstream/README.md`.
+
+## K114s v2 qualification update (2026-11-20)
+
+[Speakerguardd #219](https://github.com/aurora-silicon/speakerguardd/pull/219)
+replaces the legacy #177/#178 speaker work. The
+[offline backport](../patches/speakerguardd-v2/0001-qualify-speaker-sense-geometry.patch)
+is commit `ddf66b41341c` on base `f573f6054011`. Apply it only to a scratch v2 checkout for
+qualification. The change compares ALSA's applied format, channel count and rate to the request
+and requires a positive period before taking the silent-test grant. The LV2 test checks the
+actual PipeWire callback counts, 2730 frames followed by 512. A valid ALSA period can differ from
+either count. The applied-geometry regression failed on the unpatched base. With a synthetic
+device tree and no audio devices, the pinned checkout passed 253 session tests with one skip
+and all three LV2 sense-binding tests. The older K114c tone test in
+[#178](https://github.com/aurora-silicon/speakerguardd/pull/178) and
+[Omarchy packages #2719](https://github.com/omacom/omarchy-pkgs/pull/2719) supplies no K114s
+thermal calibration.
+
+The read-only route 1 collector found this Mac's verified, unit-bound AID49 bundle, speaker
+assembly ID 0, from macOS build `26C5035r`. The Linux camera loader uses a separate 27.2 firmware
+key. The installed v2 reader identified and validated the bundle, then compiled it offline.
+It reported an LSM2 protection unit with an LSID companion at 48 kHz and the
+`lsid-disabled` and `lsm2-release-gated` results. The voicing check refused at macOS parity.
+Keep the bundle, parameter blob, raw dump and digests private.
+
+The [K114s wiring fixture](../tests/fixtures/k114s-speaker-wiring.json) describes the ADT-observed
+six SN012776 amplifiers in this board's order: left woofer 1, right woofer 1, left woofer 2, right
+woofer 2, left tweeter, right tweeter. It uses V/I slots `4n` and `4n+2`. The current v2 wiring
+tool accepted that fixture against this Mac's private tuning dump and derived six outputs, twelve
+sense ports and `6ch-vi` at 48 kHz. This is a model of the proposed wiring. An eventual driver
+readback still has to establish the live card, applied format, rate, period and channel mapping.
+
+To reproduce the offline wiring check, use the pinned v2 checkout and the validated private tuning
+dump. Keep its result with the private bundle:
+
+```sh
+python3 packaging/session/wiring.py describe \
+  --hw "$K114S_REPO/tests/fixtures/k114s-speaker-wiring.json" \
+  --tuning-json "$PRIVATE_DIR/dump.json" > "$PRIVATE_DIR/wiring.json"
+```
+
+The current bundle was collected without booting macOS. Upstream still needs the silent macOS
+estimator baseline for LSID parity. At a separate attended macOS window, use the
+[maintainer's kit](https://github.com/aurora-silicon/speakerguardd/issues/188#issuecomment-7007450253)
+from `ddf66b41341c53908cfdeda277875e5b00f152fc`. In a private working directory on this Mac,
+as the logged-in user, from the kit directory:
+
+```sh
+umask 077
+sh macos/run-macos.sh --seconds 30 --leave-muted --out "$PWD/lsid-k114s.log"
+sh redact-check.sh "$PWD/lsid-k114s.log"
+```
+
+Use the kit's source build and its built-in mute and volume checks. Review its redacted log and
+run the repo's publish checks before sharing only the authorized results. If a different macOS
+build needs a new private tuning bundle, run
+[`tools/speaker-tuning/collect-macos.sh -o <private-path>`](https://github.com/aurora-silicon/aurora-installer/blob/7be53392f97683b4e4354c8d86596b47774db065/tools/speaker-tuning/collect-macos.sh)
+on this unit, then collect from that archive with `aurora-speaker-upgrade collect --route 3`
+using `--collection` and a private output directory. The existing bundle already supplies the
+source material for this round.
+
+Speaker output remains locked. LSID parity, a matching voicing attestation and the
+board-specific hardware proof are required before activation. Keep the Linux tester, which can
+open speaker playback and take the grant, outside the current qualification steps.

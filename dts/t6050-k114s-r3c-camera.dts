@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/* One-boot camera trial tree. Keep the normal r3c tree as the default. */
+#include "t6050-k114s-r3c.dts"
+
+#define K114S_R3_ISP
+#include "t6050-k114s-isp.dtsi"

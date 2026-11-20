@@ -1,0 +1,91 @@
+{
+  "board": "k114s",
+  "compatible": [
+    "apple,k114s"
+  ],
+  "sound": "sound",
+  "sound_compatible": [
+    "apple,k114-macaudio",
+    "apple,macaudio"
+  ],
+  "model": "MacBook Pro K114",
+  "links": [
+    {
+      "name": "Speakers",
+      "cpus": 1,
+      "cpu_compatible": [
+        [
+          "apple,t6050-aop-audio"
+        ]
+      ],
+      "cpu_dma_names": [
+        [
+          "spkr",
+          "sense"
+        ]
+      ],
+      "codecs": [
+        {
+          "node": "i2c1/codec@38",
+          "prefix": "Left Woofer 1",
+          "compatible": [
+            "ti,sn012776",
+            "ti,tas2764"
+          ],
+          "vmon": 0,
+          "imon": 2
+        },
+        {
+          "node": "i2c3/codec@3b",
+          "prefix": "Right Woofer 1",
+          "compatible": [
+            "ti,sn012776",
+            "ti,tas2764"
+          ],
+          "vmon": 4,
+          "imon": 6
+        },
+        {
+          "node": "i2c1/codec@39",
+          "prefix": "Left Woofer 2",
+          "compatible": [
+            "ti,sn012776",
+            "ti,tas2764"
+          ],
+          "vmon": 8,
+          "imon": 10
+        },
+        {
+          "node": "i2c3/codec@3c",
+          "prefix": "Right Woofer 2",
+          "compatible": [
+            "ti,sn012776",
+            "ti,tas2764"
+          ],
+          "vmon": 12,
+          "imon": 14
+        },
+        {
+          "node": "i2c1/codec@3a",
+          "prefix": "Left Tweeter",
+          "compatible": [
+            "ti,sn012776",
+            "ti,tas2764"
+          ],
+          "vmon": 16,
+          "imon": 18
+        },
+        {
+          "node": "i2c3/codec@3d",
+          "prefix": "Right Tweeter",
+          "compatible": [
+            "ti,sn012776",
+            "ti,tas2764"
+          ],
+          "vmon": 20,
+          "imon": 22
+        }
+      ]
+    }
+  ]
+}
