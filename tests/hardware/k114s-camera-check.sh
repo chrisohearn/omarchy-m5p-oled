@@ -77,11 +77,17 @@ if ! command -v ffmpeg >/dev/null; then
   exit 1
 fi
 umask 077
-frames=$(mktemp -d) || exit 1
+if ! frames=$(mktemp -d); then
+  bad "could not create a private frame directory"
+  exit 1
+fi
+trap 'rm -f -- "$frames/frame.png"; rmdir -- "$frames"' EXIT
+trap 'exit 1' HUP INT TERM
 if ! timeout 20s ffmpeg -nostdin -hide_banner -loglevel error -f v4l2 \
   -i "${devices[0]}" -frames:v 1 "$frames/frame.png" || [[ ! -s $frames/frame.png ]]; then
   bad "no frame saved from ${devices[0]}"
   exit 1
 fi
+trap - EXIT HUP INT TERM
 ok "one local frame saved to $frames/frame.png"
 info "owner checks the physical light during capture and the framing in the saved image"

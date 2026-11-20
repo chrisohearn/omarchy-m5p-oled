@@ -323,8 +323,9 @@ qualification. The change compares ALSA's applied format, channel count and rate
 and requires a positive period before taking the silent-test grant. The LV2 test checks the
 actual PipeWire callback counts, 2730 frames followed by 512. A valid ALSA period can differ from
 either count. The applied-geometry regression failed on the unpatched base. With a synthetic
-device tree and no audio devices, the pinned checkout passed 253 session tests with one skip
-and all three LV2 sense-binding tests. The older K114c tone test in
+device tree and no audio devices, the pinned checkout ran 254 session tests (253 passed, one
+skipped) with `python3 -m unittest discover -s packaging/session -p "test_*.py"`. All three LV2
+sense-binding tests passed. The older K114c tone test in
 [#178](https://github.com/aurora-silicon/speakerguardd/pull/178) and
 [Omarchy packages #2719](https://github.com/omacom/omarchy-pkgs/pull/2719) supplies no K114s
 thermal calibration.

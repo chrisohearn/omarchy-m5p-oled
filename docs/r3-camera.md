@@ -40,15 +40,17 @@ property and is not part of the key; the K116s's value is not recorded upstream,
 | File | What |
 | --- | --- |
 | `patches/aura/camera/0001-kboot-T6050-hand-the-K114s-camera-over-on-27.2.patch` | one table row, `{"apple,k114s", 0xba, V27_2}`, plus comments. Applies with `git am` on the loader base this repository builds: aura `22b71758` + betizzel's seven patches (`build/native/setup.sh`) + `patches/aura/0001-0003`, checked as the whole series; not built (no aarch64 build host here). It lives in its own folder so the display recipe's `git am patches/aura/*.patch` (docs/r3-display-gpu.md) stays the display loader and the D-series binary stays reproducible |
-| `dts/t6050-k114s-isp.dtsi` | draft, off by default (`K114S_R3_ISP`), not included by any tree: includes the base tree's `t6050-j716c-isp.dtsi`, as the K116s tree does. Not compiled: this host has no `dtc` and no kernel tree |
+| `dts/t6050-k114s-isp.dtsi` | off by default (`K114S_R3_ISP`), includes the base tree's `t6050-j716c-isp.dtsi`, as the K116s tree does. The November 18 trial and November 20 rebuild used it |
+| `dts/t6050-k114s-r3c-camera.dts` | separate r3c camera trial tree that opts in to the ISP fragment |
+| `patches/linux/camera/0001` | optional backport of Linux #1831, built into the trial ISP module |
 | `tests/k114s-adt-camera-facts.py` | reads the ADT (root, read-only, or `--adt FILE`), compares with the K116s values, replays the loader gate |
 | `tests/test-adt-camera-facts.py` | replica test: a made-up ADT from the public K116s values passes; wrong sensor type, interrupt, power-state offset, segment address and layout fail. No Apple data |
 | `tests/hardware/k114s-camera-check.sh` | report the Apple ISP capture device and light description; `--capture` saves one local frame from that device |
 
 Tests run: `git am` of betizzel's seven, `patches/aura/0001-0003` and `patches/aura/camera/0001` in order on aura `22b71758` (applies); `python3 tests/test-adt-camera-facts.py` (all ok, with a planted serial number and MAC address), `python3 -I tests/k114s-adt-camera-facts.py` on this Mac (exit 0).
 The camera trial loader is the r3 loader (`patches/aura/0001-0003`) plus `patches/aura/camera/0001`, built as its own Stage 2
-variant or `aura-try` image, never folded into a display trial. Not run: a DTS compile and `tests/lint-dtb.py` of the new fragment (no `dtc`); the aura build; the KUnit
-case of linux #1831 (no build host).
+variant or `aura-try` image. The November 15 check covered source and ADT; the later builds and
+trial are recorded below. The Linux #1831 KUnit case was not run.
 
 ## What the one-boot trial proved
 
@@ -84,8 +86,8 @@ toolchain to build `apple-isp.ko`. Compile `t6050-k114s-r3c-camera.dts` with the
 and the same private PMP input as the normal tree. The November 20 rebuild matched the
 configured control DTB and the original camera trial DTB and Stage 2 byte for byte. The ISP
 module built for the running r3c-upstream release and retained both physical-light checks.
-The camera helper passed isolated checks for AVD-only, ISP without the light description,
-ISP with a light description, and the wrong board. Only the ISP-with-light fixture invoked capture. Keep the module, DTB, loader and
+The [isolated camera helper tests](../tests/hardware/test-camera-check.sh) exercise AVD-only,
+ISP without the light description, ISP with the light, the wrong board and a failed frame write. Keep the module, DTB, loader and
 firmware artifacts outside git. The normal tree and both verified UKIs remain the recovery path.
 
 Before another trial, obtain the K114s activity-light resource and configuration from board-specific
