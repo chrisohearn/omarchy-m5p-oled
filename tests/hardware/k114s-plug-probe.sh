@@ -20,7 +20,7 @@ state() {
   local p x line="ac=$(rd "$ps/macsmc-ac/online") limit_W=$(awk -v v="$(rd "$ps/macsmc-ac/input_power_limit")" 'BEGIN { if (v ~ /^[0-9]+$/) printf "%.1f", v / 1e6; else print "?" }')"
   line+=" bat=$(rd "$ps/macsmc-battery/status")"
   for p in "$sys"/class/typec/port*; do
-    [[ -d $p ]] || continue
+    [[ -d $p && ${p##*/} =~ ^port[0-9]+$ ]] || continue
     x=none; ls -d "$p"/${p##*/}-partner >/dev/null 2>&1 && x=present
     line+=" ${p##*/}[partner=$x mode=$(rd "$p/power_operation_mode") pwr=$(rd "$p/power_role") data=$(rd "$p/data_role")]"
   done
