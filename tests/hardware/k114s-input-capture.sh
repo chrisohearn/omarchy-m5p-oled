@@ -194,18 +194,26 @@ capture() { # MODE SECONDS
   "${runner[@]}" env K114S_PROC_INPUT="$proc" K114S_DEV_DIR="${K114S_DEV_DIR:-/dev/input}" python3 -I -c '
 import os,re,select,struct,sys,time
 mode,secs=sys.argv[1],float(sys.argv[2]); proc=os.environ["K114S_PROC_INPUT"]; devdir=os.environ["K114S_DEV_DIR"]
-want={"keys":["Apple MTP keyboard","Apple SMC power/lid events"],"power":["Apple SMC power/lid events"],
-      "gestures":["Apple MTP multi-touch","Apple MTP keyboard"]}[mode]
+KEY_POWER=116
+want=["Apple MTP multi-touch","Apple MTP keyboard"] if mode=="gestures" else ["Apple MTP keyboard","Apple SMC power/lid events"]
 nodes={}
 for blk in open(proc).read().split("\n\n"):
     n=re.search(r"N: Name=\"(.*)\"",blk); h=re.search(r"H: Handlers=.*\b(event\d+)",blk)
-    if n and h and n.group(1) in want: nodes[n.group(1)]=h.group(1)
-if len(nodes)!=len(want): sys.exit("input device missing: want %s, found %s"%(want,list(nodes)))
+    if not (n and h and n.group(1) in want): continue
+    if mode=="power":
+        key=re.search(r"^B: KEY=(.*)$",blk,re.M)
+        words=key.group(1).split() if key else []
+        word,bit=divmod(KEY_POWER,64)  # /proc reports 64-bit words, most significant first
+        if len(words)<=word or not (int(words[-1-word],16) & (1<<bit)): continue
+    nodes[n.group(1)]=h.group(1)
+if mode=="power":
+    if not nodes: sys.exit("input device missing: neither Apple MTP keyboard nor Apple SMC power/lid events advertises KEY_POWER with an event handler")
+elif len(nodes)!=len(want): sys.exit("input device missing: want %s, found %s"%(want,list(nodes)))
 fds={os.open(devdir+"/"+e,os.O_RDONLY|os.O_NONBLOCK):n for n,e in nodes.items()}
 NAMES={113:"KEY_MUTE XF86AudioMute",114:"KEY_VOLUMEDOWN XF86AudioLowerVolume",115:"KEY_VOLUMEUP XF86AudioRaiseVolume",
  163:"KEY_NEXTSONG XF86AudioNext",164:"KEY_PLAYPAUSE XF86AudioPlay",165:"KEY_PREVIOUSSONG XF86AudioPrev",
  224:"KEY_BRIGHTNESSDOWN XF86MonBrightnessDown",225:"KEY_BRIGHTNESSUP XF86MonBrightnessUp",142:"KEY_SLEEP XF86Sleep",
- 116:"KEY_POWER XF86PowerOff",248:"KEY_MICMUTE XF86AudioMicMute",228:"KEY_KBDILLUMTOGGLE XF86KbdLightOnOff",
+ KEY_POWER:"KEY_POWER XF86PowerOff",248:"KEY_MICMUTE XF86AudioMicMute",228:"KEY_KBDILLUMTOGGLE XF86KbdLightOnOff",
  229:"KEY_KBDILLUMDOWN XF86KbdBrightnessDown",230:"KEY_KBDILLUMUP XF86KbdBrightnessUp",29:"KEY_LEFTCTRL",97:"KEY_RIGHTCTRL",
  464:"KEY_FN",240:"KEY_UNKNOWN",217:"KEY_SEARCH"}
 TOP=[113,114,115,163,164,165,224,225,142,248]
@@ -216,24 +224,26 @@ end=t0+secs
 while time.time()<end and fds:
     r,_,_=select.select(list(fds),[],[],0.2)
     for fd in r:
+        dev=fds[fd]; source=" [%s]"%dev if mode=="power" else ""
         try: d=os.read(fd,24*64)
         except OSError as e:   # ENODEV when the device resets or resumes mid-capture: keep the summary
-            print("%s went away mid-capture (%s); the summary covers what was read"%(fds[fd],e.strerror)); del fds[fd]; break
-        if not d: del fds[fd]; break   # a regular file (test) ends; a device never does
+            print("%s went away mid-capture (%s); the summary covers what was read"%(dev,e.strerror)); del fds[fd]; continue
+        if not d: del fds[fd]; continue   # a regular file (test) ends; a device never does
         for i in range(0,len(d)-23,24):
-            _,_,t,c,v=struct.unpack("@llHHi",d[i:i+24]); events+=1; dev=fds.get(fd,"")
+            _,_,t,c,v=struct.unpack("@llHHi",d[i:i+24]); events+=1
             if t==1:
+                if mode=="power" and c!=KEY_POWER: continue
                 if mode=="gestures":
                     if "keyboard" in dev: keycount+=v==1
                     else: btn[c]=btn.get(c,0)+(v==1)
                     continue
                 if v==1:
                     held.add(c); presses[c]=presses.get(c,0)+1
-                    if c in TOP+[116] and (29 in held or 97 in held): chord[c]=chord.get(c,0)+1
-                    print("%6.2fs press   %s"%(time.time()-t0,name(c)),flush=True)
+                    if c in TOP+[KEY_POWER] and (29 in held or 97 in held): chord[c]=chord.get(c,0)+1
+                    print("%6.2fs press   %s%s"%(time.time()-t0,name(c),source),flush=True)
                 elif v==0:
-                    held.discard(c); print("%6.2fs release %s"%(time.time()-t0,name(c)),flush=True)
-            elif t==5 and mode!="gestures": print("%6.2fs switch %d=%d"%(time.time()-t0,c,v),flush=True)
+                    held.discard(c); print("%6.2fs release %s%s"%(time.time()-t0,name(c),source),flush=True)
+            elif t==5 and mode!="gestures": print("%6.2fs switch %d=%d%s"%(time.time()-t0,c,v,source),flush=True)
             elif t==3 and mode=="gestures":
                 if c==0x2f: slot=v
                 elif c==0x39:
@@ -248,9 +258,9 @@ if mode=="gestures":
     print("buttons: "+", ".join("%s x%d"%({272:"BTN_LEFT click",330:"BTN_TOUCH",333:"BTN_TOOL_DOUBLETAP",334:"BTN_TOOL_TRIPLETAP",335:"BTN_TOOL_QUADTAP",325:"BTN_TOOL_FINGER"}.get(c,"code %d"%c),n) for c,n in sorted(btn.items())))
     print("keystrokes typed during the capture: %d; events read: %d"%(keycount,events))
 else:
-    for c in (TOP if mode=="keys" else [116]):
+    for c in (TOP if mode=="keys" else [KEY_POWER]):
         print("%-8s %s presses=%d%s"%("SEEN" if presses.get(c) else "MISSING",name(c),presses.get(c,0)," (with Ctrl: %d)"%chord[c] if c in chord else ""))
-    others=sorted(set(presses)-set(TOP)-{116})
+    others=sorted(set(presses)-set(TOP)-{KEY_POWER})
     if others and mode=="keys": print("other codes: "+", ".join(name(c)+" x%d"%presses[c] for c in others))
 ' "$mode" "$secs"
 }
