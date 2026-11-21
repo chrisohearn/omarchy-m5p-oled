@@ -76,6 +76,46 @@ run "$d"
 [[ $rc -eq 0 && $out == *"PASS arm64 CDM present"* ]] && ! grep -q "^FAIL" <<<"$out" && ok "healthy system: exit 0, no FAIL" || bad "good: rc=$rc $out"
 [[ $out == *"PASS wf-recorder 3 s clip"* ]] && ok "ffprobe reads the file wf-recorder wrote" || bad "clip: $out"
 
+# Optional OpenCL diagnostics must leave this otherwise healthy fixture at exit 0.
+[[ $rc -eq 0 && $out == *"INFO Rusticl ICD registration file absent"* && $out == *"SKIP clinfo missing"* && $out != *"Other OpenCL ICD files"* ]] &&
+  ok "missing Rusticl registration and clinfo are reported separately" || bad "missing OpenCL: rc=$rc $out"
+
+mkdir -p "$d/root/etc/OpenCL/vendors"
+printf 'libpocl.so.2\n' >"$d/root/etc/OpenCL/vendors/pocl.icd"
+cat >"$d/bin/clinfo" <<'EOF'
+#!/bin/sh
+[ "$#" -eq 1 ] && [ "$1" = -l ] || exit 2
+echo 'Platform #0: Portable Computing Language'
+echo ' `-- Device #0: rusticl'
+echo 'Platform #1: rusticl' >&2
+EOF
+chmod +x "$d/bin/clinfo"
+run "$d" --no-capture
+[[ $rc -eq 0 && $out == *"INFO Rusticl ICD registration file absent"* && $out == *"INFO Other OpenCL ICD files are present"* &&
+   $out == *"INFO clinfo -l listed no Rusticl platform"* && $out != *"PASS clinfo"* ]] &&
+  ok "unrelated ICD and platform are not reported as Rusticl" || bad "unrelated OpenCL: rc=$rc $out"
+
+printf 'libRusticlOpenCL.so.1\n' >"$d/root/etc/OpenCL/vendors/rusticl.icd"
+printf '#!/bin/sh\necho "Platform #0: rusticl"\nexit 1\n' >"$d/bin/clinfo"
+run "$d" --no-capture
+[[ $rc -eq 0 && $out == *"INFO Rusticl ICD registration file present"* && $out == *"INFO clinfo -l failed (exit 1)"* &&
+   $out != *"SKIP clinfo"* && $out != *"PASS clinfo"* ]] &&
+  ok "clinfo failure is reported even when it printed a Rusticl platform" || bad "clinfo failure: rc=$rc $out"
+
+cat >"$d/bin/clinfo" <<'EOF'
+#!/bin/sh
+[ "$#" -eq 1 ] && [ "$1" = -l ] || exit 2
+echo 'Platform #0: Portable Computing Language'
+for n in 0 1 2 3 4; do
+  echo "Device #$n: CPU"
+done
+echo 'Platform #1: rusticl'
+EOF
+run "$d" --no-capture
+[[ $rc -eq 0 && $out == *"INFO Rusticl ICD registration file present"* && $out == *"PASS clinfo -l enumerates the Rusticl platform"* &&
+   $out == *"INFO Platform enumeration alone does not verify GPU compute"* ]] &&
+  ok "Rusticl enumeration beyond the output preview passes without claiming compute" || bad "Rusticl enumeration: rc=$rc $out"
+
 # vulkaninfo failure
 printf '#!/bin/sh\nexit 1\n' >"$d/bin/vulkaninfo"; chmod +x "$d/bin/vulkaninfo"
 run "$d" --no-capture
