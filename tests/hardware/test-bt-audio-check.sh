@@ -32,11 +32,14 @@ C
 F
 cat >"$h/bin/uname" <<'F'
 #!/bin/bash
-printf '%s\n' '7.3.0-17.v272-18-k114s-r3c-ARCH'
+printf '%s\n' "$TEST_RELEASE"
 F
 chmod +x "$h/bin/pactl" "$h/bin/uname"
-out=$(HOME=$h PATH="$h/bin:$PATH" timeout 60 setsid bash "$S" --no-save </dev/null 2>&1)
-grep -q '^ok .*running kernel 7.3.0-17.v272-18-k114s-r3c-ARCH$' <<<"$out" && ok "r3c kernel accepted" || bad "r3c kernel rejected"
+for variant in r3c r3c-upstream; do
+  release=7.3.0-17.v272-18-k114s-$variant-ARCH
+  out=$(TEST_RELEASE=$release HOME=$h PATH="$h/bin:$PATH" timeout 60 setsid bash "$S" --no-save </dev/null 2>&1)
+  grep -Fxq "ok      running kernel $release" <<<"$out" && ok "$variant kernel accepted" || bad "$variant kernel rejected"
+done
 grep -q 'a2dp-sink' <<<"$out" && grep -q 'Active Profile' <<<"$out" && ok "bluez card profiles listed" || bad "bluez profiles missing"
 grep -qE 'Secret|AA.AA.AA' <<<"$out" && bad "bluez alias or address leaked" || ok "bluez alias and address absent"
 rm -rf "$h"; [ $fail = 0 ] && echo "PASS" || { echo "FAILED"; exit 1; }
