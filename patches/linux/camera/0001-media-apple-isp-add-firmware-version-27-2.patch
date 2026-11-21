@@ -1,0 +1,98 @@
+From 0e89ab422379aeaafde5a3c7b13fabd1cb8655d0 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <address-in-upstream-commit@localhost>
+Date: Sat, 14 Nov 2026 00:50:57 +1100
+Subject: [PATCH] media: apple: isp: add firmware version 27.2
+
+macOS 27.2 (build 26B123) ships the legacy-ABI ISP firmware on the
+M1/M2/M3 image signal processors with an apple,firmware-compat of
+<27 2 0>. The parser has no arm for it, so the version reads back as
+UNKNOWN. UNKNOWN sorts below ISP_FIRMWARE_V_13_5, which makes
+isp_cmd_ch_set_file_load() fall to the 12.x 32-bit set-file record;
+27.2, like every firmware from 13.5 on, expects the 64-bit record.
+
+Add ISP_FIRMWARE_V_27_2 after ISP_FIRMWARE_V_26_6_2 so it stays above
+13.5, parse exactly <27 2 0>, and print "27.2". The firmware stays
+ISP_FW_ABI_LEGACY and the existing >= ISP_FIRMWARE_V_13_5 condition then
+selects the 64-bit set-file format. 27.2 is a normal legacy firmware and
+is not caught by the J613-only 26.6.2 preview admission gate.
+
+A KUnit case covers the string and the ordering invariant that drives
+the set-file selection.
+
+Assisted-by: LLM
+Signed-off-by: Ryan Murray <address-in-upstream-commit@localhost>
+Upstream: https://github.com/aurora-silicon/linux/pull/1831 (0e89ab4223)
+---
+ .../media/platform/apple/isp/isp-drv-test.c   | 26 +++++++++++++++++++
+ drivers/media/platform/apple/isp/isp-drv.c    |  4 +++
+ drivers/media/platform/apple/isp/isp-drv.h    |  1 +
+ 3 files changed, 31 insertions(+)
+
+diff --git a/drivers/media/platform/apple/isp/isp-drv-test.c b/drivers/media/platform/apple/isp/isp-drv-test.c
+index 2ff43d1c7ae26..4b3ebef5fea74 100644
+--- a/drivers/media/platform/apple/isp/isp-drv-test.c
++++ b/drivers/media/platform/apple/isp/isp-drv-test.c
+@@ -153,3 +153,29 @@ static struct kunit_suite isp_hw_test_suite = {
+ };
+ 
+ kunit_test_suite(isp_hw_test_suite);
++
++/*
++ * 27.2 prints its own string and, like every firmware from 13.5 on, selects
++ * the 64-bit set-file record: isp_cmd_ch_set_file_load() keys that choice on
++ * fw_compat >= ISP_FIRMWARE_V_13_5, so the enum must keep 27.2 above 13.5.
++ * UNKNOWN sorts below 13.5 and would wrongly pick the 12.x 32-bit record.
++ */
++static void isp_test_fw_version_27_2(struct kunit *test)
++{
++	KUNIT_EXPECT_STREQ(test, isp_fw2str(ISP_FIRMWARE_V_27_2), "27.2");
++	KUNIT_EXPECT_GT(test, (int)ISP_FIRMWARE_V_27_2, (int)ISP_FIRMWARE_V_13_5);
++	KUNIT_EXPECT_GT(test, (int)ISP_FIRMWARE_V_27_2, (int)ISP_FIRMWARE_V_26_6_2);
++	KUNIT_EXPECT_GT(test, (int)ISP_FIRMWARE_V_13_5, (int)ISP_FIRMWARE_V_UNKNOWN);
++}
++
++static struct kunit_case isp_fwver_test_cases[] = {
++	KUNIT_CASE(isp_test_fw_version_27_2),
++	{}
++};
++
++static struct kunit_suite isp_fwver_test_suite = {
++	.name = "apple-isp-fwver",
++	.test_cases = isp_fwver_test_cases,
++};
++
++kunit_test_suite(isp_fwver_test_suite);
+diff --git a/drivers/media/platform/apple/isp/isp-drv.c b/drivers/media/platform/apple/isp/isp-drv.c
+index f46adc37bad34..0b0dfea13dfad 100644
+--- a/drivers/media/platform/apple/isp/isp-drv.c
++++ b/drivers/media/platform/apple/isp/isp-drv.c
+@@ -568,6 +568,8 @@ static const char * isp_fw2str(enum isp_firmware_version version)
+ 		return "14.7";
+ 	case ISP_FIRMWARE_V_26_6_2:
+ 		return "26.6.2";
++	case ISP_FIRMWARE_V_27_2:
++		return "27.2";
+ 	default:
+ 		return "unknown";
+ 	}
+@@ -599,6 +601,8 @@ static enum isp_firmware_version isp_read_fw_version(struct device *dev,
+ 	case 3:
+ 		if (ver[0] == 26 && ver[1] == 6 && ver[2] == 2)
+ 			return ISP_FIRMWARE_V_26_6_2;
++		if (ver[0] == 27 && ver[1] == 2 && ver[2] == 0)
++			return ISP_FIRMWARE_V_27_2;
+ 		if (ver[0] == 12 && ver[1] == 3 && ver[2] <= 1)
+ 			return ISP_FIRMWARE_V_12_3;
+ 		else if (ver[0] == 12 && ver[1] == 4 && ver[2] == 0)
+diff --git a/drivers/media/platform/apple/isp/isp-drv.h b/drivers/media/platform/apple/isp/isp-drv.h
+index 3551018baf174..183817f1aa3ba 100644
+--- a/drivers/media/platform/apple/isp/isp-drv.h
++++ b/drivers/media/platform/apple/isp/isp-drv.h
+@@ -82,6 +82,7 @@ enum isp_firmware_version {
+ 	ISP_FIRMWARE_V_13_5,
+ 	ISP_FIRMWARE_V_14_7,
+ 	ISP_FIRMWARE_V_26_6_2,
++	ISP_FIRMWARE_V_27_2,
+ };
+ 
+ struct isp_surf {

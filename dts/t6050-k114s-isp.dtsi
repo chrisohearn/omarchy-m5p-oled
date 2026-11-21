@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0+ OR MIT
 /*
- * K114s (MacBook Pro 14-inch PROLED XDR, M5 Pro, Mac17,13): the camera (Apple ISP, IMX958). DRAFT.
- * NOT booted on a K114s. NOT included by any tree of this repository (docs/r3-camera.md, issue #33).
+ * K114s (MacBook Pro 14-inch PROLED XDR, M5 Pro, Mac17,13): the camera (Apple ISP).
+ * The one-boot r3c trial reached the ISP probe. The kernel refused it because the
+ * physical activity-light description is missing. See docs/r3-camera.md.
  *
  * The K116s way (aurora-silicon/linux #1648, "The camera" block of t6050-k116s.dts): include the
  * base tree's t6050-j716c-isp.dtsi, which adds the isp/isp-dart0..2 aliases and describes isp0, its
@@ -19,13 +20,13 @@
  *
  * Open: the sensor preset in t6050-j716c-isp.dtsi (config-index 5, input 1920x2160) is the J716c
  * and K116s one. The K114c's was config-index 6, input 3040x2880, crop 320 765 2400 1350
- * (linux #1756). Which the K114s needs is unknown until the driver runs on it.
+ * (linux #1756). The K114s trial stopped before it could verify a preset.
+ * The K116s preset is a trial starting point, with no K114c crop or sensor ID override.
  *
  * Nothing here is enabled unless the including tree defines K114S_R3_ISP. Include it after
  * t6050-k114s-common.dtsi. It needs the kernel's apple-isp driver (VIDEO_APPLE_ISP=m is in the
  * running kernel), the ISP firmware files in /lib/firmware/apple, the loader row of patches/aura/camera/0001
- * and linux #1831 (the 27.2 firmware version parser; without it the driver reads UNKNOWN and sends the
- * 12.x set-file record).
+ * and the separate linux/camera/0001 backport of #1831 to recognize 27.2.
  */
 #ifdef K114S_R3_ISP
 #include "t6050-j716c-isp.dtsi"

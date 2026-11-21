@@ -1,0 +1,175 @@
+From ddf66b41341c53908cfdeda277875e5b00f152fc Mon Sep 17 00:00:00 2001
+From: Joshua Warren <816217+joshuaswarren@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 21:07:13 -0600
+Subject: [PATCH] Qualify K114c sense on the v2 path
+
+Read the applied sense PCM geometry before taking the silent check grant, and confirm the v2 host clock follows the first callback rather than a requested period. Keep the own-Mac tuning and LSID qualification gates intact.
+
+Proof: the mismatch test fails before the applied-params check, then passes. Packaging suites ran 254 tests with one skip; cargo fmt and git diff --check pass.
+---
+ crates/sgv2-lv2/tests/sense_bind.rs       | 15 +++++++----
+ docs/NEW-PLATFORM.md                      | 10 +++++++
+ packaging/session/speakerguardd-selfcheck | 25 ++++++++++++++---
+ packaging/session/test_wiring.py          | 33 +++++++++++++++++++++++
+ 4 files changed, 74 insertions(+), 9 deletions(-)
+
+diff --git a/crates/sgv2-lv2/tests/sense_bind.rs b/crates/sgv2-lv2/tests/sense_bind.rs
+index 73531af9..0f681faf 100644
+--- a/crates/sgv2-lv2/tests/sense_bind.rs
++++ b/crates/sgv2-lv2/tests/sense_bind.rs
+@@ -196,10 +196,10 @@ fn run_follows_the_supervisor_word_through_the_c_abi() {
+     std::env::set_var("SGV2_ENGINE_PAGE", &page_path);
+     let index = VARIANTS.iter().position(|v| v.1 == 6 && v.2 == 12 && v.3 == Role::Protect).unwrap();
+     let d = lv2_descriptor(index as u32);
+-    const N: usize = 512;
+-    let sense = resistive_sense(N);
+-    let mut input = [[0.25f32; N]; 6];
+-    let mut output = [[9.0f32; N]; 6];
++    const FIRST: usize = 2730;
++    let sense = resistive_sense(FIRST);
++    let mut input = [[0.25f32; FIRST]; 6];
++    let mut output = [[9.0f32; FIRST]; 6];
+     let mut controls = [0.0f32; 3];
+     let h = page.header();
+     unsafe {
+@@ -218,11 +218,16 @@ fn run_follows_the_supervisor_word_through_the_c_abi() {
+         ((*d).activate.unwrap())(inst);
+         let crc = h.params_crc.load(Ordering::Relaxed);
+         assert_ne!(crc, 0);
++        // Count the first callback's actual frames, not the scratch capacity.
++        ((*d).run)(inst, FIRST as u32);
++        assert_eq!(h.frames.load(Ordering::Acquire), FIRST as u64);
++        assert_eq!(h.sense_bound.load(Ordering::Acquire), SENSE_UNBOUND);
+         let run = || {
+-            ((*d).run)(inst, N as u32);
++            ((*d).run)(inst, 512);
+             h.sense_bound.load(Ordering::Acquire)
+         };
+         assert_eq!(run(), SENSE_UNBOUND, "no word, no binding");
++        assert_eq!(h.frames.load(Ordering::Acquire), (FIRST + 512) as u64);
+         page.set_sense_bind(Some(crc ^ 1));
+         assert_eq!(run(), SENSE_UNBOUND, "a word for another blob");
+         page.set_sense_bind(Some(crc));
+diff --git a/docs/NEW-PLATFORM.md b/docs/NEW-PLATFORM.md
+index b9b3b30b..70cef054 100644
+--- a/docs/NEW-PLATFORM.md
++++ b/docs/NEW-PLATFORM.md
+@@ -176,6 +176,16 @@ policy data; deny wins, and an explicit allow cannot bypass any proof.
+ The former `qualified`, `require_qualified_board` and `allow-unqualified`
+ mechanisms cannot admit a board.
+ 
++**K114c qualification is pending the owner's machine window.** Use the
++Mac's own installer extraction (AID49 and its unit calibration), not the
++legacy thermal constants or a profile copied from another model. Record the
++provenance and the compiler's primary and companion results. Keep the
++speakers muted while LSID parity or any other gate requirement is missing.
++Once the gate permits the silent self-check, record the applied PCM format,
++rate, period and V/I wiring. The ALSA period is not the PipeWire callback
++size: the LV2 unit processes only the frames in each callback, including
++the first after a new open. The hardware speaker row remains owed.
++
+ The provisioning and self-check services use the gate's `prepare` mode,
+ which checks graph types, refusals, parity and deny policy without requiring
+ records that they have yet to produce. The supervisor's `v2` condition
+diff --git a/packaging/session/speakerguardd-selfcheck b/packaging/session/speakerguardd-selfcheck
+index 59752500..178ea18a 100755
+--- a/packaging/session/speakerguardd-selfcheck
++++ b/packaging/session/speakerguardd-selfcheck
+@@ -225,11 +225,9 @@ def pcm_ids(idx):
+     return out
+ 
+ 
+-def pcm_status(idx, dev, d):
+-    """The substream's /proc status as a dict ({"state": "closed"} when
+-    closed, {} when unreadable)."""
++def pcm_info(idx, dev, d, name):
+     try:
+-        with open(f"/proc/asound/card{idx}/pcm{dev}{d}/sub0/status") as f:
++        with open(f"/proc/asound/card{idx}/pcm{dev}{d}/sub0/{name}") as f:
+             t = f.read()
+     except OSError:
+         return {}
+@@ -243,6 +241,11 @@ def pcm_status(idx, dev, d):
+     return out
+ 
+ 
++def pcm_status(idx, dev, d):
++    """The substream's status (state=closed on close, {} if unreadable)."""
++    return pcm_info(idx, dev, d, "status")
++
++
+ def pcm_state(idx, dev, d):
+     st = pcm_status(idx, dev, d)
+     if not st:
+@@ -560,6 +563,19 @@ class Streams:
+                 proc.kill()
+                 proc.wait(2)
+ 
++    def _check_sense_params(self):
++        params = pcm_info(self.idx, self.sense, "c", "hw_params")
++        period = params.get("period_size", "")
++        if (params.get("format") != "S16_LE"
++                or params.get("channels") != str(self.sense_ch)
++                or params.get("rate", "").partition(" ")[0] != str(self.rate)
++                or not period.isdecimal() or int(period) == 0):
++            raise wiring.Refused(f"sense PCM hw_params do not match S16_LE, "
++                                 f"{self.sense_ch} channels at {self.rate} Hz and "
++                                 f"a positive period: {params}")
++        log(f"sense capture accepted S16_LE, {self.sense_ch} channels at "
++            f"{self.rate} Hz, period {period} frames")
++
+     def start(self, idx):
+         self.idx = idx
+         self.capture_deadline = time.monotonic() + 30
+@@ -579,6 +595,7 @@ class Streams:
+             if time.monotonic() >= deadline:
+                 raise wiring.Refused("sense capture did not become owned/RUNNING before playback")
+             time.sleep(0.01)
++        self._check_sense_params()
+         self.lease = Lease(self.ctl)
+         self.lease.start()
+         log("holding \"Speaker Protection\" for the silent switch test (zero samples only)")
+diff --git a/packaging/session/test_wiring.py b/packaging/session/test_wiring.py
+index 5e8be4a9..d8097d67 100644
+--- a/packaging/session/test_wiring.py
++++ b/packaging/session/test_wiring.py
+@@ -1336,6 +1336,39 @@ def test_targeted_and_fallback(self):
+                 sgsc.regmap_values("3-0038", {0x0C})
+ 
+ 
++class SenseOpen(unittest.TestCase):
++    def test_checks_applied_pcm_geometry_before_taking_the_grant(self):
++        st = sgsc.Streams(None, "AppleK114c", 1, 2, 6, 48000)
++        good = "format: S16_LE\nchannels: 12\nrate: 48000 (48000/1)\nperiod_size: 2730\n"
++        for line, replacement in (
++            ("S16_LE", "S32_LE"),
++            ("channels: 12", "channels: 10"),
++            ("48000 (48000/1)", "44100 (44100/1)"),
++            ("period_size: 2730", "period_size: 0"),
++            (good, "closed\n"),
++        ):
++            with self.subTest(replacement=replacement), \
++                    mock.patch("builtins.open", mock.mock_open(read_data=good.replace(line, replacement))), \
++                    mock.patch.object(sgsc.subprocess, "Popen"), \
++                    mock.patch.object(sgsc.threading, "Thread"), \
++                    mock.patch.object(st, "_owned", return_value=True), \
++                    mock.patch.object(sgsc, "Lease") as lease:
++                with self.assertRaisesRegex(wiring.Refused, "sense PCM hw_params"):
++                    st.start(3)
++                lease.assert_not_called()
++
++        # The applied size need not equal the requested period or the graph
++        # quantum: a valid 2730-frame capture can proceed to the silent grant.
++        with mock.patch("builtins.open", mock.mock_open(read_data=good)) as proc, \
++                mock.patch.object(sgsc.subprocess, "Popen"), \
++                mock.patch.object(sgsc.threading, "Thread"), \
++                mock.patch.object(st, "_owned", return_value=True), \
++                mock.patch.object(sgsc, "Lease", side_effect=RuntimeError("ready for grant")):
++            with self.assertRaisesRegex(RuntimeError, "ready for grant"):
++                st.start(3)
++            proc.assert_called_once_with("/proc/asound/card3/pcm2c/sub0/hw_params")
++
++
+ class StreamStop(unittest.TestCase):
+     """The zero-sample playback ends on SIGTERM; the sense capture, whose
+     data is no longer needed and which can stall once the playback stopped,

@@ -1,46 +1,93 @@
 #!/bin/bash
-# OWNER-RUN, ATTENDED. After a one-boot trial of a tree that includes dts/t6050-k114s-isp.dtsi (macro
-# K114S_R3_ISP) on a loader with patches/aura/camera/0001, this reports whether the camera came up. READ-ONLY:
-# changes no setting, loads no module, opens no window, and captures nothing unless you pass --capture.
-# Needs no root, but kernel messages and the loader log read better with it (it says so).
-#
-#   bash tests/hardware/k114s-camera-check.sh [--capture]
-#     (no flags)  the report only
-#     --capture   runs libcamera's `cam` once, one frame, into a temporary folder, and prints its name
-#                 so you can open the image yourself ("seeing a frame" is owner-observed). The camera
-#                 light/indicator is not described on this board.
-#
-# Lines: ok / BAD (a failed expectation) / info / ASK (needs your eyes) / unknown.
-# Serial numbers and addresses of the network are never printed.
+# Attended check for a K114s camera trial. The default reports device state.
+# --capture saves one local frame from the Apple ISP after the activity light is described.
+set -uo pipefail
+
 capture=0
-for a in "$@"; do
-  case $a in --capture) capture=1 ;; *) echo "usage: k114s-camera-check.sh [--capture]" >&2; exit 2 ;; esac
-done
-ok() { echo "ok   $*"; }; bad() { echo "BAD  $*"; }; info() { echo "info $*"; }; ask() { echo "ASK  $*"; }
-dt=/proc/device-tree
-[ "$(tr -d '\0' < $dt/compatible 2>/dev/null | head -c 11)" = "apple,k114s" ] && ok "this is a K114s tree" || bad "device tree is not the K114s"
-isp=$(ls -d $dt/soc/isp@* 2>/dev/null | head -1)
-if [ -n "$isp" ]; then
-  st=$(tr -d '\0' < "$isp/status" 2>/dev/null)
-  [ "$st" = okay ] && ok "isp node status: okay (the loader handed the camera over)" || bad "isp node status: ${st:-none} (loader refused or the tree lacks K114S_R3_ISP; read the loader log below)"
-  p=$(od -An -tx1 -v "$isp/apple,platform-id" 2>/dev/null | tr -d ' \n'); info "apple,platform-id (expected 000000ba): ${p:-absent}"
-  info "memory-region-names: $(tr '\0' ' ' < "$isp/memory-region-names" 2>/dev/null)"
-else
-  bad "no isp node in the live device tree"
+case ${1:-} in
+  '') ;;
+  --capture) capture=1 ;;
+  *) echo "usage: k114s-camera-check.sh [--capture]" >&2; exit 2 ;;
+esac
+if (( $# > 1 )); then
+  echo "usage: k114s-camera-check.sh [--capture]" >&2
+  exit 2
 fi
-lsmod | grep -q '^apple_isp' && ok "apple_isp module loaded" || info "apple_isp not loaded (modprobe is not run by this script)"
-ls /dev/video* /dev/media* >/dev/null 2>&1 && ok "video or media nodes: $(ls /dev/video* /dev/media* 2>/dev/null | tr '\n' ' ')" || bad "no /dev/video* or /dev/media*"
-echo "--- kernel messages (isp, camera); root shows more"
-(dmesg 2>/dev/null || sudo -n dmesg 2>/dev/null) | grep -i -E "apple-isp|apple_isp|isp0|camera|imx958" | tail -25 || true
-echo "--- loader log (camera lines); root only"
-for m in /dev/mtd/by-name/aura_stage2.log /dev/mtd/by-name/aura_stage1.log; do sudo -n strings "$m" 2>/dev/null | grep -i -E "\bISP\b|isp0|camera" | tail -8; done
-if command -v cam >/dev/null; then
-  echo "--- libcamera"; cam -l 2>&1 | head -8
-  if [ $capture = 1 ]; then
-    d=$(mktemp -d); (cd "$d" && cam -c1 --capture=1 --file=frame- 2>&1 | tail -5); info "frame folder: $d"
-    ask "open the file in $d and say what you see (this is the owner-observed evidence)"
+
+failed=0
+ok() { printf 'ok   %s\n' "$*"; }
+bad() { printf 'BAD  %s\n' "$*"; failed=1; }
+info() { printf 'info %s\n' "$*"; }
+
+dt=/proc/device-tree
+if IFS= read -r -d '' compatible 2>/dev/null < "$dt/compatible" &&
+  [[ $compatible == apple,k114s ]]; then
+  ok "K114s device tree"
+else
+  bad "expected a K114s device tree"
+fi
+
+isp="$dt/soc/isp@580000000"
+if [[ -d $isp ]]; then
+  status=$(tr -d '\0' 2>/dev/null < "$isp/status" || true)
+  if [[ $status == okay ]]; then
+    ok "ISP node enabled by the loader"
+  else
+    bad "ISP node status: ${status:-absent}"
+  fi
+  platform_id=$(od -An -tx1 -v "$isp/apple,platform-id" 2>/dev/null | tr -d ' \n' || true)
+  if [[ $platform_id == 000000ba ]]; then
+    ok "K114s ISP platform ID 0xba"
+  else
+    bad "ISP platform ID: ${platform_id:-absent} (expected 0xba)"
+  fi
+  if [[ -s $isp/apple,cil-config ]] &&
+    grep -zFxq cil "$isp/reg-names" 2>/dev/null; then
+    ok "physical camera activity light described"
+  else
+    bad "physical camera activity light description is missing (cil and apple,cil-config)"
   fi
 else
-  info "libcamera 'cam' not installed: only the kernel side was checked"
+  bad "ISP node absent"
 fi
-ask "if the screen froze, the Mac rebooted or the keyboard died during the boot, say so: a coprocessor hang needs a forced power-off"
+
+# AVD also creates video and media nodes. Only the ISP driver's capture node counts here.
+devices=()
+for node in /sys/class/video4linux/video[0-9]*; do
+  [[ -e $node ]] || continue
+  driver=$(readlink -- "$node/device/driver") || continue
+  device="/dev/${node##*/}"
+  if [[ ${driver##*/} == apple-isp && -c $device ]]; then
+    devices+=("$device")
+  fi
+done
+case ${#devices[@]} in
+  1) ok "Apple ISP capture device: ${devices[0]}" ;;
+  0) bad "Apple ISP capture device absent" ;;
+  *) bad "expected one Apple ISP capture device, found ${#devices[@]}" ;;
+esac
+
+info "recent ISP kernel messages (if readable)"
+dmesg 2>/dev/null | grep -Ei 'apple[-_]isp|isp0|imx958' | tail -25 || true
+(( failed == 0 )) || exit 1
+(( capture == 1 )) || exit 0
+
+if ! command -v ffmpeg >/dev/null; then
+  bad "ffmpeg required for capture"
+  exit 1
+fi
+umask 077
+if ! frames=$(mktemp -d); then
+  bad "could not create a private frame directory"
+  exit 1
+fi
+trap 'rm -f -- "$frames/frame.png"; rmdir -- "$frames"' EXIT
+trap 'exit 1' HUP INT TERM
+if ! timeout 20s ffmpeg -nostdin -hide_banner -loglevel error -f v4l2 \
+  -i "${devices[0]}" -frames:v 1 "$frames/frame.png" || [[ ! -s $frames/frame.png ]]; then
+  bad "no frame saved from ${devices[0]}"
+  exit 1
+fi
+trap - EXIT HUP INT TERM
+ok "one local frame saved to $frames/frame.png"
+info "owner checks the physical light during capture and the framing in the saved image"
