@@ -2,7 +2,7 @@
 # Checks of a built linux-k114s package that need no root and change nothing:
 #   - one release directory under usr/lib/modules, ending in -ARCH, different from linux-aurora's
 #   - the package name matches the candidate of the release (linux-k114s for -k114s-r3a-ARCH, linux-k114s-r3b
-#     for -k114s-r3b-ARCH); pkgbase in .PKGINFO and the module directory's pkgbase file equal it, and the
+#     for -k114s-r3b-ARCH, linux-k114s-r3b-t1 for the touch trial); pkgbase in .PKGINFO and the module directory's pkgbase file equal it, and the
 #     config lies under usr/share/<that name>/
 #   - vmlinuz, modules.dep, dtbs/t6050-k114s.dtb present; no build/source links
 #   - dtbs are exactly the names in dtbs.list (update-m1n1 puts all of them into m1n1/boot.bin)
@@ -39,13 +39,14 @@ fi
 [ -f "$m/vmlinuz" ] && ok "vmlinuz $(stat -c %s "$m/vmlinuz") bytes" || no "no vmlinuz"
 info() { sed -n "s/^$1 = //p" "$w/.PKGINFO"; }
 case $rel in
+  *-k114s-r3b-t1-ARCH) want=linux-k114s-r3b-t1 ;;
   *-k114s-r3b-ARCH) want=linux-k114s-r3b ;;
   *-k114s-r3a-ARCH) want=linux-k114s ;;
   *-k114s-r3c-ARCH) want=linux-k114s ;;   # r3c takes the r3a slot (docs/r3c-kernel.md)
   *) want= ;;
 esac
 name=$(info pkgname); base=$(info pkgbase)
-[ -n "$want" ] && [ "$name" = "$want" ] && ok "package name $name fits release $rel" || no "package name '$name' for release $rel (want '${want:-a k114s r3a, r3b or r3c release}')"
+[ -n "$want" ] && [ "$name" = "$want" ] && ok "package name $name fits release $rel" || no "package name '$name' for release $rel (want '${want:-a k114s r3a, r3b, r3b-t1 or r3c release}')"
 [ "$base" = "$name" ] && ok "pkgbase $base equals the package name" || no "pkgbase '$base' is not the package name '$name'"
 [ "$(cat "$m/pkgbase" 2>/dev/null)" = "$name" ] && ok "module directory pkgbase file is $name" || no "module directory pkgbase file is '$(cat "$m/pkgbase" 2>/dev/null)', not '$name'"
 [ -f "$w/usr/share/$name/config-$rel" ] && [ "$(ls "$w/usr/share")" = "$name" ] && ok "config at usr/share/$name/config-$rel" || no "config not (only) at usr/share/$name/config-$rel"

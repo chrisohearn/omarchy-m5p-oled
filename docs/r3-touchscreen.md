@@ -201,7 +201,14 @@ During attended staging, mkinitcpio uses the module directory's `pkgbase`
 file to select `linux-k114s-r3b-t1.preset`. The Limine hook uses the package
 name for `omarchy_linux-k114s-r3b-t1.efi`. Inspect the archive to verify the
 distinct module directory, the Kiwi module's vermagic, and the disabled Kiwi
-node in the packaged `dtbs/t6050-k114s.dtb`. The touchscreen-enabled `t6050-k114s-r3-touch.dtb`
+node in the packaged `dtbs/t6050-k114s.dtb`. The standard checker can
+also compare the package paths with the existing r3b installation:
+
+```bash
+bash packaging/linux-k114s/check-package.sh "$trial_archive" linux-k114s-r3b   "$trial_out/Module.symvers"
+```
+
+The touchscreen-enabled `t6050-k114s-r3-touch.dtb`
 is a separate Stage 2 input for the attended trial. The archive inspection
 proves package layout and DTB settings only.
 
