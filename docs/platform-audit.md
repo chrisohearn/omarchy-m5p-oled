@@ -254,11 +254,12 @@ the default entry ready. Read first: `sudo cat /boot/efi/limine.conf`; `df /boot
 
 ## Factory reset (#69)
 
-### What the menu does (agent-run)
+### Factory reset menu entry (agent-run)
 
-The stock menu shows `Setup > Reset Computer` (`setup.reset`) when `/` is btrfs. Its `when` is in
-`/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc`, owned by `omarchy-settings-dev`. The action
-calls `omarchy-system-factory-reset` (owned by `omarchy-dev`). Without patch 0005's gate, the command
+The 2026-11-15 audit recorded `Setup > Reset Computer` (`setup.reset`). On 2026-11-20, the installed
+stock definition in `/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc` (`omarchy-settings-dev`)
+used `Remove > Factory Reset` (`remove.factory-reset`). It checks that `/` is btrfs and calls
+`omarchy-system-factory-reset` (owned by `omarchy-dev`). Without patch 0005's gate, the command
 proceeds in this order:
 
 1. mounts the btrfs top level (writable);
@@ -308,7 +309,7 @@ How, in the style of docs/omarchy-patches.md:
   in `~/.config/omarchy/extensions/omarchy-menu.jsonc` (OWNER; not applied by this pass):
 
   ```jsonc
-  "setup.reset": {"when": "false"}
+  "remove.factory-reset": {"when": "false"}
   ```
 
   The extension controls menu visibility independently of the command gate.
