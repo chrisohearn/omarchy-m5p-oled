@@ -50,9 +50,32 @@ if [[ $vkcube -eq 1 ]]; then
 fi
 
 echo "== OpenCL (#27)"
-if ls "$root"/etc/OpenCL/vendors/*.icd >/dev/null 2>&1; then pass "OpenCL ICD registered"; else
-  echo "INFO no OpenCL ICD in /etc/OpenCL/vendors: no rusticl in mesa-aurora (expected today)"; fi
-have clinfo && { timeout -k 5 30 clinfo -l 2>&1 | head -5; } || skip "clinfo missing; no compute run is part of this script"
+vendors=$root/etc/OpenCL/vendors
+if [[ -f $vendors/rusticl.icd ]]; then
+  echo "INFO Rusticl ICD registration file present: rusticl.icd"
+else
+  echo "INFO Rusticl ICD registration file absent from /etc/OpenCL/vendors"
+  for icd in "$vendors"/*.icd; do
+    [[ -f $icd ]] || continue
+    echo "INFO Other OpenCL ICD files are present"
+    break
+  done
+fi
+if have clinfo; then
+  if out=$(timeout -k 5 30 clinfo -l 2>/dev/null); then
+    if grep -Eiq '^Platform #[0-9]+:[[:blank:]]+rusticl[[:blank:]]*$' <<<"$out"; then
+      pass "clinfo -l enumerates the Rusticl platform"
+    else
+      echo "INFO clinfo -l listed no Rusticl platform"
+    fi
+    printf '%s\n' "$out" | head -5
+  else
+    echo "INFO clinfo -l failed (exit $?)"
+  fi
+else
+  skip "clinfo missing"
+fi
+echo "INFO Platform enumeration alone does not verify GPU compute"
 
 echo "== Screen capture (#32)"
 if have gpu-screen-recorder; then opts=$(timeout -k 5 20 gpu-screen-recorder --list-capture-options 2>/dev/null </dev/null); orc=$?; fi
