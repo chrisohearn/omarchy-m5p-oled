@@ -160,6 +160,22 @@ verified upstream (see the table). The DART stream 1 change and the receive ring
 so a boot of r3b-t1 can break typing before it ever reaches touch. The KUnit cases in the series were not run. The QEMU smoke test was not run
 on r3b-t1. The ADT facts (12 of 12) say the pins agree; they say nothing about the polarities or about the 27.2 firmware actually running.
 
+### Offline packaging objective (#219)
+
+Prepare the existing r3b-t1 touchscreen build as an opt-in local package with
+both a distinct package name and a distinct kernel release. The package name
+must select its own pkgbase, preset and UKI name. The release must select its
+own `/usr/lib/modules` directory. Reject a build with the plain r3b release
+before staging any files. Keep the current default and all existing package
+variants as they are.
+
+Proof is an offline archive or package-root inspection. Check its names and
+paths against the r3b package, check that the regular r3b variant still selects
+its existing names, and verify that the trial build contains the Kiwi module.
+The endpoint is a locally verified archive and repository source. Installing the
+package, creating an entry and booting remain part of the later attended trial.
+Check the ESP budget and verify the recovery route before staging that trial.
+
 **Owner-session steps (not run).** Keep the default-off rule and the one-shot pattern. Only after the display window is closed
 (`docs/r3-display-plan.md` 4.4):
 
