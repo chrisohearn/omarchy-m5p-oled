@@ -67,7 +67,7 @@ origin() {
 # Omarchy package's own files carry the same change (it merged the fix), they are left as they are.
 # Returns 1 only when a reversal that should work fails.
 take_out() {
-  local p=$1 name how=exact
+  local p=$1 name how=exact result=clean
   name=$(basename "$p" .patch)
   is_in "$p" || { in_by_merge "$p" && how=merge; } || how=""
   if [[ -z $how ]]; then
@@ -75,7 +75,15 @@ take_out() {
     rm -f "$(marker "$p")"
   elif applied_here "$p"; then
     # A change put in by a three-way merge comes out the same way.
-    if [[ $how == exact ]] && ! run_patch "$p" -R || [[ $how == merge && $(three_way "$p" rev write) != clean ]]; then
+    if [[ $how == exact ]]; then
+      run_patch "$p" -R || result=failed
+    else
+      result=$(three_way "$p" rev write)
+    fi
+    if [[ $result == stuck\ * ]]; then
+      say "$name: could not take it out or put the files back. Copies of the originals are in ${result#stuck }/. Reinstall the Omarchy package to restore its files."
+      return 1
+    elif [[ $result != clean ]]; then
       say "$name: could not take it out; reinstall the Omarchy package to restore its files"
       return 1
     fi
@@ -141,6 +149,16 @@ check_targets() {
 # the patch's change (base -> base with the patch) into the current files instead. Any overlap
 # with Omarchy's own change is a conflict: then nothing is written.
 base_dir() { printf '%s.base\n' "${1%.patch}"; }
+same_base() {
+  local old new f
+  old=$(base_dir "$1"); new=$(base_dir "$2")
+  [[ ! -d $old && ! -d $new ]] && return 0
+  [[ -d $old && -d $new ]] || return 1
+  # Only the patch targets participate in the merge.
+  while read -r f; do
+    cmp -s -- "$old/$f" "$new/$f" || return 1
+  done < <(patch_files "$1")
+}
 have_merge() { command -v git >/dev/null 2>&1; }
 
 # Fills $2/base and $2/new (base with the patch applied exactly). 1: no base or no git; 2: the
@@ -170,10 +188,9 @@ merge_sides() {
 #   clean     the merge is clean and changes the files; written with "write"
 #   failed    a write failed; every file written so far was put back as it was
 #   stuck DIR a write failed and putting a file back failed too; DIR holds the originals:
-#             NAME.rescue/ beside the patch, or, if that cannot be written, the work folder,
-#             which is then kept
+#             a fresh NAME.rescue.XXXXXX/ beside the patch, or the kept workspace if the copy fails
 three_way() {
-  local p=$1 dir=$2 mode=$3 w f from to rc state=noop todo=0
+  local p=$1 dir=$2 mode=$3 w f from to rc rescue state=noop todo=0
   local -a written=()
   w=$(mktemp -d "${TMPDIR:-/tmp}/k114s-omarchy-merge.XXXXXX") || { echo nobase; return; }
   merge_sides "$p" "$w"; rc=$?
@@ -212,11 +229,12 @@ three_way() {
         cmp -s "$w/keep/$f" "$ROOT/usr/$f" || cat "$w/keep/$f" > "$ROOT/usr/$f" 2>/dev/null || state=stuck
       done
       if [[ $state == stuck ]]; then
-        rm -rf "${p%.patch}.rescue" 2>/dev/null
-        if cp -r "$w/keep" "${p%.patch}.rescue" 2>/dev/null; then
-          state="stuck ${p%.patch}.rescue"
+        if rescue=$(mktemp -d -- "${p%.patch}.rescue.XXXXXX" 2>/dev/null) &&
+           cp -R -- "$w/keep/." "$rescue/" 2>/dev/null; then
+          state="stuck $rescue"
         else
-          # Nowhere better to put them: keep the work folder rather than lose the originals.
+          # Keep the originals in the work folder if the rescue copy is incomplete.
+          if [[ -n $rescue ]]; then rm -rf -- "$rescue" 2>/dev/null || true; fi
           state="stuck $w/keep"; w=""
         fi
       fi

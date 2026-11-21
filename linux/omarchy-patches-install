@@ -57,8 +57,8 @@ mkdir -p "$DEST" "$(dirname "$HOOK")"
 
 # Patches stack in name order, and one may sit on another's lines. So before the set changes,
 # take out, from the top down, every installed patch from the lowest one the change reaches:
-# one that is retired or changed, or one a new patch sorts below. The applier then puts the
-# wanted set back from the bottom up.
+# one that is retired, one whose patch or base changed, or one a new patch sorts below.
+# The applier puts the wanted set back from the bottom up.
 installed=("$DEST"/*.patch)
 first_new=""
 for p in "${wanted[@]}"; do
@@ -70,7 +70,8 @@ done
 low=-1
 for i in "${!installed[@]}"; do
   b=$(basename "${installed[i]}")
-  if [[ ! -e $SRC/$b ]] || ! cmp -s "${installed[i]}" "$SRC/$b" || [[ -n $first_new && $b > $first_new ]]; then
+  if ! cmp -s "${installed[i]}" "$SRC/$b" || ! same_base "${installed[i]}" "$SRC/$b" ||
+     [[ -n $first_new && $b > $first_new ]]; then
     low=$i
     break
   fi
