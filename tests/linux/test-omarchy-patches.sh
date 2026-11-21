@@ -84,6 +84,42 @@ ok "merge: no .orig or .rej" "$(leftovers "$r")" 0
 out=$(applyn "$r"); ok "merge: next run says in place" "$(grep -c '0001-test: in place (merged' <<<"$out")" 1
 ok "merge: modes kept" "$(stat -c %a "$r/usr/bin/omarchy-b")" 755
 out=$(inst "$r" "$M" --undo); ok "merge: undo takes the merged change out, keeps Omarchy's" "$(grep -c '0001-test: taken out' <<<"$out"):$(tr '\n' ' ' < "$r/usr/bin/omarchy-b")" "1:#!/bin/bash # two cache=user echo \"\$cache\" # finish "
+
+# Refresh the same patch bytes with a changed base, then with no base.
+nearby_root() { local r; r=$(mk); sed -i 's/^# end$/# finish/' "$r/usr/bin/omarchy-b"; shipped "$r"; echo "$r"; }
+newbase=$BASE/newbase; cp -r "$M" "$newbase"
+printf '# an extra line in the base\n' >> "$newbase/0001-test.base/bin/omarchy-a"
+r=$(nearby_root); before=$(sumof "$r"); out=$(inst "$r" "$M")
+ok "base-only refresh fixture: installed by three-way merge" "$(grep -c 'applied by a three-way merge' <<<"$out")" 1
+out=$(inst "$r" "$M")
+ok "unchanged base: merged patch stays in place" "$(grep -c 'in place (merged' <<<"$out"):$(grep -c 'taken out' <<<"$out")" "1:0"
+out=$(inst "$r" "$newbase"); rc=$?
+ok "changed base: reverses the old merge and applies the new one" "$rc:$(grep -c 'taken out' <<<"$out"):$(grep -c 'applied by a three-way merge' <<<"$out")" "0:1:1"
+out=$(inst "$r" "$newbase" --undo)
+ok "changed base: undo restores packaged bytes" "$?:$(sumof "$r")" "0:$before"
+r=$(nearby_root); inst "$r" "$M" >/dev/null
+out=$(inst "$r" "$SRC"); rc=$?
+ok "removed base: reverses the old merge before replacing the base" "$rc:$(grep -c 'taken out' <<<"$out"):$(sumof "$r")" "0:1:$before"
+out=$(inst "$r" "$SRC" --undo)
+ok "removed base: undo leaves packaged bytes" "$?:$(sumof "$r")" "0:$before"
+
+# Base generation accepts a uniquely fitting direction and leaves an existing base alone
+# if a zero-context insertion fits both ways.
+encoder=$L/../tools/omarchy-patch-base
+encoded=$BASE/encoded; mkdir -p "$encoded"; cp "$SRC/0001-test.patch" "$encoded/"
+for version in a b; do
+  out=$("$encoder" "$encoded/0001-test.patch" "$BASE/$version/usr" 2>&1); rc=$?
+  diff -r "$M/0001-test.base" "$encoded/0001-test.base" >/dev/null
+  ok "base encoding from fixture $version: stores packaged bytes" "$rc:$?" "0:0"
+done
+printf 'one\ninserted\n' > "$BASE/b/usr/bin/omarchy-c"
+diff -U0 --label a/bin/omarchy-c --label b/bin/omarchy-c \
+  "$BASE/a/usr/bin/omarchy-c" "$BASE/b/usr/bin/omarchy-c" > "$encoded/0002-insert.patch"
+out=$("$encoder" "$encoded/0002-insert.patch" "$BASE/a/usr" 2>&1)
+ok "zero-context insertion: a unique fit encodes the shipped file" "$?:$(cat "$encoded/0002-insert.base/bin/omarchy-c")" "0:one"
+out=$("$encoder" "$encoded/0002-insert.patch" "$BASE/b/usr" 2>&1); rc=$?
+ok "ambiguous insertion: refused before replacing the base" "$rc:$(grep -c 'both applies and reverses' <<<"$out"):$(cat "$encoded/0002-insert.base/bin/omarchy-c")" "1:1:one"
+
 # Omarchy changes the very line the fix changes: a conflict. Nothing written, and a notification.
 r=$(mk); inst "$r" "$M" >/dev/null; orig "$r"; sed -i 's/^key=user$/key=account/' "$r/usr/bin/omarchy-a"; shipped "$r"; changed=$(sumof "$r")
 out=$(applyn "$r"); ok "merge conflict: reported, nothing written (the other file too)" "$(grep -c 'three-way merge from its base conflicts' <<<"$out"):$(sumof "$r")" "1:$changed"
@@ -98,22 +134,28 @@ if [ "$(id -u)" != 0 ]; then
   ok "merge write fails: exit 0, reported, both files as they were" "$rc:$(grep -c 'could not write the three-way merge' <<<"$out"):$(sumof "$r")" "0:1:$before"
   nok "merge write fails: notified" "$(grep -c '0001-test: failed while applying' "$NOTES")" 1
 fi
-# A write fails and putting the first file back fails too (a cat that cannot read the saved copy):
-# the originals are kept in the rescue folder, or in the kept work folder if that cannot be written.
-if [ "$(id -u)" != 0 ]; then
-  shim=$BASE/shim; mkdir -p "$shim"; printf '#!/bin/bash\ncase "$1" in */keep/*) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v cat)" > "$shim/cat"; chmod 755 "$shim/cat"
-  stuck() { local r; r=$(mk); inst "$r" "$M" >/dev/null; orig "$r"; sed -i 's/^# end$/# finish/' "$r/usr/bin/omarchy-a" "$r/usr/bin/omarchy-b"; shipped "$r"; echo "$r"; }
-  r=$(stuck); keep=$(cat "$r/usr/bin/omarchy-a"); chmod 444 "$r/usr/bin/omarchy-b"
-  out=$(PATH=$shim:$PATH K114S_ROOT=$r bash "$r/usr/local/lib/omarchy-k114s/omarchy-patches-apply" 2>&1); rc=$?; chmod 755 "$r/usr/bin/omarchy-b"
-  d=$r/usr/local/lib/omarchy-k114s/omarchy-patches/0001-test.rescue
-  ok "stuck: exit 0, says where the originals are" "$rc:$(grep -c "Copies of the originals are in $d/" <<<"$out")" "0:1"
-  ok "stuck: rescue copy holds the original" "$(cat "$d/bin/omarchy-a")" "$keep"
-  r=$(stuck); keep=$(cat "$r/usr/bin/omarchy-a"); chmod 444 "$r/usr/bin/omarchy-b"; chmod 555 "$r/usr/local/lib/omarchy-k114s/omarchy-patches"
-  out=$(PATH=$shim:$PATH TMPDIR=$BASE K114S_ROOT=$r bash "$r/usr/local/lib/omarchy-k114s/omarchy-patches-apply" 2>&1); rc=$?
-  chmod 755 "$r/usr/bin/omarchy-b" "$r/usr/local/lib/omarchy-k114s/omarchy-patches"
-  w=$(sed -n 's#.*Copies of the originals are in \(.*\)/\. Reinstall.*#\1#p' <<<"$out")
-  ok "stuck, rescue folder not writable: work folder kept with the original" "$rc:$(test -n "$w" && cat "$w/bin/omarchy-a")" "0:$keep"
-fi
+# Inject a failed write and a failed restore, including when the suite runs as root.
+shim=$BASE/shim; mkdir -p "$shim"
+printf '#!/bin/bash\ncase "$1" in */out/bin/omarchy-b|*/keep/bin/omarchy-a) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v cat)" > "$shim/cat"
+printf '#!/bin/bash\nif [[ ${FAIL_RESCUE_COPY:-} == 1 && ${*: -1} == *.rescue.*/ ]]; then exit 1; fi\nexec %s "$@"\n' "$(command -v cp)" > "$shim/cp"
+chmod 755 "$shim/cat" "$shim/cp"
+rescue_path() { sed -n 's#.*Copies of the originals are in \(.*\)/\. Reinstall.*#\1#p' <<<"$1"; }
+backup=$BASE/backup; mkdir -p "$backup/bin"
+r=$(mk); inst "$r" "$M" >/dev/null; orig "$r"; sed -i 's/^# end$/# finish/' "$r/usr/bin/omarchy-b"; shipped "$r"
+cp "$r"/usr/bin/omarchy-{a,b} "$backup/bin/"
+d=$r/usr/local/lib/omarchy-k114s/omarchy-patches/0001-test.rescue
+mkdir -p "$d/bin"; printf 'stale\n' > "$d/bin/omarchy-a"
+out=$(PATH=$shim:$PATH apply "$r"); rc=$?; w=$(rescue_path "$out")
+ok "stuck apply: hook succeeds and reports a new rescue directory" "$rc:$( [[ $w == "$d".* && -d $w ]] && echo yes )" "0:yes"
+diff -r "$backup" "$w" >/dev/null 2>&1
+ok "stuck apply: exact originals at the reported path, older rescue preserved" "$?:$(cat "$d/bin/omarchy-a")" "0:stale"
+
+r=$(nearby_root); inst "$r" "$M" >/dev/null
+cp "$r"/usr/bin/omarchy-{a,b} "$backup/bin/"
+out=$(PATH=$shim:$PATH FAIL_RESCUE_COPY=1 TMPDIR=$BASE inst "$r" "$M" --undo); rc=$?; w=$(rescue_path "$out")
+ok "stuck undo: reports retained workspace when rescue copy fails" "$rc:$( [[ $w == "$BASE"/k114s-omarchy-merge.*/keep && -d $w ]] && echo yes )" "1:yes"
+diff -r "$backup" "$w" >/dev/null 2>&1
+ok "stuck undo: retained originals match and the applied record survives" "$?:$(markers "$r")" "0:0001-test.applied "
 # Omarchy ships the fix in one file and changes only context in the other: nothing is written,
 # and --undo leaves Omarchy's own fix alone.
 r=$(mk); inst "$r" "$M" >/dev/null; orig "$r"; sed -i 's/^key=user$/key=user-org/' "$r/usr/bin/omarchy-a"; sed -i 's/^# end$/# finish/' "$r/usr/bin/omarchy-b"; shipped "$r"
@@ -276,16 +318,29 @@ if [ -n "${2:-}" ]; then
   [ -d "$2/shell" ] && cp -a "$2/shell" "$O/usr/share/omarchy/shell"
   shipped "$O"
   # Patches to omarchy-mac's files (0003, 0004) have no counterpart in an omacom/omarchy tree.
-  R=$BASE/real; mkdir -p "$R"
+  R=$BASE/real; mkdir -p "$R"; real_count=0
   for p in "$P"/*.patch; do
-    n=$(basename "$p"); f=""
-    while read -r f; do [ -f "$O/usr/$f" ] || break; f=""; done < <(sed -n 's#^+++ b/\([^[:space:]]*\).*#\1#p' "$p" | LC_ALL=C sort -u)
-    if [ -n "$f" ]; then echo "SKIP real $n: changes $f, which omacom/omarchy does not ship"; continue; fi
+    n=$(basename "$p"); mac_missing=""; unexpected=""
+    while read -r f; do
+      [ -f "$O/usr/$f" ] && continue
+      case "$n:$f" in
+        0003-omarchy-mac-k114s-display-cutout.patch:share/omarchy-platform/display-cutouts.json|\
+        0004-omarchy-mac-k-board-audio-names.patch:share/omarchy-platform/audio.json|\
+        0004-omarchy-mac-k-board-audio-names.patch:bin/omarchy-audio-asahi-mic-map|\
+        0004-omarchy-mac-k-board-audio-names.patch:share/pipewire/pipewire.conf.d/asahi-device-names.conf|\
+        0004-omarchy-mac-k-board-audio-names.patch:share/wireplumber/wireplumber.conf.d/asahi-audio-no-suspend.conf)
+          mac_missing=$f ;;
+        *) unexpected=$f; break ;;
+      esac
+    done < <(sed -n 's#^+++ b/\([^[:space:]]*\).*#\1#p' "$p" | LC_ALL=C sort -u)
+    if [ -n "$unexpected" ]; then ok "real $n: target $unexpected exists" missing present; continue; fi
+    if [ -n "$mac_missing" ]; then echo "SKIP real $n: $mac_missing belongs to omarchy-mac"; continue; fi
     cp "$p" "$R/"; [ -d "${p%.patch}.base" ] && cp -r "${p%.patch}.base" "$R/"
+    real_count=$((real_count + 1))
     patch -p1 -d "$O/usr" -F0 -s -f --dry-run < "$p" >/dev/null 2>&1; ok "real $n: applies without fuzz" "$?" 0
   done
   out=$(K114S_ROOT=$O K114S_OMARCHY_PATCHES_SRC=$R bash "$INSTALL" 2>&1); ok "real patches: install succeeds" "$?" 0
-  ok "real patches: all applied" "$(grep -c ': applied' <<<"$out")" "$(ls "$R"/*.patch | wc -l | tr -d ' ')"
+  ok "real patches: all applied" "$(grep -c ': applied' <<<"$out")" "$real_count"
   for f in "$O"/usr/bin/omarchy-agent-*; do head -1 "$f" | grep -q python && { python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$f" || ok "real: $(basename "$f") parses" 1 0; }; done
   for f in "$O"/usr/share/omarchy/shell/plugins/*/*.qml; do
     [ -x /usr/lib/qt6/bin/qmllint ] || break

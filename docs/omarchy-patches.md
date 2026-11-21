@@ -91,8 +91,9 @@ Each patch is checked as a whole before anything is written, and without fuzz:
 
 A merge writes its files only after every one of them merged cleanly. If a write still fails, each
 file already written is put back as it was, and the patch counts as not applied. If putting a file
-back fails too, copies of the originals are kept in `<patch>.rescue/` beside the installed patch,
-and the hook says to reinstall the Omarchy package. A patch that does
+back fails too, copies of the originals are saved in a new `<patch>.rescue.XXXXXX/` directory beside
+the installed patch. If the copy fails, the work directory holding the originals is kept. The hook
+or installer reports the exact location and says to reinstall the Omarchy package. A patch that does
 not fit, is partly shipped or fails while applying also raises one desktop notification after the
 update, to each signed-in user, naming it: Omarchy's own behaviour is back until it is refreshed.
 The notification is best effort and never fails the hook.
@@ -108,7 +109,7 @@ ships this change itself now**. Delete the file from `patches/omarchy/`, then ru
 If Omarchy merged a different version of the change, the hook reports **does not fit**. Check
 that the problem is fixed upstream, then retire the patch the same way.
 
-Taking a patch out (a refresh without it, a changed version of it, or `--undo`) reverses it only
+Taking a patch out (a refresh without it, a change to the patch or its base, or `--undo`) reverses it only
 while its record shows the change was made here. Once the package has replaced the files, the
 change in them is the package's and is left alone, so retiring a merged fix never takes Omarchy's
 own fix back out, even when other patches share those files. A patch applied by the first

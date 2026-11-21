@@ -9,21 +9,25 @@ set -euo pipefail
 p=$1; usr=${2:-/usr}
 [[ -f $p && $p == *.patch ]] || { echo "usage: $0 PATCH [USR_DIR]" >&2; exit 1; }
 HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-ROOT=""; say() { echo "$*"; }
 # shellcheck source=../linux/omarchy-patches-lib.sh
 . "$HERE/../linux/omarchy-patches-lib.sh"
 w=$(mktemp -d); trap 'rm -rf "$w"' EXIT
+ROOT=$w
 while read -r f; do
   [[ -f $usr/$f ]] || { echo "$usr/$f is missing" >&2; exit 1; }
-  mkdir -p "$(dirname "$w/$f")"; cp "$usr/$f" "$w/$f"
+  mkdir -p "$(dirname "$w/usr/$f")"; cp "$usr/$f" "$w/usr/$f"
 done < <(patch_files "$p")
-if patch -p1 -d "$w" -F0 -s -f --no-backup-if-mismatch -r - -N --dry-run < "$p" >/dev/null 2>&1; then
+if fits "$p"; then
+  if is_in "$p"; then
+    echo "$(basename "$p") both applies and reverses in $usr. Regenerate the patch with context or use the shipped files. No base written." >&2
+    exit 1
+  fi
   echo "$(basename "$p"): base taken as found"
-elif patch -p1 -d "$w" -F0 -s -f --no-backup-if-mismatch -r - -R < "$p" >/dev/null 2>&1; then
+elif run_patch "$p" -R; then
   echo "$(basename "$p"): base taken with the patch reversed"
 else
   echo "$(basename "$p") neither applies nor reverses exactly in $usr; nothing written" >&2; exit 1
 fi
 b=$(base_dir "$p"); rm -rf "$b"; mkdir -p "$b"
-while read -r f; do mkdir -p "$(dirname "$b/$f")"; install -m 644 "$w/$f" "$b/$f"; done < <(patch_files "$p")
+while read -r f; do mkdir -p "$(dirname "$b/$f")"; install -m 644 "$w/usr/$f" "$b/$f"; done < <(patch_files "$p")
 echo "wrote $b"
