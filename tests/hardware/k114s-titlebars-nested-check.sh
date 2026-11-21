@@ -12,9 +12,10 @@
 # PACKAGE-FILE: the omarchy-hyprland-titlebars +m5 package (its titlebars.so is unpacked to a temp
 # dir, nothing is installed). STOCK-SO defaults to the disabled stock library. Logs and the crash
 # report are kept in a directory whose path is printed at the end.
-# Pass: rebuild prints "background, top and overlay layer surfaces mapped" and 10 PASS lines;
-# the stock build dies with a nested SIGSEGV at the first titlebar press. Read-only for the
-# system: a nested window appears for about half a minute per run.
+# The rebuild must map all three layers and print 10 PASS lines. Exit 3 means
+# the retained stock outcome needs attended review. Exit 1 means either the
+# rebuild failed its checks or the stock run unexpectedly succeeded.
+# A nested window appears for about half a minute per run.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 nested=$here/../../packaging/omarchy-hyprland-titlebars-m5/nested-test.sh
