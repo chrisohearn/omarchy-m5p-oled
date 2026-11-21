@@ -66,26 +66,32 @@ upstream-reported). Upstream describes this very port on the J716c
   same way by the J716c) changes the power tree. Not tried.
 - The draft builds the J716c's USB-only subset: no DisplayPort or USB4 on this port.
 
-## What has to change first
+## Offline candidate objective
 
-1. **Loader.** Without the aura change the PHY has no tunables. Options: (a) get
-   `patches/aura/atc0/0001` (or an equivalent) into aurora-silicon/aura, then take the pinned
-   aura that has it; (b) carry it locally in our Stage 2 build, which is a change of the boot
-   chain and needs the owner's decision. The upstream comment is drafted in the issue.
-2. **Trial tree.** The trial tree is P, the configured Stage 2 tree `t6050-k114s-r3-gpu.dts`
-   (docs/r3-display-plan.md), plus `K114S_R3_USB_ATC0`, so the GPU desktop stays and the ATC0
-   section is the only variable. `t6050-k114s-r3-usb-atc0.dts` is r1-based and only for the lint
-   and compile checks; it is not that trial tree, and the P-based file is still to be written.
-3. **Loader, in the display plan's sequence.** The display plan's r3 loader (`patches/aura/0001-0003`,
-   build `bdf42d19`, stage D3) is also a new Stage 2 loader prefix, and its G2 ESP budget allows at
-   most two trial Stage 2 files at once. The ATC0 patch applies cleanly to aura `85c7dc55` and to
-   `bdf42d19`, so build the ATC0 loader change together with (or after) the display r3 loader in one
-   prefix, and give the trial a slot in that plan's trial sequence and G2 budget. Keep
-   `patches/aura/atc0/` out of the `git am patches/aura/*.patch` set: the subdirectory already does.
-4. A trial build of Stage 2 with that prefix and the P-based ATC0 tree (docs/r3a-promotion.md
-   style: one boot, owner at the Mac, default entry restored).
+On 2026-11-20 the owner approved a local Stage 2 candidate for a later attended trial.
+Build it from the recorded display loader source (`bdf42d19`) and the existing ATC0
+patch. Use the pinned r3c kernel includes and the same U-Boot input as the verified
+r3c Stage 2. Keep the result in a separate build directory with its inputs and hashes
+recorded. The build does not install a payload or touch the ESP, NVRAM, or boot entries.
 
-## Owner steps (after step 1 and 2 are done; not before)
+1. Reproduce the verified r3c Stage 2 (`677f04ca…`) as a control with the existing
+   loader, unmodified r3c tree, and U-Boot. Build the candidate from a clean copy of
+   the pinned aura source with the ATC0 patch applied. Verify that a debug build
+   or enabled aura-debug still reserves port 0.
+2. Build the r3c tree with `K114S_R3_USB_ATC0` for the candidate. The stock r3c tree
+   must still reproduce its recorded DTB. Check both directions of USB lint and
+   verify that the r3c GPU and sound checks still pass with the third port enabled.
+3. Assemble a distinct trial payload with `build/make-stage2.sh`. Verify one
+   K114s DTB, the original U-Boot trailer, and the 16 MiB loader limit. Record the
+   full payload, prefix, DTB and trailer hashes and sizes.
+4. Keep #72 open for the attended trial. That trial needs the verified r3c fallback
+   and the display plan's G2 ESP budget checked before staging. Port enumeration,
+   replug, charging and recovery boot are hardware results for that later session.
+
+The r1-based `t6050-k114s-r3-usb-atc0.dts` remains a lint fixture. The trial uses
+r3c so it keeps the configured GPU desktop and existing device support.
+
+## Owner steps for a later attended trial
 
 1. Charger on MagSafe, nothing in the left-back port. Trial boot of the ATC0 tree (the way
    back as for any trial; it may hang: hold the power button to force off).
