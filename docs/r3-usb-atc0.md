@@ -69,14 +69,16 @@ upstream-reported). Upstream describes this very port on the J716c
 ## Offline candidate objective
 
 On 2026-11-20 the owner approved a local Stage 2 candidate for a later attended trial.
-Build it from the recorded display loader source (`bdf42d19`) and the existing ATC0
-patch. Use the pinned r3c kernel includes and the same U-Boot input as the verified
-r3c Stage 2. Keep the result in a separate build directory with its inputs and hashes
+Build it from the pin loader used by the verified r3c Stage 2 (`beceb683…`) and
+the existing ATC0 patch. The pin loader comes from aura `22b71758`, the release-3
+recipe patch, and betizzel/omarchy-m5#18's K114s pin patch. Use the pinned r3c
+kernel includes and the same U-Boot input as the verified r3c Stage 2. Keep the result in a separate build directory with its inputs and hashes
 recorded. The build does not install a payload or touch the ESP, NVRAM, or boot entries.
 
 1. Reproduce the verified r3c Stage 2 (`677f04ca…`) as a control with the existing
-   loader, unmodified r3c tree, and U-Boot. Build the candidate from a clean copy of
-   the pinned aura source with the ATC0 patch applied. Verify that a debug build
+   loader, unmodified r3c tree, and U-Boot. Qualify the loader source and build
+   flags against that control. Then build from the same inputs with the ATC0
+   patch applied. Verify that a debug build
    or enabled aura-debug still reserves port 0.
 2. Build the r3c tree with `K114S_R3_USB_ATC0` for the candidate. The stock r3c tree
    must still reproduce its recorded DTB. Check both directions of USB lint and
