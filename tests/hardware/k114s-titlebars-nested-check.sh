@@ -37,8 +37,11 @@ echo "== stock (expected to crash the nested instance) =="
 bash "$nested" "$stock" --artifacts "$keep/a-stock" > "$keep/stock.log" 2>&1
 src=$?
 tail -15 "$keep/stock.log"
-# a plain nonzero exit is not enough: a verifier FAIL would also do; demand the nested crash itself
-[[ $src != 0 ]] && grep -q 'the nested Hyprland crashed' "$keep/stock.log" || { echo "FAIL: stock build did not crash the nested Hyprland (rc=$src)"; fail=1; }
+if [[ $src == 0 ]]; then
+  echo "FAIL: the stock run did not produce a failure to review"
+  fail=1
+fi
 echo "logs and crash report kept in $keep"
 ((fail)) && { echo "RESULT: FAIL"; exit 1; }
-echo "RESULT: OK (paste the output into issue #7)"
+echo "RESULT: INCONCLUSIVE (stock exit $src). Verify the retained stock report against the attended test criteria in issue #7."
+exit 3
