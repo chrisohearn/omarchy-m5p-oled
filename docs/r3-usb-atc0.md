@@ -1,6 +1,7 @@
-# r3: left-back USB-C port (ATC0), draft
+# r3: left-back USB-C port (ATC0)
 
-Status: **draft, compiled and linted, never booted.** Issue #72. Written 2026-11-15 on the K114s,
+Status: **r3c candidate built and checked offline on 2026-11-20.** The attended boot and port
+trial remain open in #72. The initial draft was written 2026-11-15 on the K114s,
 r3a kernel (`7.3.0-17.v272-4-k114s-r3a-ARCH`, driver source aurora-silicon/linux `a34d26c255c2`).
 Evidence labels: agent-run, upstream-reported. There is no owner-observed result yet.
 
@@ -25,11 +26,11 @@ upstream-reported). Upstream describes this very port on the J716c
 | Path | What |
 | --- | --- |
 | `dts/t6050-k114s-usb.dtsi`, section `K114S_R3_USB_ATC0` | hpm0 (`usb-pd@c` on nub-spmi-a0), connector graph, ATC0 PHY and mailbox, dwc3 `usb-drd0` and its two DARTs, the five power domains. Off unless defined; with it off every tree is byte-identical to before |
-| `dts/t6050-k114s-r3-usb-atc0.dts` | r1 plus that section and nothing else. Flagged draft, **lint-only, not a boot candidate**: it has no GPU node, so booting it would also drop the GPU desktop (see "What has to change first") |
+| `dts/t6050-k114s-r3-usb-atc0.dts` | r1 plus that section and nothing else. Flagged draft, **lint-only, not a boot candidate**: it has no GPU node, so booting it would also drop the GPU desktop (see "Offline candidate objective") |
 | `tests/lint-usb-dtb.py --atc0 [--atc0-reference J716C.dtb]` | The third port checked like the other two; optional comparison with the J716c's ATC0 nodes. Without `--atc0` the lint still demands an undescribed left-back port |
 | `tests/test-usb-dtb.sh KTREE [K116S [J716C]]` | Builds the new tree, checks both lint directions, and with a J716c tree compares |
 | `tests/k114s-usb-root-probe.py adt` | Now also reports usb-drd0, atc-phy0, acio-phy-cpu0 and dart-usb0 against the draft's addresses (informational, not part of the verdict) |
-| `patches/aura/atc0/0001-...patch` | Draft loader change: skip port 0 only while `aura-debug` is on or in a `USE_DEBUG_USB` build. Applies to aura `85c7dc55`, passes a syntax check, **not built into a Stage 2** |
+| `patches/aura/atc0/0001-...patch` | Draft loader change: skip port 0 only while `aura-debug` is on or in a `USE_DEBUG_USB` build. Built on the verified r3c pin loader for the offline candidate |
 | `tests/hardware/k114s-atc0-plug-test.sh` | Owner test after a trial boot |
 
 ## Evidence (all agent-run)
@@ -72,16 +73,17 @@ On 2026-11-20 the owner approved a local Stage 2 candidate for a later attended 
 Build it from the pin loader used by the verified r3c Stage 2 (`beceb683…`) and
 the existing ATC0 patch. The pin loader comes from aura `22b71758`, the release-3
 recipe patch, and betizzel/omarchy-m5#18's K114s pin patch. Use the pinned r3c
-kernel includes and the same U-Boot input as the verified r3c Stage 2. Keep the result in a separate build directory with its inputs and hashes
-recorded. The build does not install a payload or touch the ESP, NVRAM, or boot entries.
+kernel includes and the same U-Boot input as the verified r3c Stage 2. Keep the
+result in a separate build directory with its inputs and hashes recorded. The build does not install a payload or touch the ESP, NVRAM, or boot entries.
 
 1. Reproduce the verified r3c Stage 2 (`677f04ca…`) as a control with the existing
    loader, unmodified r3c tree, and U-Boot. Qualify the loader source and build
    flags against that control. Then build from the same inputs with the ATC0
-   patch applied. Verify that a debug build
-   or enabled aura-debug still reserves port 0.
-2. Build the r3c tree with `K114S_R3_USB_ATC0` for the candidate. The stock r3c tree
-   must still reproduce its recorded DTB. Check both directions of USB lint and
+   patch applied. Verify that a debug build or enabled aura-debug still reserves port 0.
+2. In an isolated kernel include tree, wrap the stock r3c DTS and include
+   `t6050-k114s-usb.dtsi` only under `K114S_R3_USB_ATC0`. The stock r3c include
+   chain does not include that fragment. With the flag off, reproduce the
+   recorded stock DTB. With it on, check both directions of USB lint and
    verify that the r3c GPU and sound checks still pass with the third port enabled.
 3. Assemble a distinct trial payload with `build/make-stage2.sh`. Verify one
    K114s DTB, the original U-Boot trailer, and the 16 MiB loader limit. Record the
@@ -92,6 +94,25 @@ recorded. The build does not install a payload or touch the ESP, NVRAM, or boot 
 
 The r1-based `t6050-k114s-r3-usb-atc0.dts` remains a lint fixture. The trial uses
 r3c so it keeps the configured GPU desktop and existing device support.
+
+## Offline build results (2026-11-20)
+
+The rebuilt pin loader and unflagged r3c DTB matched their recorded binaries. The
+assembled control matched the verified r3c Stage 2 byte for byte. The candidate
+used the existing ATC0 patch and the flagged r3c wrapper. Its loader kept port 0
+reserved in debug builds and with `aura-debug` enabled in the checks. The trial
+DTB passed the three-port USB lint. The control passed the two-port lint. Each
+was rejected by the other mode, and both passed GPIO, sound, and display/GPU lint.
+
+| Trial component | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Stage 2 payload | 4,548,706 | `ae2efe84c17c77b091220faf983cd115288f7c87fc3492dabb8e6d3791311dad` |
+| Aura prefix | 4,063,232 | `a918ac179dfc81f4ae3f692ed7011029d3a637cd6e0487418e2624f977dc1cdf` |
+| K114s DTB | 151,464 | `daac8c9092d2f549cd47a3f9af61cc22ff114ee60769548a43f2b4c0dcec4ffe` |
+| U-Boot trailer, identical to the control | 334,010 | `9d8dc11ea755e8405a7380683bd82cfeb7391b1fc68245e56e10bf5155a746ad` |
+
+The payload is below the 16 MiB limit and remains in the private build directory.
+Port enumeration, replug, charging and recovery still need the attended trial.
 
 ## Owner steps for a later attended trial
 
