@@ -1,7 +1,7 @@
 # Platform audit: first boot, startup disk, snapshots, factory reset
 
-Issues #63, #64, #68 and #69 (Omarchy Apple Silicon parity map, 2026-11-15). Everything here was
-read off the running K114s (agent-run, 2026-11-15) with read-only commands, some of them through
+Issues #63, #64, #68 and #69 (Omarchy Apple Silicon parity map, 2026-11-15). The original audit used
+read-only commands on the running K114s (agent-run, 2026-11-15), some of them through
 `sudo cat`, `sudo ls`, `sudo du`, `sudo lsinitcpio` and the verifier below run as root. Nothing was
 written to the machine, no mount was made, nothing was started, enabled or rebooted. Evidence
 labels: **agent-run**, **owner-observed**, **upstream-reported**, **replica** (a software test
@@ -18,7 +18,7 @@ Versions read: `omarchy-mac` 0.2.3-2, `omarchy-mac-boot` 20261104-1, `aurora-ble
 | #63 first boot | setup-system ran to its last line, first boot and owner provisioning both finished, no step failed. Two effects the baseline expects are not delivered on this Mac, none by a failure: Electron wrappers (the runtime has no helper), the Wi-Fi resume fix (the chip test cannot match the N1). | **verified** (agent-run with sudo reads 2026-11-15, 0 FAIL); the remaining WARN is the Electron wrapper steps, skipped because the runtime lacks `omarchy-cmd-electron-gl-wrap` and `omarchy-cmd-desktop-exec-repair` (an omacom runtime item). The `installer/` patch audit against upstream is still not done |
 | #64 startup disk | `aurora-bless` needs `/dev/mtd/by-name/nvram`. The booted tree has no flash node and no `nvram` alias; the K114s ADT has the NVRAM region, identical to the J775D's. Not the J714s or K116s: neither carries the node in this kernel base. | cause **found**; node **drafted, not built**; the write test is **blocked on the owner** |
 | #68 snapshots | Limine has **no** snapshot entry, so no Snapshots boot is possible today. Each would cost a 75.7 MiB UKI; the ESP has 111 MB free after the r3a promotion (the repair image is gone) and 167.5 MB is needed (one k114s UKI plus the guard). `LIMIT_USAGE_PERCENT=85` is what refuses them. | a Snapshots boot is **not safe to enable** here; keep the limit at 85 |
-| #69 factory reset | `@factory` exists. The reset would replace the Limine menu with the stock template (dropping the K114s repair entry), rebuild the boot files from the image, and erase the system. Its own kernel check should refuse here first, but only after several steps. | **hide it until qualified**: patch 0005 refuses the command on the K114s; the menu row needs a one-line user extension |
+| #69 factory reset | `@factory` exists. The reset would replace the Limine menu with the stock template (dropping the K114s repair entry), rebuild the boot files from the image, and erase the system. Its own kernel check should refuse here first, but only after several steps. | **Patch 0005 gate present** in the installed command on `omarchy-mac` (read-only, 2026-11-20). Menu visibility remains unverified and a real reset remains unqualified. |
 
 ## First boot: omarchy-mac-setup-system and -setup-user (#63)
 
@@ -256,9 +256,10 @@ the default entry ready. Read first: `sudo cat /boot/efi/limine.conf`; `df /boot
 
 ### What the menu does (agent-run)
 
-`Setup > Reset Computer` (`setup.reset`) is shown when `/` is btrfs. Its `when` is in
+The stock menu shows `Setup > Reset Computer` (`setup.reset`) when `/` is btrfs. Its `when` is in
 `/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc`, owned by `omarchy-settings-dev`. The action
-runs `omarchy-system-factory-reset` (owned by `omarchy-dev`), which, in order:
+calls `omarchy-system-factory-reset` (owned by `omarchy-dev`). Without patch 0005's gate, the command
+proceeds in this order:
 
 1. mounts the btrfs top level (writable);
 2. requires `@factory`, which **exists** here (subvolume 261, generation 17, so from the image's first boot);
@@ -310,7 +311,7 @@ How, in the style of docs/omarchy-patches.md:
   "setup.reset": {"when": "false"}
   ```
 
-  Without it the row stays visible; it prints the refusal only while 0005 fits.
+  The extension controls menu visibility independently of the command gate.
 - **Test** `tests/linux/test-factory-reset-gate.sh` (10 checks, replica: the patched copy of the
   installed command, with the device-tree and marker paths pointed at fixtures; the gate sits before
   sudo, a K114s without the marker stops with exit 1 and the message, with the marker or on another
@@ -318,8 +319,10 @@ How, in the style of docs/omarchy-patches.md:
   root: `linux/omarchy-patches-install` installs 0005 as "applied" and `--undo` gives back the
   shipped file byte for byte (agent-run); `tests/linux/test-omarchy-patches.sh linux` passes (67).
 
-Install is the owner's usual command (`sudo bash linux/omarchy-patches-install`), unchanged. It was
-**not** installed on the Mac in this pass.
+On 2026-11-20, read-only inspection on `omarchy-mac` confirmed the patch 0005 gate in
+`/usr/bin/omarchy-system-factory-reset`, `apple,k114s` in the live compatible list and the absence of
+`/etc/omarchy-k114s/factory-reset-qualified`. Menu visibility remains unverified. A real reset
+remains unqualified.
 
 ### Qualifying it later (OWNER; not run)
 
