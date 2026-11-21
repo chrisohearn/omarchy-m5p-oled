@@ -127,6 +127,16 @@ package() {
       { echo "$_src lacks sep/0001, the K114s in the T6050 SEP profile (patches/linux/r3b-c4.series)" >&2; return 1; }
   fi
   if [[ $_cand == r3b-t1 ]]; then
+    # The loadable driver needs the built-in Kiwi transport and receive ring,
+    # the T6050 pinctrl implementation, and both MTP DART streams.
+    local dchid="$_src/drivers/hid/dockchannel-hid/dockchannel-hid.c"
+    local mtp_dts="$_src/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi"
+    grep -Fq 'KIWI_START_TIMEOUT_MS' "$dchid" &&
+      grep -Fq 'dchid->use_rx_ring' "$dchid" &&
+      grep -Fq 'apple_gpio_t6050_hw' "$_src/drivers/pinctrl/pinctrl-apple-gpio.c" &&
+      grep -Fq 'apple,t6050-dockchannel-hid' "$mtp_dts" &&
+      grep -Fq 'iommus = <&mtp_dart 0>, <&mtp_dart 1>;' "$mtp_dts" ||
+      { echo "$_src lacks the touchscreen transport, pinctrl or DART changes (patches/linux/r3b-t1.series)" >&2; return 1; }
     [[ -s "$_out/drivers/hid/hid-apple-mtp-kiwi.ko" ]] &&
       grep -Fxq 'drivers/hid/hid-apple-mtp-kiwi.o' "$_out/modules.order" ||
       { echo "$_out lacks the built Kiwi module (CONFIG_HID_APPLE_MTP_KIWI=m)" >&2; return 1; }

@@ -61,6 +61,10 @@ echo "info packaged t6050-k114s.dtb sha256 $(sha256sum "$m/dtbs/t6050-k114s.dtb"
 bad=$(find "$m" -name '*.ko' -print0 | xargs -0 -n200 modinfo -F vermagic | grep -vc "^$rel ")
 total=$(find "$m" -name '*.ko' | wc -l)
 [ "$bad" = 0 ] && ok "$total modules, all with vermagic $rel" || no "$bad of $total modules have another vermagic"
+if [[ $want == linux-k114s-r3b-t1 ]]; then
+  kiwi=$m/kernel/drivers/hid/hid-apple-mtp-kiwi.ko
+  [[ -s $kiwi ]] && ok "touchscreen Kiwi module present" || no "touchscreen Kiwi module missing"
+fi
 if [ -s "$symvers" ]; then sv=(-e -E "$symvers"); what="depmod -a -e"; else sv=(); what="depmod -a (no Module.symvers, symbols not checked)"; fi
 # the duplicate alias spi:tpm_tis_spi warning is the same on the installed linux-aurora tree
 out=$(depmod -b "$w/usr" -a "${sv[@]}" -w "$rel" 2>&1 | grep -v 'duplicate module alias\|^spi:tpm_tis_spi')
