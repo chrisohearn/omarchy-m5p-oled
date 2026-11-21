@@ -26,12 +26,17 @@ B: KEY=10000 0 0 0 0 0
 N: Name="Apple SMC power/lid events"
 H: Handlers=kbd event2
 B: KEY=10000000000000 0
+
+N: Name="USB keyboard"
+H: Handlers=kbd event3
+B: KEY=10000000000000 0
 D
 echo '[{"key":"XF86AudioMute","modmask":0,"description":"Mute"},{"key":"XF86PowerOff","modmask":0,"description":"Power menu"}]' >"$t/binds.json"
 # ev TYPE CODE VALUE -> one 24-byte input_event (aarch64/x86_64 layout)
 ev() { python3 -I -c 'import struct,sys;sys.stdout.buffer.write(struct.pack("@llHHi",0,0,*map(int,sys.argv[1:])))' "$@"; }
 { ev 1 113 1; ev 1 113 0; ev 1 116 1; ev 1 29 1; ev 1 225 1; } >"$t/dev/event1"   # mute, ctrl+brightness up
-{ ev 1 116 1; ev 1 116 0; } >"$t/dev/event2"
+{ ev 1 116 1; ev 1 116 2; ev 1 116 0; } >"$t/dev/event2"
+{ ev 1 116 1; ev 1 116 0; } >"$t/dev/event3"
 { ev 3 47 0; ev 3 57 5; ev 3 47 1; ev 3 57 6; ev 3 48 900; ev 3 58 3000; ev 3 55 2; ev 1 272 1; } >"$t/dev/event0"
 
 out=$(cap keys 2); rc=$?
@@ -51,10 +56,30 @@ sed -i 's/^B: ABS=.*/B: ABS=80000000000000/' "$t/devices"
 out=$(cap status); [[ $out == *"ABS_MT_TOOL_TYPE (code 55) advertised: yes"* ]] && ok "status: tool type advertised" || { bad "status tool type (yes)"; echo "$out"; }
 
 out=$(cap power 2); rc=$?
-[[ $rc -eq 0 && $out == *"SEEN     KEY_POWER XF86PowerOff presses=1"* && $out == *"POWER-KEY POLICY: ok"* ]] && ok "power: press seen, policy ok" || { bad "power (rc=$rc)"; echo "$out"; }
+[[ $rc -eq 0 && $out == *"SEEN     KEY_POWER XF86PowerOff presses=1"* && $out == *"POWER-KEY POLICY: ok"* &&
+   $out == *"press   KEY_POWER XF86PowerOff [Apple SMC power/lid events]"* ]] &&
+  ok "power: SMC press counted once when only SMC is eligible" || { bad "SMC power (rc=$rc)"; echo "$out"; }
+
+# Both built-in devices now advertise KEY_POWER, but only MTP sends a press.
+sed -i 's/^B: KEY=10000 0 0 0 0 0$/B: KEY=10000 0 0 0 10000000000000 0/' "$t/devices"
+{ ev 1 113 1; ev 1 116 1; ev 1 116 2; ev 1 116 0; } >"$t/dev/event1"
+: >"$t/dev/event2"
+out=$(cap power 2); rc=$?
+[[ $rc -eq 0 && $out == *"SEEN     KEY_POWER XF86PowerOff presses=1"* &&
+   $out == *"press   KEY_POWER XF86PowerOff [Apple MTP keyboard]"* &&
+   $out == *"release KEY_POWER XF86PowerOff [Apple MTP keyboard]"* &&
+   $out != *"USB keyboard"* && $out != *"KEY_MUTE"* ]] &&
+  ok "power: MTP press counted once with both nodes eligible, unrelated input excluded" || { bad "MTP power (rc=$rc)"; echo "$out"; }
 
 out=$(cap gestures 2); rc=$?
 [[ $rc -eq 0 && $out == *"max simultaneous 2"* && $out == *"values seen: [2]"* && $out == *"max touch major 900"* && $out == *"BTN_LEFT click x1"* ]] && ok "gestures: contacts, tool type, size, click" || { bad "gestures (rc=$rc)"; echo "$out"; }
+
+{ ev 1 116 1; ev 1 116 0; } >"$t/dev/event2"
+out=$(cap power 2); rc=$?
+[[ $rc -eq 0 && $out == *"SEEN     KEY_POWER XF86PowerOff presses=2"* &&
+   $out == *"press   KEY_POWER XF86PowerOff [Apple MTP keyboard]"* &&
+   $out == *"press   KEY_POWER XF86PowerOff [Apple SMC power/lid events]"* ]] &&
+  ok "power: both eligible sources are read in the same capture" || { bad "both power sources (rc=$rc)"; echo "$out"; }
 
 out=$(LV=suspend cap status); rc=$?
 [[ $rc -eq 1 && $out == *"POWER-KEY POLICY: FAIL"* ]] && ok "policy fails when logind would suspend" || { bad "suspend policy (rc=$rc)"; echo "$out"; }
@@ -65,11 +90,12 @@ out=$(cap status); rc=$?
 rm "$t/ld/50-aurora-sep.conf"
 
 # a device that errors on read mid-capture (ENODEV in real life; a directory raises the same OSError family)
+ev 1 116 2 >"$t/dev/event1"
 rm "$t/dev/event2"; mkdir "$t/dev/event2"
 out=$(cap power 1); rc=$?
 [[ $rc -eq 0 && $out != *Traceback* && $out == *"went away mid-capture"* && $out == *"MISSING  KEY_POWER"* ]] && ok "power: a device that fails on read keeps the summary" || { bad "read error (rc=$rc)"; echo "$out"; }
 rmdir "$t/dev/event2"; : >"$t/dev/event2"
-out=$(cap power 1); [[ $out == *"MISSING  KEY_POWER"* ]] && ok "power: no press is MISSING" || bad "no-press case"
+out=$(cap power 1); [[ $out == *"MISSING  KEY_POWER XF86PowerOff presses=0"* ]] && ok "power: a repeat alone is MISSING" || bad "repeat-only case"
 
 out=$(cap keys 1); [[ $out == *"the moon key"* && $out != *"Do NOT press the moon"* ]] && ok "keys prompt names the moon key by default" || bad "default keys prompt"
 out=$(K114S_NO_MOON=1 cap keys 1); [[ $out == *"Do NOT press the moon key"* && $out != *"Ctrl+brightness down/up, the moon key"* ]] && ok "K114S_NO_MOON omits the moon key from the prompt" || { bad "no-moon prompt"; echo "$out"; }
