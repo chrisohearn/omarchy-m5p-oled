@@ -165,7 +165,7 @@ buffer (with the native driver instead it dies: "Apple G17S uses the HAL300 comm
 this driver does not implement"). The script now says so when that is why a run failed. The test
 has to be run from a CPU-rendered session: `rm ~/.config/k114s-gpu-desktop`, log in again, run it
 (expect: rebuild 10 of 10; the channel `.so` a nested SIGSEGV at the first press, as in run 3),
-`touch` the file again. Record then: the `background, top and overlay layer surfaces mapped` line, 10 PASS lines for the rebuild, a nested SIGSEGV for the channel build (`titlebars.so.disabled-k114s`). Until then the TOP and OVERLAY coverage is **code written, unverified**, not fixed. `tests/hardware/k114s-titlebars-nested-check.sh PACKAGE` runs both builds and checks those three outcomes (issue #7).
+`touch` the file again. Record then: the `background, top and overlay layer surfaces mapped` line, 10 PASS lines for the rebuild, a nested SIGSEGV for the channel build (`titlebars.so.disabled-k114s`). Until then the TOP and OVERLAY coverage is **code written, unverified**, not fixed. `tests/hardware/k114s-titlebars-nested-check.sh PACKAGE` checks the rebuild and keeps the stock evidence. Exit 3 means the rebuild met its checks and the stock outcome still needs to be matched to the attended criteria in issue #7.
 
 What the nested test does not cover: the session's real configuration (Omarchy's
 `workspace-modes.lua`, its theme colors and buttons, the real bar and dock
