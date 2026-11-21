@@ -27,14 +27,45 @@ Reading: the #1568 record is the same 48-byte layout as the Trackpad26 contact, 
 
 Proposed upstream change (small, on top of #1568 once it lands): in the 0x5a parser, read the class byte of each record, report `MT_TOOL_PALM` for class 7 (and sticky until lift, as #636 does), and advertise `ABS_MT_TOOL_TYPE`. Needs one capture to confirm that class 7 shows up for a resting palm on the K114s.
 
-## Owner capture (not yet run)
+## Attended class-byte capture (#218)
 
-```
-bash tests/hardware/k114s-input-capture.sh status
-sudo bash tests/hardware/k114s-input-capture.sh gestures 60
+On the K114s, use the `hidrawN` under the already identified trackpad HID instance's
+`hidraw/` directory in sysfs. Replace `N` with its current number. The reader checks
+the selected node for the `Apple MTP multi-touch` name and the bus, vendor and
+product tuple `0019:05ac:0361` before opening it read-only. The session must already
+have read access to that node. If access is denied, stop the capture.
+
+```sh
+python3 tests/hardware/k114s-palm-class.py /dev/hidrawN finger
+python3 tests/hardware/k114s-palm-class.py /dev/hidrawN resting-palm
 ```
 
-During the 60 s: type a sentence with a palm resting on the pad, then 2-, 3- and 4-finger swipes, a pinch, one click. The script prints the maximum contact count, the tool-type values seen (expected: none), the largest touch major and pressure, and the button counts. It reads only.
+Wait for each prompt. Move one finger during the first pass. Lift it, then rest
+your palm during the second pass. Each pass lasts 10 seconds by default
+(`--seconds` accepts 1–30) and opens its own reader. The JSON output gives the
+pass label, status, and a count for each observed value of `rec[3]`. These totals
+count active contact records over all frames, so a steady contact can contribute
+many times. The reader discards the reports in memory and emits no raw reports,
+coordinates or contact IDs.
+
+The [pinned #1568 patch](../patches/linux/r3b/0004-HID-magicmouse-parse-the-0x5a-MTP-report-of-the-K114.patch)
+documents the supported K2C1 framing from K114c captures. Report ID `0x5a` has
+its contact section at byte 48, the first 48-byte record at byte 60, and
+`113 + 48 × count` total bytes. The reader checks the section tag and lengths
+before counting phases 3 and 4, as the pinned parser does. The existing
+`k114s-input-capture.sh gestures` reads evdev and remains the separate check for
+contact count, tool type and gestures. In that check, rest a palm while typing,
+then try 2-, 3- and 4-finger swipes, a pinch and a click.
+
+`observed` means the pass found eligible records. `no-data` means it found no
+eligible contacts, and `unsupported` means reports arrived but none matched the
+supported framing. Those two outcomes exit 1. Device or read errors exit 2.
+The offline fixture exercises synthetic reports and identities. A physical
+finger and resting-palm comparison on K114s is still pending under #46.
+
+```sh
+python3 -B tests/hardware/test-palm-class.py
+```
 
 To judge gestures after that, uncomment the `hl.gesture` workspace line in the user `input.lua` (a config change, the owner's call).
 
