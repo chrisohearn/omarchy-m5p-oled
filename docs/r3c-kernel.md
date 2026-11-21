@@ -4,7 +4,7 @@
 the first normal boot passed (section 6). The light sensor reports lux. The trial found the NVRAM partition and its
 flash ID, and the first normal boot read the full partition. The owner asked to "check all repos and adopt their code" (intake 2026-11-17:
 kernel v272-18, lid sleep, camera, deep sleep and the release 9 packages). r3c is the kernel half of that. Evidence
-labels: **agent-run**, **emulator/replica**, **upstream-reported**.
+labels: **agent-run**, **owner-observed**, **emulator/replica**, **upstream-reported**.
 
 ## 1. What r3c is
 
@@ -30,7 +30,7 @@ suspend-to-idle qualification (#1647), HDMI after a system sleep, and betizzel's
 | `brightness/0002` (DCP syslog filter) | `r3c/0002`, re-cut | `dcp.c` gained `link_report_rtkit_ops` between `rtkit_ops` and the helper; the internal panel's `rtkit_ops` takes the filter |
 | `brightness/0006` (panel floor) | `r3c/0003`, re-cut | only the `dcp_set_brightness()` hunk moved (the base passes a local `suspended`) |
 | `vrr/0001` (`fw27_panel_vrr_min`) | **dropped** | it does not apply, and nothing sets it: panel VRR is blocked here (#19) and betizzel j714s15 stopped turning `fw27_panel_vrr` on |
-| (new) | `r3c/0004` | aurora-silicon/linux #1983 (Joshua Warren, open, `242ce586c5`): the light sensor's 193-byte calibration |
+| (new) | `r3c/0004` | Joshua Warren's 193-byte light-sensor calibration change (`242ce586c5`). [aurora-silicon/linux #1983](https://github.com/aurora-silicon/linux/pull/1983) merged into `integration/aurora` on 2026-11-20 at `8fd2d5e8b402`. |
 | (new) | `r3c/0005`, `0006` | rolotrealanis98/m5pro-linux `contrib/pending/nvram` 0002, 0003 (Rolando Trevino, GPL-2.0-only; sha256 `926c73c7…`, `622ec6e8…` as their README lists): T6050 QSPI NVRAM writes, the J716s row, and the flash ID logged when a write is refused |
 | (new) | `r3c/0007` | ours: the K114s row, fail-closed (below) |
 
@@ -39,12 +39,13 @@ suspend-to-idle qualification (#1647), HDMI after a system sleep, and betizzel's
 The base's `t6050-die0.dtsi` now has the AOP's `als` child (VD6286), and the sound tree already runs the AOP. On r3b
 the driver said "no ALS calibration named in the device tree; the sensor stays off" (agent-run). This Mac's factory
 calibration, `apple/aop-als-cal.bin`, is already installed (193 bytes, the vendor firmware extract). The base driver
-only takes T8140's 80-byte message; #1983 builds the 216-byte message the 14-inch M5 Max firmware accepts from a
-193-byte blob. Its author names the file only in the K114c tree, noting that "the 14-inch M5 Pro" firmware never asks
-for the endpoint. This Mac's firmware does ask: `setup_als_calibration()` returns silently when the firmware has not
-announced the ALS endpoint (0x21), and only after that check prints "no ALS calibration named in the device tree",
-which r3b.c4 printed here (agent-run, the same function in both kernels). What the boot log shows, by outcome
-(`setup_als_calibration()` in `drivers/soc/apple/aop.rs` on r3c):
+only takes T8140's 80-byte message. The #1983 driver change builds a 216-byte message from the 193-byte blob.
+The merged PR names `apple/aop-als-cal.bin` on the shared `aop_als` node in `t6050-die0.dtsi`, so both K114
+and both K116 trees inherit it. The r3c tree supplies the same value through its K114s override.
+`setup_als_calibration()` checks for the ALS endpoint (0x21) before looking up the file. The r3b.c4 log
+printed "no ALS calibration named in the device tree", confirming the K114s firmware announced the endpoint
+(agent-run). The following outcomes come from `setup_als_calibration()` in `drivers/soc/apple/aop.rs` on r3c.
+[Merged device-tree change](https://github.com/aurora-silicon/linux/commit/64a0eccc0514962d6f8230654ec8f32eb261e411).
 
 | Outcome | Kernel log | Sensor |
 | --- | --- | --- |
@@ -163,8 +164,12 @@ write gate stayed closed (`read_only=Y`). The MTD index differed from the trial,
 Sleep at that boot: r3c admits the K114s for suspend-to-idle (`r3c/0001`), and `suspend.target`, `hibernate.target`,
 `hybrid-sleep.target` and `suspend-then-hibernate.target` stay masked until the attended procedure.
 
+On 2026-11-18 UTC, the owner covered and uncovered the light sensor on the normal r3c boot while the agent
+sampled `aop-sensors-als`. Median illuminance was 0.64 lux before covering, 0.00 lux while covered and
+0.64 lux after uncovering (105 samples). Lid angle remains unverified. The K114s ADT has no `las` node.
+[#67 cover-test evidence](https://github.com/chrisohearn/omarchy-m5p-oled/issues/67#issuecomment-6966175366).
+
 Still open:
-- the owner's light-sensor cover test;
 - lid sleep, twice, on battery only, with the owner attending (the targets are unmasked only for it);
 - Bluetooth audio with the paired AirPods (#41);
 - the camera and deep-sleep trial.
