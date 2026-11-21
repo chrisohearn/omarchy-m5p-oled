@@ -1,5 +1,5 @@
 #!/bin/bash
-# OWNER-RUN, ATTENDED. After the first boot of the r3a kernel with the SOUND tree (t6050-k114s-r3a-sound),
+# OWNER-RUN, ATTENDED. On a K114s r3a, r3b, r3c or r3c-upstream kernel with a Stage A sound tree,
 # this reports what the headphone jack, the microphones and Bluetooth audio look like. READ-ONLY: it
 # changes no setting, loads no module, pairs nothing and needs no root (a few lines are better with root
 # and say so). It plays nothing unless you pass --play. Nothing is ever sent to the loudspeakers: the
@@ -47,14 +47,22 @@ pause() { printf '\n>>> %s\n    Press Enter when done (Ctrl-C stops the script; 
 jack_state() { amixer -c AppleK114 contents 2>/dev/null | grep -A2 -i "Headphone Jack\|Headset Jack\|Jack" | grep -E "numid|: values=" | tr '\n' ' '; }
 irqs() { awk '/cs42l84/ {s+=$2} END {print s+0}' /proc/interrupts 2>/dev/null; }
 
-echo "== K114s r3a audio and Bluetooth check, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "== K114s wired and Bluetooth audio check, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "== 1. kernel and tree"
 rel=$(uname -r)
-case $rel in *k114s-r3[ab]-ARCH) ok "running kernel $rel" ;; *) bad "running kernel is $rel, not an r3a or r3b kernel: stop here, the rest is meaningless"; nospk ;; esac
+case $rel in
+  *k114s-r3[abc]-ARCH|*k114s-r3c-upstream-ARCH) ok "running kernel $rel" ;;
+  *) bad "running kernel is $rel (expected K114s r3a, r3b, r3c or r3c-upstream)"; nospk ;;
+esac
 trial=$(tr -d '\0' < /proc/device-tree/chosen/aurora,trial 2>/dev/null)
 info "Stage 2: ${trial:-the configured m1n1/boot-ctxr.bin}"
 tc=/usr/local/lib/omarchy-k114s/audio/tree-check; [ -x "$tc" ] || tc=$here/linux/audio/tree-check
-if out=$("$tc" 2>&1); then ok "device tree: $out"; else bad "device tree: ${out//$'\n'/; }"; fi
+if out=$("$tc" 2>&1); then
+  ok "device tree: $out"
+else
+  bad "device tree: ${out//$'\n'/; }"
+  nospk
+fi
 if [ -r /proc/config.gz ]; then
   conf=$(zcat /proc/config.gz)
   for o in BT BT_BREDR BT_RFCOMM BT_HIDP SND_JACK SND_SOC_CS42L84 SND_SOC_APPLE_MACAUDIO BT_HCICENTAURI; do
@@ -136,7 +144,7 @@ if [ $listen = 0 ]; then
   [ $nbad = 0 ] && exit 0 || exit 1
 fi
 
-[ $nospk = 1 ] && { echo "== stopping: a speaker-related BAD line or a non-r3a kernel is above; no attended step and no tone runs"; exit 1; }
+[ $nospk = 1 ] && { echo "== stopping: a speaker-related BAD line or an unsupported kernel is above; no attended step and no tone runs"; exit 1; }
 echo "== 6. attended: headphone jack (owner-observed)"
 before=$(jack_state); info "jack before: ${before:-no jack control}"
 pause "Plug wired headphones into the 3.5 mm jack."
