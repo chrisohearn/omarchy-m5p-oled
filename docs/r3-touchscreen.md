@@ -176,11 +176,41 @@ The endpoint is a locally verified archive and repository source. Installing the
 package, creating an entry and booting remain part of the later attended trial.
 Check the ESP budget and verify the recovery route before staging that trial.
 
+### Building the isolated archive
+
+Use a private copy of the r3b-t1 source and a separate output directory seeded
+with its build configuration. Set the copy's `localversion.10-pkgrel` to
+`-17.v272-11-k114s-r3b-t1` and keep `CONFIG_LOCALVERSION="-ARCH"` and
+`CONFIG_HID_APPLE_MTP_KIWI=m`. Rebuild `Image modules dtbs` with the K114s
+`kmake` toolchain. The expected release is `7.3.0-17.v272-11-k114s-r3b-t1-ARCH`.
+The recipe checks the release and the built Kiwi module before copying files
+into the package root. A build with the original plain r3b release is refused.
+
+From a private copy of `packaging/linux-k114s/`, point the recipe at that source
+and output. Set `K114S_SRC`, `K114S_OUT`, `BUILDDIR` and `PKGDEST` to private
+absolute paths:
+
+```bash
+K114S_CAND=r3b-t1 K114S_SRC="$trial_src" K114S_OUT="$trial_out" \
+  BUILDDIR="$trial_pkgbuild" PKGDEST="$trial_archives" PKGEXT=.pkg.tar.zst \
+  makepkg --nodeps --skipinteg
+```
+
+The archive is `linux-k114s-r3b-t1-7.3.0.r3b.t1-1-aarch64.pkg.tar.zst`.
+During attended staging, mkinitcpio uses the module directory's `pkgbase`
+file to select `linux-k114s-r3b-t1.preset`. The Limine hook uses the package
+name for `omarchy_linux-k114s-r3b-t1.efi`. Inspect the archive to verify the
+distinct module directory, the Kiwi module's vermagic, and the disabled Kiwi
+node in the packaged `dtbs/t6050-k114s.dtb`. The touchscreen-enabled `t6050-k114s-r3-touch.dtb`
+is a separate Stage 2 input for the attended trial. The archive inspection
+proves package layout and DTB settings only.
+
 **Owner-session steps (not run).** Keep the default-off rule and the one-shot pattern. Only after the display window is closed
 (`docs/r3-display-plan.md` 4.4):
 
 1. Install the firmware from the build area (`~/k114s-build/touch-fw/`) to `/lib/firmware/apple/tpkiwifw-k114c.bin` (built from Apple's 27.2 restore image for this model; never committed).
-2. Package the r3b-t1 build under its own name, not as `linux-k114s-r3b`, so the r3b.c1 package and its UKI stay untouched, and add its own boot entry.
+2. After checking ESP capacity and the recovery route, stage the verified
+   `linux-k114s-r3b-t1` archive and add its own boot entry.
 3. Compose a Stage 2 from `t6050-k114s-r3-touch.dtb` on the loader the default Stage 2 uses, as an `aura-try` one-shot (`m1n1/boot-ctxr.bin` is not written),
    with the recovery entry available.
 4. Boot once. Check keyboard and trackpad first, then `sudo dmesg | grep -i kiwi` (expect `Kiwi interface ready with status:0`), then

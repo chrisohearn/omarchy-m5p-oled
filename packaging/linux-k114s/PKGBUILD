@@ -7,7 +7,7 @@
 # running kernel's module directory stays package-owned (linux-modules-cleanup.service leaves it alone).
 # The layout is Arch's: vmlinuz (the raw arm64 Image), pkgbase, modules.*, kernel/, dtbs/ (flat).
 # The system's hooks do the rest: pkgbase names the mkinitcpio preset, and the Limine hook builds
-# omarchy_<pkgbase>.efi for it.
+# omarchy_<pkgname>.efi.
 #
 # Package names: r3a is linux-k114s (the installed default). r3b is linux-k114s-r3b, so pacman installs it
 # beside r3a instead of replacing it: its own pkgbase file (preset, UKI omarchy_linux-k114s-r3b.efi, Limine
@@ -31,8 +31,11 @@
 # r3b-c4 (docs/r3-touchid.md) is r3b-c3 plus sep/0001, which admits the K114s to apple_sep's T6050 profile
 # (patches/linux/r3b-c4.series): version 7.3.0.r3b.c4-1, upgrading r3b.c3 in place.
 #
+# r3b-t1 (docs/r3-touchscreen.md) is the opt-in touchscreen trial. Its separate pkgbase and
+# -k114s-r3b-t1-ARCH release keep its boot names and module directory separate from r3b.
+#
 # This file does not compile anything. It packages a finished build:
-#   K114S_CAND  the candidate, r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3c   (default r3a, the one the runbook docs/r3-integration.md names;
+#   K114S_CAND  the candidate, r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c   (default r3a, the one the runbook docs/r3-integration.md names;
 #               r3b: docs/r3b-kernel.md, K114S_CAND=r3b makepkg ...; r3b-b1: D5a, K114S_CAND=r3b-b1 makepkg ...;
 #               r3b-c1: docs/r3-hdr.md, K114S_CAND=r3b-c1 makepkg ...; r3b-c2: docs/r3b-kernel.md,
 #               K114S_CAND=r3b-c2 makepkg ...; r3b-c3: docs/r3-vrr.md, K114S_CAND=r3b-c3 makepkg ...;
@@ -53,10 +56,11 @@ case $_cand in
   r3b-c2) pkgname=linux-k114s-r3b; _kcand=r3b; _ver=r3b.c2; _rel=1 ;;   # vercmp: 7.3.0.r3b.c2-1 is newer than 7.3.0.r3b.c1-1
   r3b-c3) pkgname=linux-k114s-r3b; _kcand=r3b; _ver=r3b.c3; _rel=1 ;;   # vercmp: 7.3.0.r3b.c3-1 is newer than 7.3.0.r3b.c2-1
   r3b-c4) pkgname=linux-k114s-r3b; _kcand=r3b; _ver=r3b.c4; _rel=1 ;;   # vercmp: 7.3.0.r3b.c4-1 is newer than 7.3.0.r3b.c3-1
+  r3b-t1) pkgname=linux-k114s-r3b-t1; _kcand=r3b-t1; _ver=r3b.t1; _rel=1 ;;
   # r3c takes the r3a slot (docs/r3c-kernel.md): linux-k114s 7.3.0.r3a-2 -> 7.3.0.r3c-1 (vercmp: newer), so the ESP keeps
   # two kernel images (r3c and the proven r3b) and the macOS repair tool still finds omarchy_linux-k114s.efi
   r3c) pkgname=linux-k114s; _kcand=r3c; _ver=r3c; _rel=1 ;;
-  *) echo "K114S_CAND must be r3a, r3b, r3b-b1, r3b-c1 to r3b-c4 or r3c" >&2; exit 1 ;;
+  *) echo "K114S_CAND must be r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1 or r3c" >&2; exit 1 ;;
 esac
 pkgbase=$pkgname
 pkgver=7.3.0.$_ver
@@ -122,6 +126,11 @@ package() {
     grep -q 'has(b"apple,k114s")' "$_src/drivers/soc/apple/profile.rs" ||
       { echo "$_src lacks sep/0001, the K114s in the T6050 SEP profile (patches/linux/r3b-c4.series)" >&2; return 1; }
   fi
+  if [[ $_cand == r3b-t1 ]]; then
+    [[ -s "$_out/drivers/hid/hid-apple-mtp-kiwi.ko" ]] &&
+      grep -Fxq 'drivers/hid/hid-apple-mtp-kiwi.o' "$_out/modules.order" ||
+      { echo "$_out lacks the built Kiwi module (CONFIG_HID_APPLE_MTP_KIWI=m)" >&2; return 1; }
+  fi
   modpath="$pkgdir/usr/lib/modules/$kernel_release"
 
   # vmlinuz: the uncompressed Image, as linux-aurora ships it
@@ -142,7 +151,7 @@ package() {
     install -m644 "$_out/arch/arm64/boot/dts/apple/$dtb" "$modpath/dtbs/$dtb"
   done < "$startdir/dtbs.list"
 
-  # names the mkinitcpio preset and the Limine entry (the UKI becomes omarchy_<pkgbase>.efi)
+  # names the mkinitcpio preset; Limine uses the matching package name
   echo "$pkgbase" | install -Dm644 /dev/stdin "$modpath/pkgbase"
 
   # the file the kernel and modules were built from, for the record
