@@ -328,12 +328,16 @@ def known_sets(m, esp=None):
     sha_ok = lambda v: isinstance(v, str) and len(v) == 64 and all(c in "0123456789abcdef" for c in v)
     try:
         extra = json.loads(esp.get(KNOWN_JSON).decode("utf-8"))
-        add_loaders = [(e["name"], e["bytes"], e["sha256"]) for e in extra.get("loaders", [])]
-        add_trailers = [(e["name"], e["sha256"]) for e in extra.get("trailers", [])]
-    except (ValueError, KeyError, TypeError, AttributeError):
+        raw_loaders, raw_trailers = extra.get("loaders", []), extra.get("trailers", [])
+        if not isinstance(raw_loaders, list) or not isinstance(raw_trailers, list):
+            raise TypeError("loaders and trailers must be lists")
+    except (ValueError, TypeError, AttributeError):
         return loaders, trailers, "damaged, ignored"
+    # each entry stands on its own: one that is not well formed is dropped, the others are kept
+    add_loaders = [(e.get("name"), e.get("bytes"), e.get("sha256")) for e in raw_loaders if isinstance(e, dict)]
+    add_trailers = [(e.get("name"), e.get("sha256")) for e in raw_trailers if isinstance(e, dict)]
     loaders += [e for e in add_loaders if name_ok(e[0]) and e[0] != "installed" and sha_ok(e[2])
-                and isinstance(e[1], int) and 0 < e[1] <= 16 << 20]
+                and isinstance(e[1], int) and not isinstance(e[1], bool) and 0 < e[1] <= 16 << 20]
     trailers += [e for e in add_trailers if name_ok(e[0]) and e[0] != "bundle" and sha_ok(e[1])]
     return loaders, trailers, "%d loaders, %d U-Boot tails" % (len(loaders) - 1 - len(KNOWN_LOADERS), len(trailers) - 1 - len(KNOWN_TRAILERS))
 

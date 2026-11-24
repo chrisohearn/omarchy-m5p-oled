@@ -326,6 +326,15 @@ for c in j-loader-only j-tail-only j-wrong-hash j-bad-entry; do mkb13 after; bef
   ok "b13: $c.json: the Stage 2 was not replaced" "$(cmp -s "$E/m1n1/boot-ctxr.bin" "$B/payload/boot-ctxr-k114s-r1.bin"; echo $?)" 1; done
 mkb13 after; out=$(RJ "$W/j-damaged.json" status); has "b13: a damaged known-loaders.json is ignored, status still runs" "$out" "known-loaders.json: *damaged, ignored"
 has "b13: and the Stage 2 stays unknown" "$out" "Stage 2 (boot-ctxr):   unknown"
+# a malformed entry beside valid ones is dropped on its own: the valid loader and tail still make the Stage 2 known
+python3 -I - "$W/known.json" "$W" <<'PY2'
+import json, sys
+k = json.load(open(sys.argv[1])); w = sys.argv[2]
+k["loaders"].append({"name": "broken"}); k["loaders"].append("not a dict"); k["trailers"].append({"sha256": 5})
+json.dump(k, open(w + "/j-mixed.json", "w"))
+PY2
+mkb13 after; out=$(RJ "$W/j-mixed.json" status); has "b13: a malformed entry beside valid ones keeps the valid ones" "$out" "Stage 2 (boot-ctxr):   aura-b13-loader-other-trees(1)"
+has "b13: and counts only the valid entries" "$out" "known-loaders.json: *1 loaders, 1 U-Boot tails"
 # the built-in lists are the second source: the same Stage 2 is known without the file when the tool carries a loader and tail
 BI() { python3 -I -c '
 import json, sys; sys.path.insert(0, sys.argv[1]); import k114s_repair as r
