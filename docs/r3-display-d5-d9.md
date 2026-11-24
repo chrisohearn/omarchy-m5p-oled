@@ -160,8 +160,9 @@ from the kept file, not through the hook.
 
 **F10. The macOS tool: loaders by prefix, a rollback that restores them, and one more rollback target.** The tool split every
 Stage 2 at the manifest's `aura_prefix_bytes` (3,997,696, the installed loader), so a display Stage 2 (pin loader, 4,063,232)
-read as `unknown` and `stage2` refused to replace it. Now `split_known` tries the installed loader (manifest) and the pin loader
-(`PIN_LOADER`, a constant), so a Stage 2 on either is recognised; the D9 file is named by hash (`LOCAL_STAGE2`); and
+read as `unknown` and `stage2` refused to replace it. Now `split_known` tries the installed loader (manifest) and the loaders of `KNOWN_LOADERS`
+(first the pin loader, a constant; the Aura b13 and b15 loaders were added for issue #234, see `docs/bundle-r2c.md`, "Which Stage 2
+the tool knows"), so a Stage 2 on any of them is recognised; the D9 file is named by hash (`LOCAL_STAGE2`); and
 `stage2 r3-gpu` writes the proven Stage 2 (`9825a103...`) and its tree (`2c870ba9...`) from the bundle's `promotion/` folder,
 checked against hashes in the tool. The whole file is written, so the loader bytes are restored with it. `stage2 r1` also
 works from the display state (it is whole-file too). The Mac's copy is M9's job. `restore-repair` is unchanged and, in the D9

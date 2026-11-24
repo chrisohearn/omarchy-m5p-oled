@@ -39,6 +39,10 @@ Options: --kernel r1|r1a              which repair kernel apply installs (defaul
          --yes                   skip the typed confirmation
          --esp-dir DIR           test mode: treat DIR as the mounted ESP (no diskutil, no root)
 
+A Stage 2 is recognised by its loader and U-Boot tail, both exact sha256 matches: the manifest's, KNOWN_LOADERS and KNOWN_TRAILERS
+below, and k114s-repair/known-loaders.json on the ESP (docs/bundle-r2c.md, "Which Stage 2 the tool knows"). The copy of this
+file on the ESP is put there by tools/k114s-repair-tool-install, run by root on Linux.
+
 Nothing here repartitions, touches macOS volumes, the Linux root (LUKS), boot policy or NVRAM.
 Python 3.9, standard library only.
 """
@@ -69,9 +73,22 @@ LOCAL_STAGE2 = {"9825a10317866865b49d26bc1df2d0d04a818d385ca62c1a3ce81d96f3d6b8f
                 "5164bb1e1be1fba39aee64229863b2f835828edd8b4f90e8cfa91e71a6fd8cd9": "r3a (r3a tree, not in this bundle)",
                 "90b351377d6fcbad00ddc4c2fb74fce4313dd7fa5f4978ba895a7c41be523e30": "r3-display (pin loader + brightness tree, not in this bundle)"}
 # A Stage 2 is  <loader> <device tree> <gzip U-Boot>  and the tree starts where the loader ends, so each loader has its
-# own prefix length: the bundle's installed loader (manifest.json) and the K114s-pin loader of the display Stage 2
-# (betizzel/omarchy-m5#18, docs/r3-display-d5-d9.md D9): 4,063,232 bytes, the sha256 of that loader file.
-PIN_LOADER = (4063232, "beceb683b63a6d421ce58061a55c14a6d09e0381a23c1a543df55f4cc8007392")
+# own prefix length. A Stage 2 is known when its prefix is a loader below (or the manifest's, "installed") and its tail is a
+# U-Boot below (or the manifest's): both are exact sha256 matches, so a loader or tail that is not listed is never guessed.
+# (name, prefix bytes, sha256 of the prefix, which is the loader file itself)
+KNOWN_LOADERS = (
+    # the K114s-pin loader of the display Stage 2 (betizzel/omarchy-m5#18, docs/r3-display-d5-d9.md D9)
+    ("pin", 4063232, "beceb683b63a6d421ce58061a55c14a6d09e0381a23c1a543df55f4cc8007392"),
+    # Aura 1.0.0b13, the configured Stage 2 since 2026-11-23 (usr/lib/asahi-boot/m1n1.bin)
+    ("aura-b13", 3932160, "4742dd6a11884e25c7817616a6a14ace98f82cf292904c58220545e77babe994"),
+    # the self-built Aura b15 of docs/r3d-stage2.md, listed so a promoted b15 stays recognisable
+    ("aura-b15", 3932160, "788277b6e5987034546e8eaeeefe29f5251379aaba4535f800270c9a1e710f94"),
+)
+# (name, sha256 of the gzip U-Boot tail after the device trees)
+KNOWN_TRAILERS = (("aurora9", "6ee8bd9f81e5d409973b6f5cab69d67aa2ff292e0f570e3d97dd69e722b667af"),)
+# More of both, from k114s-repair/known-loaders.json on the ESP: root writes it with tools/k114s-repair-tool-install, by hand, after a Stage 2 promotion:
+# {"loaders": [{"name", "bytes", "sha256"}], "trailers": [{"name", "sha256"}]}. It only adds to the lists above.
+KNOWN_JSON = "k114s-repair/known-loaders.json"
 # Stage 2 files kept in the bundle's promotion/ folder (copied from the ESP's k114s-repair/promotion/ by the owner's macOS
 # agent, D9): choice -> (file, tree file, sha256 of the file, sha256 of the tree, loader). Checked here, not in manifest.json,
 # because the manifest belongs to the bundle and these files do not.
@@ -300,30 +317,57 @@ class Esp:
 
 # --- reading the live state --------------------------------------------------
 
-def split_known(data, m):
-    """(loader name, prefix, trees, trailer) of a Stage 2 that carries one of the known loaders and the bundle's U-Boot
-    tail, else None. The loader is named "installed" (the manifest's) or "pin"."""
-    for name, (size, digest) in (("installed", (m["aura_prefix_bytes"], m["aura_prefix_sha256"])), ("pin", PIN_LOADER)):
+def known_sets(m, esp=None):
+    """(loaders, trailers, json note): the built-in lists, the manifest's loader and U-Boot, and the entries of the ESP's
+    KNOWN_JSON. A missing file adds nothing; a damaged one or an entry that is not well formed is ignored, never fatal."""
+    loaders = [("installed", m["aura_prefix_bytes"], m["aura_prefix_sha256"])] + list(KNOWN_LOADERS)
+    trailers = [("bundle", m["uboot_trailer_sha256"])] + list(KNOWN_TRAILERS)
+    if esp is None or not esp.has(KNOWN_JSON):
+        return loaders, trailers, "absent"
+    name_ok = lambda v: isinstance(v, str) and 0 < len(v) <= 32 and all(c.isalnum() or c in "._-" for c in v)
+    sha_ok = lambda v: isinstance(v, str) and len(v) == 64 and all(c in "0123456789abcdef" for c in v)
+    try:
+        extra = json.loads(esp.get(KNOWN_JSON).decode("utf-8"))
+        raw_loaders, raw_trailers = extra.get("loaders", []), extra.get("trailers", [])
+        if not isinstance(raw_loaders, list) or not isinstance(raw_trailers, list):
+            raise TypeError("loaders and trailers must be lists")
+    except (ValueError, TypeError, AttributeError):
+        return loaders, trailers, "damaged, ignored"
+    # each entry stands on its own: one that is not well formed is dropped, the others are kept
+    add_loaders = [(e.get("name"), e.get("bytes"), e.get("sha256")) for e in raw_loaders if isinstance(e, dict)]
+    add_trailers = [(e.get("name"), e.get("sha256")) for e in raw_trailers if isinstance(e, dict)]
+    loaders += [e for e in add_loaders if name_ok(e[0]) and e[0] != "installed" and sha_ok(e[2])
+                and isinstance(e[1], int) and not isinstance(e[1], bool) and 0 < e[1] <= 16 << 20]
+    trailers += [e for e in add_trailers if name_ok(e[0]) and e[0] != "bundle" and sha_ok(e[1])]
+    return loaders, trailers, "%d loaders, %d U-Boot tails" % (len(loaders) - 1 - len(KNOWN_LOADERS), len(trailers) - 1 - len(KNOWN_TRAILERS))
+
+
+def split_known(data, m, esp=None):
+    """(loader name, prefix, trees, trailer) of a Stage 2 whose loader and U-Boot tail are both known (known_sets), else
+    None. The loader is named "installed" (the manifest's) or by its entry ("pin", "aura-b13", ...)."""
+    loaders, trailers, _ = known_sets(m, esp)
+    tails = {digest for _, digest in trailers}
+    for name, size, digest in loaders:
         try:
             prefix, trees, trailer = tool.stage2_split(data, size)
         except (SystemExit, Exception):   # a damaged file (a short tree, a bad gzip tail) is not a known Stage 2
             continue
-        if sha(prefix) == digest and sha(trailer) == m["uboot_trailer_sha256"]:
+        if sha(prefix) == digest and sha(trailer) in tails:
             return name, prefix, trees, trailer
     return None
 
 
-def stage2_state(data, m):
+def stage2_state(data, m, esp=None):
     known = {v: k for k, v in m["stage2_sha256"].items()}
     digest = sha(data)
     if digest in known:
         return known[digest]
     if digest in LOCAL_STAGE2:
         return LOCAL_STAGE2[digest]
-    hit = split_known(data, m)
+    hit = split_known(data, m, esp)
     if hit is None:
         return "unknown"
-    return ("same-loader-other-trees(%d)" if hit[0] == "installed" else "pin-loader-other-trees(%d)") % len(hit[2])
+    return ("same-loader-other-trees(%d)" if hit[0] == "installed" else hit[0] + "-loader-other-trees(%d)") % len(hit[2])
 
 
 def tar_files(data):
@@ -358,7 +402,8 @@ def live_state(esp, m):
         state["kernel"] = {m["original_kernel_sha256"]: "original v272-4"}.get(state["uki_linux_sha256"], "unknown")
     else:
         state["uki_uname"], state["uki_linux_sha256"], state["kernel"] = None, None, "removed"
-    state["stage2"] = stage2_state(esp.get(STAGE2), m)
+    state["stage2"] = stage2_state(esp.get(STAGE2), m, esp)
+    state["known_loaders_json"] = known_sets(m, esp)[2]
     state["boot_bin"] = "image combined" if state["files"]["m1n1/boot.bin"] == m["stage2_sha256"]["image-combined"] else "other"
     names = [n for n, _ in tar_files(esp.get(VENDORFW[1]))]
     state["vendorfw_files"] = len(names)
@@ -432,6 +477,7 @@ def show(state):
     else:
         say("  installed kernel UKI:  %s (%s)" % (state["kernel"], state["uki_uname"]))
     say("  Stage 2 (boot-ctxr):   %s" % state["stage2"])
+    say("  known-loaders.json:    %s" % state["known_loaders_json"])
     say("  vendor firmware:       %d files; trackpad firmware %s; N1 firmware %s" % (
         state["vendorfw_files"], "present" if state["vendorfw_has_tpmtfw"] else "MISSING",
         "present" if state["vendorfw_has_ftab"] else "absent"))
@@ -746,8 +792,8 @@ def switch_stage2(esp, m, choice):
     try:
         if not esp.has(BACKUP_DIR + "/backup.json"):
             raise Stop("apply the repair first (no backup on the ESP yet)")
-        if stage2_state(esp.get(STAGE2), m) == "unknown":
-            raise Stop("the live Stage 2 is not one this bundle knows; not replacing it")
+        if stage2_state(esp.get(STAGE2), m, esp) == "unknown":
+            raise Stop("the live Stage 2 is not one this bundle knows (its loader or U-Boot tail is not listed, KNOWN_LOADERS in this tool and %s on the ESP); not replacing it" % KNOWN_JSON)
         esp.put(STAGE2, data)
         esp.put(REPAIR_DIR + "/k114s.dtb", dtb)
         if sha(esp.get(STAGE2)) != sha(data):
