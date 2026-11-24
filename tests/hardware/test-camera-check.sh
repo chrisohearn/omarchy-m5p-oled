@@ -48,6 +48,15 @@ run_case 'AVD is not a camera' 0 0 1 'Apple ISP capture device absent'
 test ! -e "$fixture/ffmpeg-call"
 run_case 'ISP without a light description refuses capture' 1 0 1 'physical camera activity light description is missing'
 test ! -e "$fixture/ffmpeg-call"
+: > "$isp/apple,camera-light-undescribed"
+run_case 'ISP that opts in to apple,camera-light-undescribed captures from the ISP only' 1 0 0 'one local frame saved'
+grep -Fxq /dev/video9 "$fixture/ffmpeg-call"
+grep -Fq 'on-screen indicator only' "$fixture/result"
+printf 'gpio\0wdt\0cil\0' > "$isp/reg-names"; printf '\0\0\0\1' > "$isp/apple,cil-config"
+run_case 'a light and the opt-in together refuse capture' 1 0 1 'both describes a camera light and opts in'
+printf 'gpio\0wdt\0' > "$isp/reg-names"; rm -f -- "$isp/apple,cil-config"
+rm -f -- "$isp/apple,camera-light-undescribed"
+find "$fixture/tmp" -mindepth 1 -delete
 printf 'gpio\0wdt\0cil\0' > "$isp/reg-names"
 printf '\0\0\0\1' > "$isp/apple,cil-config"
 run_case 'failed capture cleans up the partial image' 1 1 1 'no frame saved'

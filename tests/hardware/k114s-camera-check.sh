@@ -1,6 +1,7 @@
 #!/bin/bash
 # Attended check for a K114s camera trial. The default reports device state.
-# --capture saves one local frame from the Apple ISP after the activity light is described.
+# --capture saves one local frame from the Apple ISP once the activity light is described, or the tree opts in to
+# apple,camera-light-undescribed (the K114s: on-screen indicator only).
 set -uo pipefail
 
 capture=0
@@ -41,11 +42,18 @@ if [[ -d $isp ]]; then
   else
     bad "ISP platform ID: ${platform_id:-absent} (expected 0xba)"
   fi
-  if [[ -s $isp/apple,cil-config ]] &&
+  if [[ -e $isp/apple,camera-light-undescribed ]] && [[ -s $isp/apple,cil-config ]]; then
+    # The driver lets the opt-in win and drives no light, so a described light here would be misleading.
+    bad "the tree both describes a camera light and opts in to apple,camera-light-undescribed: the driver drives no light"
+  elif [[ -s $isp/apple,cil-config ]] &&
     grep -zFxq cil "$isp/reg-names" 2>/dev/null; then
     ok "physical camera activity light described"
+  elif [[ -e $isp/apple,camera-light-undescribed ]]; then
+    # The owner's choice (2026-11-24): no light is described on the K114s; the r3e driver (patches/linux/r3e/0075)
+    # runs the camera without light control and the display's best-effort indicator (#2561) is the only signal.
+    info "no camera light described: the tree opts in to apple,camera-light-undescribed (on-screen indicator only)"
   else
-    bad "physical camera activity light description is missing (cil and apple,cil-config)"
+    bad "physical camera activity light description is missing (cil and apple,cil-config), and the tree does not opt in to apple,camera-light-undescribed"
   fi
 else
   bad "ISP node absent"
