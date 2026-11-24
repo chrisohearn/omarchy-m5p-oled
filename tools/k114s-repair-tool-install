@@ -99,6 +99,9 @@ def main(argv):
     ap.add_argument("--check", action="store_true", help="read everything, write nothing")
     args = ap.parse_args(argv)
     esp = args.esp
+    # the default ESP must be a mount point: a failed /boot/efi mount leaves a stale tree under it on the root filesystem
+    if args.esp == "/boot/efi" and not os.path.ismount(esp):
+        die("%s is not a mount point; mount the ESP first (or pass --esp for a copy)" % esp)
     if not os.path.isfile(os.path.join(esp, STAGE2)):
         die("%s has no %s; is the ESP mounted?" % (esp, STAGE2))
     loader = args.loader or next((p for p in ("/usr/lib/asahi-boot/m1n1-ctxr.bin", "/usr/lib/asahi-boot/m1n1.bin") if os.path.isfile(p)), None)
