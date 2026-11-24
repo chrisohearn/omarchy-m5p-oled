@@ -170,7 +170,8 @@ sampled `aop-sensors-als`. Median illuminance was 0.64 lux before covering, 0.00
 [#67 cover-test evidence](https://github.com/chrisohearn/omarchy-m5p-oled/issues/67#issuecomment-6966175366).
 
 Still open:
-- lid sleep, twice, on battery only, with the owner attending (the targets are unmasked only for it);
+- lid sleep, twice, on battery only, with the owner attending (the targets are unmasked only for it); the install that
+  opens it for ordinary boots only is [docs/r3-lid-sleep-battery.md](r3-lid-sleep-battery.md);
 - Bluetooth audio with the paired AirPods (#41);
 - the camera and deep-sleep trial.
 

@@ -1036,7 +1036,7 @@ Expected: the check with `default_entry is Omarchy/linux-k114s (entry 3, ...)` a
     sudo test -e /etc/omarchy-k114s/stage2-trial && stop "a standing Stage 2 trial is configured"
     grep -q -x 'export M1N1_UPDATE_DISABLED=1' /etc/default/update-m1n1 || stop "update-m1n1 is not off"
     grep -m1 '^IgnorePkg = ' /etc/pacman.conf | tr ' ' '\n' | grep -q -x linux-k114s-r3b || stop "the holds block lacks linux-k114s-r3b (sudo $L/apply-holds)"
-    [ "$(systemctl is-enabled suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target | sort -u)" = masked ] || stop "a sleep target is not masked"
+    [ "$(systemctl is-enabled hibernate.target hybrid-sleep.target suspend-then-hibernate.target | sort -u)" = masked ] && case $(systemctl is-enabled suspend.target) in masked) true ;; *) sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep check >/dev/null ;; esac || stop "a sleep target is not masked, or suspend.target is not masked and the lid-sleep gate does not hold it (sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep check says why)"
     [ "$(h "$D/omarchy_linux-aurora.efi")" = $AUR ] || stop "the copy of the linux-aurora image in $D is gone or changed (the way back to three images needs it)"
     free=$(df -B1 --output=avail /boot/efi | tail -1); [ "$free" -ge 95000000 ] || stop "ESP free is $free: below 95 MB (the guard's minimum is 88,080,384): find what took the space"
     echo "this boot: $(uname -r), Stage 2 $({ tr -d '\0' < /proc/device-tree/chosen/aurora,trial; } 2>/dev/null || echo configured)"; echo "ESP free: $free"
@@ -1107,7 +1107,7 @@ the DCP card (#25): the session is the check (the T2 and T3 boots reached Hyprla
     echo "no boot file changed since D9c"
     sudo $K check || stop "check is not clean"
     now=$(df -B1 --output=avail /boot/efi | tail -1); [ "$now" -ge 95000000 ] || stop "ESP free is $now: below 95 MB"
-    [ "$(systemctl is-enabled suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target | sort -u)" = masked ] || stop "a sleep target is not masked"
+    [ "$(systemctl is-enabled hibernate.target hybrid-sleep.target suspend-then-hibernate.target | sort -u)" = masked ] && case $(systemctl is-enabled suspend.target) in masked) true ;; *) sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep check >/dev/null ;; esac || stop "a sleep target is not masked, or suspend.target is not masked and the lid-sleep gate does not hold it (sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep check says why)"
     # the snapshot sync back on (E12): with the two promoted images it estimates the same skip as with aurora and r3a (78.8 % to 109.3 %)
     date +%s | sudo tee "$D/sync-restarted" >/dev/null
     sudo systemctl start snapper-cleanup.timer limine-snapper-sync.service || stop "the snapshot sync did not start: sudo systemctl start snapper-cleanup.timer limine-snapper-sync.service"

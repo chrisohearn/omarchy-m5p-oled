@@ -26,7 +26,10 @@
 #   - the target exists in limine.conf, boots an EFI file that is on the ESP and matches its #hash
 #   - no Stage 2 trial is armed or configured, so the new kernel runs on the configured, proven tree
 #     (--with-stage2-trial lifts only this check, for the GPU step and for the self-test)
-#   - the suspend, hibernate, hybrid-sleep and suspend-then-hibernate targets are masked
+#   - the hibernate, hybrid-sleep and suspend-then-hibernate targets are masked in /etc, and so is suspend.target, or the
+#     gate that re-masks it on trial boots is in place because k114s-lid-sleep check passes (gate unit enabled, tool and
+#     drop-ins installed, AllowSuspend=no and the lid lock still in /etc, and a trial boot is closed). A runtime mask
+#     (masked-runtime) alone is never enough: it is gone after the reboot that starts the trial.
 # and it checks, after saving, that U-Boot's variable file holds the request; if not it takes it back.
 #
 # Self-test gate: nothing shows that U-Boot saves a boot-time erase, so arm refuses every target except the default
@@ -38,13 +41,14 @@
 # lead removing the file by hand (after a new decision) lifts it.
 #
 # Test hooks (environment): K114S_EFIVARS K114S_ESP K114S_ETC K114S_SAVE K114S_SYSTEMCTL
-# K114S_STATE K114S_BOOTID K114S_PREVBOOT K114S_BOOT_EPOCH.
+# K114S_STATE K114S_BOOTID K114S_PREVBOOT K114S_BOOT_EPOCH K114S_LIDSLEEP (the environment also reaches k114s-lid-sleep).
 set -u
 EFIVARS=${K114S_EFIVARS:-/sys/firmware/efi/efivars}
 ESP=${K114S_ESP:-/boot/efi}
 ETC=${K114S_ETC:-/etc/omarchy-k114s}
 SAVE=${K114S_SAVE:-/usr/lib/omarchy/mac-boot/efi-vars-save}
 SYSTEMCTL=${K114S_SYSTEMCTL:-systemctl}
+LIDSLEEP=${K114S_LIDSLEEP:-/usr/local/lib/omarchy-k114s/k114s-lid-sleep}
 STATE=${K114S_STATE:-/var/lib/k114s-recovery}
 BOOTID=${K114S_BOOTID:-$(tr -d - </proc/sys/kernel/random/boot_id 2>/dev/null)}
 BLI=4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
@@ -128,10 +132,16 @@ cmd_check() {
       case $fp in *'#'*) ;; *) f=${fp#boot\(\):}; [ -f "$ESP$f" ] && echo "info  the default entry's file has no #hash in limine.conf; its sha256 is $(sha256sum "$ESP$f" | cut -c1-64)" ;; esac
     fi
   else bad "$row"; fi
-  for t in suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target; do
+  for t in hibernate.target hybrid-sleep.target suspend-then-hibernate.target; do
     s=$($SYSTEMCTL is-enabled "$t" 2>/dev/null); [ "$s" = masked ] || bad "$t is '$s', not masked"
   done
-  [ $rc = 0 ] && echo "ok    the sleep targets are masked"
+  # A /run mask (masked-runtime) says nothing about the next boot, the trial: only the /etc mask or the installed gate holds that.
+  s=$($SYSTEMCTL is-enabled suspend.target 2>/dev/null)
+  if [ "$s" != masked ]; then
+    if [ -x "$LIDSLEEP" ]; then o=$("$LIDSLEEP" check 2>&1) || bad "suspend.target is '$s', not masked in /etc, and the lid-sleep gate does not hold it: $(printf '%s' "$o" | grep -m1 '^BAD')"
+    else bad "suspend.target is '$s', not masked in /etc, and there is no $LIDSLEEP to close it for a trial"; fi
+  fi
+  [ $rc = 0 ] && echo "ok    no trial could sleep (hibernate, hybrid-sleep, suspend-then-hibernate masked; suspend.target $s)"
   grep -qiE '^[ \t]*remember_last_entry:[ \t]*yes' "$CONF" && bad "remember_last_entry is yes: Limine would boot the last booted entry ahead of default_entry, pinning later boots to a trial entry"
   [ "$(sed -n 1p "$ESP/aura-try" 2>/dev/null)" = armed ] && echo "info  a Stage 2 trial is armed: $(sed -n 2p "$ESP/aura-try")" || echo "ok    no Stage 2 trial is armed"
   [ -s "$ETC/stage2-trial" ] && echo "info  a Stage 2 trial is configured to re-arm: $(sed -n 1p "$ETC/stage2-trial")" || echo "ok    no Stage 2 trial is configured to re-arm"
@@ -226,11 +236,14 @@ cmd_arm() {
   tmp=$(mktemp) || die "no temp file"; trap 'rm -f "$tmp"' EXIT
   { printf '\007\000\000\000'; printf '%s' "$id" | iconv -f UTF-8 -t UTF-16LE; printf '\000\000'; } > "$tmp"   # attributes NV|BS|RT, then the id
   drop_var
-  cat "$tmp" > "$VAR" || die "cannot write $VAR"                                                           # one write(2), as efivarfs needs
+  # the arming record first: the lid-sleep gate (k114s-lid-sleep) keeps a one-shot trial boot from sleeping only through
+  # it, so no one-shot is written unless the record is
+  { mkdir -p "$STATE" && printf '%s %s\n' "$BOOTID" "$id" > "$STATE/boot-once-armed.new" && mv -f "$STATE/boot-once-armed.new" "$STATE/boot-once-armed" &&
+    [ "$(cat "$STATE/boot-once-armed")" = "$BOOTID $id" ]; } || { rm -f "$STATE/boot-once-armed.new"; die "cannot write the arming record $STATE/boot-once-armed: a trial boot could sleep; nothing armed"; }
+  cat "$tmp" > "$VAR" || { rm -f "$STATE/boot-once-armed"; die "cannot write $VAR; nothing armed"; }                                                           # one write(2), as efivarfs needs
   if [ -x "$SAVE" ]; then "$SAVE" || { drop_var; die "efi-vars-save failed: the request would be lost at reset; taken back"; }; else drop_var; die "no $SAVE: U-Boot's file cannot be updated; taken back"; fi
   store_has "$id"; rc=$?
   [ $rc = 0 ] || { cmd_clear >/dev/null 2>&1; die "U-Boot's variable file does not hold '$id' after the save (code $rc): not hang-safe; taken back"; }
-  mkdir -p "$STATE" && printf '%s %s\n' "$BOOTID" "$id" > "$STATE/boot-once-armed"
   echo "armed: the next boot starts '$target' (id $id) once. Limine erases the request when it reads it."
   echo "       U-Boot's variable file holds it now. default_entry stays $(default_value). A hang before the root filesystem leaves the default entry ($dp) as the next boot."
 }

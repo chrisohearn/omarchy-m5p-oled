@@ -7,7 +7,7 @@ for f in esp-trim k114s-lib.sh k114s-guard k114s-holds k114s-repackage k114s-rec
     k114s-modules-cleanup k114s-tooling-install k114s-boot initramfs-no-appledrm-k114s hooks/pre-refresh-pacman-k114s-holds hooks/post-update-k114s-release-check; do
   ok "bash parses $f" "$(bash -n "$L/$f" 2>&1)" ""
 done
-for f in update-boot-ctxr-k114s k114s-booted-esp r3a-trial/k114s-boot-once r3a-trial/70-k114s-gpu-desktop; do ok "sh parses $f" "$(sh -n "$L/$f" 2>&1)" ""; done
+for f in update-boot-ctxr-k114s k114s-booted-esp r3a-trial/k114s-boot-once r3a-trial/k114s-lid-sleep r3a-trial/70-k114s-gpu-desktop; do ok "sh parses $f" "$(sh -n "$L/$f" 2>&1)" ""; done
 if command -v dash >/dev/null; then for f in update-boot-ctxr-k114s k114s-booted-esp; do ok "dash parses $f" "$(dash -n "$L/$f" 2>&1)" ""; done; fi
 for f in k114s-fdt k114s-binscan; do ok "python compiles $f" "$(python3 -I -c 'import sys; compile(open(sys.argv[1]).read(), sys.argv[1], "exec")' "$L/$f" 2>&1)" ""; done
 ok "python compiles the test device-tree writer" "$(python3 -I -c 'import sys; compile(open(sys.argv[1]).read(), sys.argv[1], "exec")' "$T/mkfdt.py" 2>&1)" ""

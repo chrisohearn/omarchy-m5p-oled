@@ -21,7 +21,15 @@ else
 fi
 os=/sys/firmware/efi/efivars/LoaderEntryOneShot-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
 [ -e "$os" ] && info "LoaderEntryOneShot is still set (a request for the next boot): $(tail -c +5 "$os" | iconv -f UTF-16LE -t UTF-8 2>/dev/null | tr -d '\0')" || ok "no LoaderEntryOneShot left over: Limine consumed the request"
-for t in suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target; do [ "$(systemctl is-enabled $t 2>/dev/null)" = masked ] || bad "$t is not masked"; done
+for t in hibernate.target hybrid-sleep.target suspend-then-hibernate.target; do [ "$(systemctl is-enabled $t 2>/dev/null)" = masked ] || bad "$t is not masked in /etc"; done
+# suspend.target is not masked in /etc only when docs/r3-lid-sleep-battery.md is installed. Whether this boot is a trial is not
+# known from aurora,trial alone (a Limine one-shot kernel trial has none), so the lid-sleep tool decides, and a check that fails or cannot run is BAD.
+LS=/usr/local/lib/omarchy-k114s/k114s-lid-sleep
+case $(systemctl is-enabled suspend.target 2>/dev/null) in
+  masked) ;;
+  *) if o=$(sudo -n "$LS" check 2>&1); then info "suspend.target is not masked in /etc: $LS check passes (no trial boot could sleep)"
+     else bad "suspend.target is not masked in /etc and $LS check fails or cannot run (sudo -n): $(printf '%s' "$o" | grep -m1 -E '^BAD|sudo|not found|No such' | cut -c1-200)"; fi ;;
+esac
 tree=r1; for f in /proc/device-tree/chosen/framebuffer@*/apple,internal-panel; do [ -e "$f" ] && tree=r3a; done
 [ "$tree" = "$want" ] && ok "device tree is the $tree tree (apple,internal-panel property: $([ $tree = r3a ] && echo present || echo absent))" || bad "expected the $want tree, the booted tree looks like $tree"
 conf=$(zcat /proc/config.gz 2>/dev/null)

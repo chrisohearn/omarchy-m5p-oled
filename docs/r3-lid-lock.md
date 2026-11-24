@@ -18,6 +18,8 @@ So the kernel is ready and the tree is the missing piece: with `apple,internal-p
 framebuffer node the connector becomes `eDP-1`, Omarchy stops counting it as an external monitor,
 the inhibitor is released, and a lid close locks (Omarchy script and logind `lock`). Suspend stays
 blocked by design (masked targets), so the lid locks but does not suspend until the sleep row opens.
+The sleep row's opening for ordinary boots (battery only) is [docs/r3-lid-sleep-battery.md](r3-lid-sleep-battery.md); these
+`lock` drop-ins stay as its fail-closed default and are what a trial boot keeps.
 
 ## Headless proof of the Omarchy side
 

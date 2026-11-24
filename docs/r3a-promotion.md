@@ -246,7 +246,7 @@ tool's live copy). That is the package's own kernel without the trackpad fix, an
     [ "$(sudo sed -n 1p /boot/efi/aura-try)" = spent ] || stop "aura-try does not read spent"
     [ "$(sed -n 1p /etc/omarchy-k114s/stage2-trial)" = m1n1/boot-ctxr-r3-gpu.bin ] || stop "stage2-trial does not name the GPU file"
     [ "$(systemctl is-enabled k114s-stage2-rearm.service)" = enabled ] || stop "k114s-stage2-rearm.service is not enabled"
-    [ "$(systemctl is-enabled suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target | sort -u)" = masked ] || stop "a sleep target is not masked"
+    [ "$(systemctl is-enabled hibernate.target hybrid-sleep.target suspend-then-hibernate.target | sort -u)" = masked ] && case $(systemctl is-enabled suspend.target) in masked) true ;; *) sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep check >/dev/null ;; esac || stop "a sleep target is not masked, or suspend.target is not masked and the lid-sleep gate does not hold it (sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep check says why)"
     ls ~/.config/k114s-gpu-desktop ~/.config/k114s-gpu-desktop.keep ~/.config/k114s-gpu-desktop-r3a >/dev/null || stop "a GPU desktop opt-in is missing"
     [ -e /sys/firmware/efi/efivars/LoaderEntryOneShot-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f ] && stop "a one-shot request is pending"
     echo "ESP free: $(df -B1 --output=avail /boot/efi | tail -1)"
@@ -797,7 +797,7 @@ full rebuild anyway.
       sudo tee /etc/omarchy-mac-boot/owner-boot-chain >/dev/null
     # 5. no override marker is left, sleep stays blocked, the space guard will pass
     for f in allow-low-esp allow-coupled-update; do [ -e /etc/omarchy-k114s/$f ] && stop "/etc/omarchy-k114s/$f exists: remove it first"; done
-    [ "$(systemctl is-enabled suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target | sort -u)" = masked ] || stop "a sleep target is not masked"
+    [ "$(systemctl is-enabled hibernate.target hybrid-sleep.target suspend-then-hibernate.target | sort -u)" = masked ] && case $(systemctl is-enabled suspend.target) in masked) true ;; *) sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep check >/dev/null ;; esac || stop "a sleep target is not masked, or suspend.target is not masked and the lid-sleep gate does not hold it (sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep check says why)"
     ls /etc/systemd/logind.conf.d/30-k114s-r3a-trial.conf /etc/systemd/sleep.conf.d/30-k114s-r3a-trial.conf >/dev/null || stop "a suspend drop-in is missing"
     free=$(df -B1 --output=avail /boot/efi | tail -1); [ "$free" -ge 88080384 ] || stop "below the space guard's minimum"
     echo "P6c: holds $(echo "$held" | wc -w) words; update-m1n1 off; trial-default-revert $(systemctl is-enabled $TU); ESP free $free"

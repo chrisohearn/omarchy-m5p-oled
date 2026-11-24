@@ -282,7 +282,7 @@ window's D1 state had room for it too and missed a run by luck. So:
     sudo test -e /var/lib/k114s-recovery/boot-once-selftest-ok && ! sudo test -e /var/lib/k114s-recovery/boot-once-not-durable || stop "the one-shot self-test marker is missing, or the not-durable marker exists"
     [ -e /sys/firmware/efi/efivars/LoaderEntryOneShot-$BLI ] && stop "a one-shot request is pending"
     grep -q -x 'export M1N1_UPDATE_DISABLED=1' /etc/default/update-m1n1 || stop "update-m1n1 is not off"
-    [ "$(systemctl is-enabled suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target | sort -u)" = masked ] || stop "a sleep target is not masked"
+    [ "$(systemctl is-enabled hibernate.target hybrid-sleep.target suspend-then-hibernate.target | sort -u)" = masked ] && case $(systemctl is-enabled suspend.target) in masked) true ;; *) sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep check >/dev/null ;; esac || stop "a sleep target is not masked, or suspend.target is not masked and the lid-sleep gate does not hold it (sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep check says why)"
     # from W0 to C4 the snapshot sync is held off and has copied nothing (E12)
     if sudo test -e "$D/sync-held"; then
       [ "$(systemctl is-active snapper-cleanup.timer limine-snapper-sync.service snapper-cleanup.service | sort -u)" = inactive ] || stop "the snapshot sync runs in the window (E12): sudo systemctl stop snapper-cleanup.timer limine-snapper-sync.service (block F or C does it first in each boot)"
@@ -1128,7 +1128,7 @@ check with `entry 2` and the last line.
     was=$(sudo cat "$D/free.before-window"); now=$(df -B1 --output=avail /boot/efi | tail -1)
     [ $((now - was)) -le 1048576 ] && [ $((was - now)) -le 1048576 ] || stop "ESP free is $now, the window opened at $was: find what took the space"
     grep -m1 '^IgnorePkg = ' /etc/pacman.conf | grep -q -w linux-k114s || stop "the holds block is gone"
-    [ "$(systemctl is-enabled suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target | sort -u)" = masked ] || stop "a sleep target is not masked"
+    [ "$(systemctl is-enabled hibernate.target hybrid-sleep.target suspend-then-hibernate.target | sort -u)" = masked ] && case $(systemctl is-enabled suspend.target) in masked) true ;; *) sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep check >/dev/null ;; esac || stop "a sleep target is not masked, or suspend.target is not masked and the lid-sleep gate does not hold it (sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep check says why)"
     # the snapshot sync back on (E12): its 10-minute boot delay has passed, so the timer runs once at once
     date +%s | sudo tee "$D/sync-restarted" >/dev/null
     sudo systemctl start snapper-cleanup.timer limine-snapper-sync.service || stop "the snapshot sync did not start: sudo systemctl start snapper-cleanup.timer limine-snapper-sync.service"

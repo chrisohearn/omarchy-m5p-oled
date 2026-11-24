@@ -46,10 +46,15 @@ v=$K114S_EFIVARS/LoaderEntryOneShot-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
 [ -e "$v" ] && { printf 'LoaderEntryOneShot' | iconv -t UTF-16LE >> "$f"; printf '\0\0' >> "$f"; tail -c +5 "$v" >> "$f"; }
 exit 0
 SAVE
-  printf '#!/bin/sh\n[ "$FAKE_SLEEP" = open ] && echo disabled || echo masked\n' > "$d/systemctl"
+  cat > "$d/systemctl" <<'SYSCTL'
+#!/bin/sh
+# FAKE_SLEEP=open: every target open. FAKE_SUSPEND / FAKE_HIB: what suspend.target / hibernate.target read (default masked)
+[ "$FAKE_SLEEP" = open ] && { echo disabled; exit 0; }
+case $2 in suspend.target) echo "${FAKE_SUSPEND:-masked}" ;; hibernate.target) echo "${FAKE_HIB:-masked}" ;; *) echo masked ;; esac
+SYSCTL
   chmod +x "$d/save" "$d/systemctl"
 }
-run() { d=$W/$1; shift; K114S_STATE=$d/state K114S_BOOTID=$(cat $d/bootid 2>/dev/null || echo boot1) K114S_PREVBOOT=$(cat $d/prev 2>/dev/null) K114S_BOOT_EPOCH=$(cat $d/epoch 2>/dev/null || echo 0) K114S_EFIVARS=$d/efivars K114S_ESP=$d/esp K114S_ETC=$d/etc K114S_SAVE=$d/save K114S_SYSTEMCTL=$d/systemctl sh "$T" "$@" 2>&1; }
+run() { d=$W/$1; shift; K114S_LIDSLEEP=$d/lidsleep K114S_STATE=$d/state K114S_BOOTID=$(cat $d/bootid 2>/dev/null || echo boot1) K114S_PREVBOOT=$(cat $d/prev 2>/dev/null) K114S_BOOT_EPOCH=$(cat $d/epoch 2>/dev/null || echo 0) K114S_EFIVARS=$d/efivars K114S_ESP=$d/esp K114S_ETC=$d/etc K114S_SAVE=$d/save K114S_SYSTEMCTL=$d/systemctl sh "$T" "$@" 2>&1; }
 
 mk a
 out=$(run a entries)
@@ -84,6 +89,13 @@ mk f; rm $W/f/esp/EFI/Linux/omarchy_linux-k114s.efi; EXP="is not on the ESP"; re
 mk g; EXP="no entry 'Omarchy/linux-nothing'"; refuse "unknown entry" g arm Omarchy/linux-nothing
 mk h; EXP="is a directory"; refuse "directory" h arm Omarchy
 mk i; out=$(FAKE_SLEEP=open run i arm Omarchy/linux-k114s); has "unmasked sleep target" "$out" "is 'disabled', not masked"; ok "unmasked sleep: no variable" "$(ls $W/i/efivars | grep -c LoaderEntryOneShot)" 0
+mk i2; out=$(FAKE_HIB=masked-runtime run i2 arm Omarchy/linux-k114s); has "hibernate masked only in /run is refused" "$out" "hibernate.target is 'masked-runtime', not masked"; ok "hibernate masked-runtime: no variable" "$(ls $W/i2/efivars | grep -c LoaderEntryOneShot)" 0
+mk i3; out=$(FAKE_SUSPEND=masked-runtime run i3 arm Omarchy/linux-k114s); has "suspend masked only in /run, no lid-sleep tool: refused" "$out" "suspend.target is 'masked-runtime', not masked in /etc, and there is no"; ok "suspend masked-runtime, no tool: no variable" "$(ls $W/i3/efivars | grep -c LoaderEntryOneShot)" 0
+printf '#!/bin/sh\necho "BAD   the gate is disabled"; exit 1\n' > $W/i3/lidsleep; chmod +x $W/i3/lidsleep
+out=$(FAKE_SUSPEND=masked-runtime run i3 arm Omarchy/linux-k114s); has "suspend masked-runtime, the lid-sleep check fails: refused" "$out" "the lid-sleep gate does not hold it: BAD   the gate is disabled"
+printf '#!/bin/sh\nexit 0\n' > $W/i3/lidsleep
+out=$(FAKE_SUSPEND=masked-runtime run i3 arm Omarchy/linux-k114s); has "suspend masked-runtime, the lid-sleep check passes: armed" "$out" "armed: the next boot"
+mk i4; out=$(FAKE_SUSPEND=static run i4 arm Omarchy/linux-k114s); has "suspend open, no lid-sleep tool: refused" "$out" "suspend.target is 'static', not masked in /etc, and there is no"
 mk j; mv $W/j/esp/EFI/Linux/omarchy_linux-aurora-k114s.efi $W/j/esp/EFI/Linux/x.efi; EXP="omarchy_linux-aurora-k114s.efi is not on the ESP"; refuse "the default entry's image missing" j arm Omarchy/linux-k114s
 mk k; printf '#!/bin/sh\nexit 0\n' > $W/k/save; out=$(run k arm Omarchy/linux-k114s); has "a saver that does not persist the request: taken back" "$out" "not hang-safe; taken back"; ok "not hang-safe: variable removed" "$(ls $W/k/efivars | grep -c LoaderEntryOneShot)" 0
 mk l; printf '#!/bin/sh\nexit 1\n' > $W/l/save; out=$(run l arm Omarchy/linux-k114s); has "a failing saver: taken back" "$out" "efi-vars-save failed"; ok "failing saver: variable removed" "$(ls $W/l/efivars | grep -c LoaderEntryOneShot)" 0
@@ -98,6 +110,9 @@ REPAIR='Omarchy K114s repair r1 (trackpad fix B)'; RID=Omarchy-K114s-repair-r1--
 mk s; rm $W/s/state/boot-once-selftest-ok; EXP="has not been measured"; refuse "real target without the self-test marker" s arm Omarchy/linux-k114s
 out=$(run s arm "$REPAIR"); has "the repair entry itself can be armed without the marker" "$out" "armed: the next boot starts"
 ok "arm records the arming boot and id" "$(cat $W/s/state/boot-once-armed)" "boot1 $RID"
+# no arming record, no one-shot: the lid-sleep gate needs the record to keep the trial boot from sleeping
+mk u; rm -rf $W/u/state; : > $W/u/state; EXP="cannot write the arming record"; refuse "arm without a writable arming record" u arm "$REPAIR"
+ok "and no one-shot was written" "$(ls $W/u/efivars 2>/dev/null | grep -c LoaderEntryOneShot || true)" 0
 # reboot simulation: Limine consumed the request, U-Boot kept nothing, the file is older than this boot
 reboot() { d=$W/$1; echo "$2" > $d/bootid; echo boot1 > $d/prev; echo $(( $(date +%s) + 1000 )) > $d/epoch; rm -f $d/efivars/LoaderEntryOneShot-$BLI; : > $d/esp/ubootefi.var
   { printf '\007\000\000\000'; printf '%s' "$RID" | iconv -t UTF-16LE; printf '\0\0'; } > $d/efivars/LoaderEntrySelected-$BLI; }
