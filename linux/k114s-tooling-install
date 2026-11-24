@@ -16,7 +16,8 @@
 #   the user hook pre-refresh-pacman.d/k114s-holds -> the one that waits, asks sudo, and fails loudly
 # What it adds: k114s-repackage, k114s-recovery-set, k114s-release-check, k114s-release,
 # k114s-boot-success (+ timer), k114s-holds.path, the keep list for linux-modules-cleanup, the
-# user hook post-update.d/k114s-release-check, /etc/omarchy-k114s/release.conf, and data files.
+# user hook post-update.d/k114s-release-check, /etc/omarchy-k114s/release.conf, data files, and the
+# command /usr/local/bin/k114s-boot (which kernel is Main, Backup or Test; read only).
 # It installs no package, changes no boot file on the ESP, does not touch the channel, and does
 # not reboot. The first thing it does after copying is record the running boot chain as proven
 # and (unless told not to) write a recovery set of every held package.
@@ -27,6 +28,7 @@ LIB=$ROOT/usr/local/lib/omarchy-k114s
 ETC=$ROOT/etc/omarchy-k114s
 SAVED=$LIB/tooling-r3
 HOOKS=$ROOT/etc/pacman.d/hooks
+BINDIR=$ROOT/usr/local/bin
 UNITS=$ROOT/etc/systemd/system
 SYSTEMCTL=${K114S_SYSTEMCTL:-systemctl}
 USER_HOME=${K114S_USER_HOME:-}
@@ -36,6 +38,7 @@ die() { echo "k114s-tooling-install: $*" >&2; exit 1; }
 
 TOOLS=(k114s-lib.sh k114s-guard k114s-holds k114s-repackage k114s-recovery-set k114s-release-check k114s-release
   k114s-boot-success k114s-modules-cleanup k114s-fdt k114s-binscan k114s-booted-esp k114s-edge-check)
+BIN=(k114s-boot)
 DATA=(release-criteria.conf kernel-config.required rivals.list protected.list noextract.list extras.list
   esp-audit-ignore.list holds.default)
 NEW_HOOKS=(00-k114s-guard-install.hook 00-k114s-guard-remove.hook 01-k114s-guard-esp.hook)
@@ -84,6 +87,8 @@ copy_files() {
   local file
   for file in "${TOOLS[@]}"; do install -m 755 "$HERE/$file" "$LIB/$file"; done
   chmod 644 "$LIB/k114s-lib.sh"
+  mkdir -p "$BINDIR"
+  for file in "${BIN[@]}"; do install -m 755 "$HERE/$file" "$BINDIR/$file"; done
   for file in "${DATA[@]}"; do install -m 644 "$HERE/$file" "$LIB/$file"; done
   install -m 755 "$HERE/update-boot-ctxr-k114s" "$LIB/update-boot-ctxr"
   # r2c's name stays valid: its user hook, its notes and people's fingers call apply-holds
@@ -141,6 +146,7 @@ if [[ $mode == undo ]]; then
   for file in "${NEW_HOOKS[@]}" "${EARLIER_HOOKS[@]}"; do rm -f "$HOOKS/$file"; done
   for file in "${OLD_HOOKS[@]}"; do restore "$HOOKS/$file" "hook-$file"; done
   for file in "${TOOLS[@]}" "${DATA[@]}" released.list; do rm -f "$LIB/$file"; done
+  for file in "${BIN[@]}"; do rm -f "$BINDIR/$file"; done
   for file in "${OLD_TOOLS[@]}"; do restore "$LIB/$file" "tool-$file"; done
   if [[ -n $USER_HOME ]]; then
     restore "$(user_hook pre-refresh-pacman.d/k114s-holds)" user-pre-refresh
@@ -157,7 +163,7 @@ if [[ $mode == undo ]]; then
 fi
 
 # --- install / refresh ---------------------------------------------------------------------------
-for file in "${TOOLS[@]}" "${DATA[@]}" "${NEW_HOOKS[@]}" "${UNIT_FILES[@]}" "${OTHER[@]}"; do
+for file in "${TOOLS[@]}" "${BIN[@]}" "${DATA[@]}" "${NEW_HOOKS[@]}" "${UNIT_FILES[@]}" "${OTHER[@]}"; do
   [[ -f $HERE/$file ]] || die "$file is missing beside this script; nothing changed"
 done
 if [[ -f $HERE/SHA256SUMS ]]; then (cd "$HERE" && sha256sum --quiet -c SHA256SUMS) || die "files beside this script do not match SHA256SUMS; nothing changed"; fi
