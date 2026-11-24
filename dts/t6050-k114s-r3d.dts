@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * The K114s Stage 2 tree on the r3d kernel's includes (docs/r3d-kernel.md): the configured r3c tree, unchanged,
+ * plus the two board values the r3d include t6050-k114-k116.dtsi now takes from its board file (r3d's own
+ * t6050-k114s.dts sets the same): the N1 firmware table name and the board id. The shared trees r3d carries add
+ * the T6050 memory-cache controller node (apple,t6050-mcc), the framebuffer's display link and DART reg-names.
+ */
+#define T6050_K_N1_FIRMWARE	"apple/centauri/k114s-ftab.bin"
+#define T6050_K_BOARD_ID	0x14
+
+#include "t6050-k114s-r3c.dts"
