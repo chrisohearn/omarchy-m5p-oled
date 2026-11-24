@@ -8,11 +8,12 @@ repository's sources) → `built/tested` (builds, passes the software tests name
 apply-ready bundle) → `applied` (written to the Mac) → `hardware-verified` (seen working on a
 K114s). A software test is never recorded as hardware proof.
 
-**Base in use** (2026-11-24). Kernel r3d, `linux-k114s` 7.3.0.r3d-1: aurora-silicon/linux `integration/aurora`
-`0bbe021a` plus `patches/linux/r3d.series` ([docs/r3d-kernel.md](r3d-kernel.md)), as Main. r3c-upstream is Backup.
-Loader: the self-built Aura `v1.0.0b15` (`788277b6`) through the `m1n1-ctxr.bin` override. Configured Stage 2 `6b984811`,
-with tree `a0897a5a` from `dts/t6050-k114s-r3d.dts` ([docs/r3d-stage2.md](r3d-stage2.md)). Linux stub firmware 27.2
-(26B8125). Desktop: Edge `omarchy-dev`, with Mesa at aurora-wip `e775d773684` ([docs/r3-package-batch.md](r3-package-batch.md)).
+**Base in use** (2026-11-24). Kernel r3f, `linux-k114s-r3b` 7.3.0.r3f-1: aurora-silicon/linux `main`
+`4abf0f83` plus `patches/linux/r3f.series` ([docs/r3f-kernel.md](r3f-kernel.md)), as Main. r3e1 (`linux-k114s`
+7.3.0.r3e1-1) is Backup. Loader: the self-built Aura `v1.0.0b15` with the K114s camera row through the `m1n1-ctxr.bin`
+override. Configured Stage 2 `3e46007a`, with camera tree `b7efcc0d` ([docs/r3-camera.md](r3-camera.md)). Linux stub
+firmware 27.2 (26B8125). Desktop: Edge `omarchy-dev`, with Mesa at aurora-wip `89472d5e832`
+([docs/r3-package-batch.md](r3-package-batch.md)). Updated nightly ([docs/nightly-rollout.md](nightly-rollout.md)).
 The first image was aurora-silicon/linux `a34d26c2` + betizzel/omarchy-m5 `linux-j714s-27.2.patch` (v272-4), aura
 `22b71758` + `aura-j714s-27.2.patch`, image set `j714s-dev-runtime-7cd4572ff7ef` (betizzel release 3). The 27.2 Apple device trees of the
 K114s and the K116s (16-inch M5 Pro) are identical node for node, so K116s work is the closest

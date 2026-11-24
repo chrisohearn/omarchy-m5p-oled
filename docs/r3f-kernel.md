@@ -1,9 +1,13 @@
 # r3f: the K114s kernel on aurora-silicon/linux `main` `4abf0f83`
 
-Status 2026-11-24: **built and checked, not yet tried on the Mac.** r3f is r3e1 rebased onto the newest upstream `main`,
+Status 2026-11-24: **r3f is Main (the default), and r3e1 is Backup.** Its one-shot trial (23:49Z) gave `R3F-CHECK: PASS`
+(every gate, including a 5 s camera stream with the indicator, 0 Oops/WARNING lines, 0 new error lines, video decode 3/3)
+and it was promoted. On that boot: EDR on at the owner's 1200-nit cap (headroom 16, four HDR lines in the EDID), and
+CLPC still registers `apple-clpc` with low-power, balanced and performance, so #3090 did not cost the K114s its profile.
+The text below records the build: r3f is r3e1 rebased onto the newest upstream `main`,
 with upstream's panel HDR value (#2694) in place of our 500-nit EDR cap (the owner's decision, 2026-11-24: "Use
-upstream's value"). It is built for one overnight one-shot trial in the Backup slot (`linux-k114s-r3b`, which holds r3e);
-r3e1 stays Main and the way back. The speakers stay off. Deep sleep stays compiled out (`CONFIG_APPLE_SOC_SLEEP` off), as
+upstream's value"). It was built for a one-shot trial in the Backup slot (`linux-k114s-r3b`, which held r3e), with
+r3e1 as Main and the way back. The speakers stay off. Deep sleep stays compiled out (`CONFIG_APPLE_SOC_SLEEP` off), as
 in r3d and r3e. Evidence labels as in [r3d-kernel.md](r3d-kernel.md): **agent-run**, **emulator/replica**,
 **upstream-reported**.
 
@@ -56,8 +60,9 @@ swap interface). The firmware 27 peak is the ADT's `LmaxProduct`, taken only abo
 panel's SDR maximum of 1000 nits, left no EDR headroom: no PQ in the EDID, PQ commits refused. r3f drops that patch. The
 line is now `static unsigned int fw27_panel_edr_max_nits;` (default 0, "the panel's own peak"; the parameter still exists and
 can lower the peak by hand, `modinfo -F parm appledrm` shows `(default: 0)`). With #2694 and the K114s ADT (peak 2000 nits,
-EDR potential headroom 16, from the r3e notes) the panel should now offer the 2000-nit peak, advertise PQ and the HDR
-connector properties, and a PQ frame ramps the panel towards 2000 nits. PQ content has been shown on this OLED only up to a 1200-nit
+EDR potential headroom 16, from the r3e notes) the panel offers EDR, advertises PQ and the HDR connector properties, and a PQ frame
+ramps the panel towards the cap in force: 1200 nits on this Mac while `/etc/modprobe.d/k114s-edr-cap.conf` stands (see
+below), the panel's own 2000-nit peak without it. PQ content has been shown on this OLED only up to a 1200-nit
 cap (owner-observed 2026-11-16, [r3-hdr.md](r3-hdr.md) sections 8 and 9), never at the full 2000-nit peak.
 
 **On this Mac the trial still runs at 1200 nits.** The managed HDR default, `/etc/modprobe.d/k114s-edr-cap.conf`
@@ -110,7 +115,7 @@ run on this Mac):
     cd ~/k114s-build/src/r3f
     grep -v '^#' "$REPO/patches/linux/r3f.series" | grep . | while read p; do git am --3way "$REPO/patches/linux/$p"; done
     printf -- '-17.v272-18-k114s-r3f' > localversion.10-pkgrel
-    cp ~/k114s-build/out/r3e1/.config ~/k114s-build/out/r3f/.config      # then: kmake O=... olddefconfig (no change)
+    mkdir -p ~/k114s-build/out/r3f && cp ~/k114s-build/out/r3e1/.config ~/k114s-build/out/r3f/.config      # then: kmake O=... olddefconfig (no change)
     K114S_LABEL=K114S-R3F kmake O=~/k114s-build/out/r3f -j16 Image modules dtbs
 
 | Check | Result | Label |
