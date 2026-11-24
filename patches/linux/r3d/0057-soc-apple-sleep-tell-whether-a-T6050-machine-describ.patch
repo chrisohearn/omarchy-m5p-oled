@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 19 Nov 2026 05:27:07 -0700
+Subject: [PATCH 57/93] soc: apple: sleep: tell whether a T6050 machine
+ describes the sleep
+
+The drivers that take part in T6050's firmware-driven sleep each name
+the boards it has run on. Whether a board sleeps that way is in its
+device tree: it has an enabled apple,t6050-sleep node or it does not.
+
+Add apple_t6050_sleep_described() for that. What differs from one
+description to another is a property of the node, read with
+apple_t6050_sleep_property().
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ include/linux/soc/apple/sleep.h | 25 ++++++++++++++++++++++++-
+ 1 file changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/include/linux/soc/apple/sleep.h b/include/linux/soc/apple/sleep.h
+index db4337d663b..09ec51cbf80 100644
+--- a/include/linux/soc/apple/sleep.h
++++ b/include/linux/soc/apple/sleep.h
+@@ -9,10 +9,33 @@
+ #include <linux/compiler_types.h>
+ #include <linux/errno.h>
+ #include <linux/kconfig.h>
++#include <linux/of.h>
+ #include <linux/types.h>
+ 
+ struct device;
+-struct device_node;
++
++/*
++ * A T6050 machine whose device tree describes the firmware-driven sleep. What a
++ * driver does for that sleep follows the description, not a list of boards.
++ * With @prop: the description also has that property.
++ */
++static inline bool apple_t6050_sleep_property(const char *prop)
++{
++	struct device_node *np;
++	bool ret;
++
++	if (!of_machine_is_compatible("apple,t6050"))
++		return false;
++	np = of_find_compatible_node(NULL, NULL, "apple,t6050-sleep");
++	ret = np && of_device_is_available(np) && (!prop || of_property_read_bool(np, prop));
++	of_node_put(np);
++	return ret;
++}
++
++static inline bool apple_t6050_sleep_described(void)
++{
++	return apple_t6050_sleep_property(NULL);
++}
+ 
+ /* The SMC's sleep messages: the pmVC value and the spacings between them, used as floors */
+ struct apple_sleep_smc_policy {

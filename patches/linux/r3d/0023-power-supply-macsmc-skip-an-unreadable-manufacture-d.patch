@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <address-in-upstream-commit@localhost>
+Date: Wed, 11 Nov 2026 18:42:53 -0600
+Subject: [PATCH 23/93] power: supply: macsmc: skip an unreadable manufacture
+ date quietly
+
+macsmc_battery_get_date() returns -EOPNOTSUPP when the SMC manufacture
+date (BMDT) holds no digits. The power supply core skips a property only
+for -ENODEV, -ENODATA or -EINVAL. For -EOPNOTSUPP it logs an error and
+aborts, so reading the battery uevent file fails.
+
+On a 14-inch M5 Max MacBook Pro the uevent read printed nothing, dmesg
+held 44 "driver failed to report 'manufacture_year' property: -95" lines,
+and the synthetic uevent failed with -95.
+
+Return -ENODATA so the core treats the date as absent. Add the 1992 year
+offset only when the date was read.
+
+Signed-off-by: Joshua Warren <address-in-upstream-commit@localhost>
+
+(cherry picked from commit 089b082fa3290813235729582b3d854d602a4d21)
+[k114s: from aurora-silicon/linux pull request 1615 (open draft); context offset only]
+---
+ drivers/power/supply/macsmc-power.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/power/supply/macsmc-power.c b/drivers/power/supply/macsmc-power.c
+index 5bd714eaf1b..174ab5138fb 100644
+--- a/drivers/power/supply/macsmc-power.c
++++ b/drivers/power/supply/macsmc-power.c
+@@ -560,7 +560,7 @@ static int macsmc_battery_set_charge_behaviour(struct macsmc_power *power, int v
+ static int macsmc_battery_get_date(const char *s, int *out)
+ {
+ 	if (!isdigit(s[0]) || !isdigit(s[1]))
+-		return -EOPNOTSUPP;
++		return -ENODATA;
+ 
+ 	*out = (s[0] - '0') * 10 + s[1] - '0';
+ 	return 0;
+@@ -760,7 +760,8 @@ static int macsmc_battery_get_property(struct power_supply *psy,
+ 	case POWER_SUPPLY_PROP_MANUFACTURE_YEAR:
+ 		ret = macsmc_battery_get_date(&power->mfg_date[0], &val->intval);
+ 		/* The SMC reports the manufacture year as an offset from 1992. */
+-		val->intval += 1992;
++		if (!ret)
++			val->intval += 1992;
+ 		break;
+ 	case POWER_SUPPLY_PROP_MANUFACTURE_MONTH:
+ 		ret = macsmc_battery_get_date(&power->mfg_date[2], &val->intval);

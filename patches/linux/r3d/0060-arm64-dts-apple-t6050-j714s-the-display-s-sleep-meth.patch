@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 19 Nov 2026 08:12:12 -0700
+Subject: [PATCH 60/93] arm64: dts: apple: t6050-j714s: the display's sleep
+ method and the SMC's wake reasons
+
+Both were tied to the board's name in the drivers: the display
+coprocessors' sleep through their firmware 27 method table, and the
+numbering of the SMC's wake record. Describe them, the latter as the
+J714s ADT's smc-pmu node has it.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ arch/arm64/boot/dts/apple/t6050-j714s.dts | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714s.dts b/arch/arm64/boot/dts/apple/t6050-j714s.dts
+index 16954f133d6..612db696b07 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j714s.dts
+@@ -796,6 +796,19 @@ &hpm5 {
+ #include "t6050-j714s-sleep-soc.dtsi"
+ #include "t6050-j714s-sleep-adt.dtsi"
+ 
++/* The display coprocessors take the sleep through their firmware 27 method table */
++&sleep {
++	apple,display-method-sleep;
++};
++
++/* The SMC's wake reasons (ADT smc-pmu, event_name-bitN) */
++&smc {
++	apple,wake-reasons = <0 8 9 11 13 35 40 41 42 43 44 45 48>;
++	apple,wake-reason-names = "pwrbtn", "lid", "sdconn", "charger", "wifibt",
++				  "trackpadkeyboard", "acattach", "acdetach", "USB-C_plug",
++				  "USB2_plug", "USB2_wake", "aupo", "rtc";
++};
++
+ /*
+  * Sound through the AOP, as on J813: its audio service runs the serializers, the
+  * CS42L84 headphone jack on admac-base-ns TX2/RX2 and the six SN012776 speaker amps

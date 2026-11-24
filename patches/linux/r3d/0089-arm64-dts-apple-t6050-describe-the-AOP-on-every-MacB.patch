@@ -1,0 +1,374 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <address-in-upstream-commit@localhost>
+Date: Thu, 19 Nov 2026 22:55:53 +1100
+Subject: [PATCH 89/93] arm64: dts: apple: t6050: describe the AOP on every
+ MacBook Pro
+
+The AOP, with its ambient light and lid angle services and the
+microphone array its audio service captures, was enabled only on the
+J714s, K114c and K116s. The ADTs of all eight T6050 MacBook Pros (J714c,
+J714s, J716c, J716s, K114c, K114s, K116c, K116s) have the same AOP,
+setup port, dart-aop, admac-base-ns, ALS, audio service and microphone
+array nodes (three microphones on leap-s RX0 through the proxy ADMAC),
+with the same addresses, interrupts and DART streams. Only the chassis
+name the microphone card takes its identity from differs.
+
+Move the enables and the audio service's DMA channels into a new
+t6050-aop.dtsi and include it from all eight boards. Each board sets
+only apple,chassis-name: J714 (J714c, J714s), J716 (J716c, J716s), K114
+(K114c, K114s) and K116 (K116c, K116s). Values are from each board's
+ADT. The J714s, K114c and K116s DTBs are byte-identical; the J775c,
+J775d and J873s are unchanged.
+
+The J714s block is DjDeveloperr's, the K114c one Joshua Warren's and the
+K116s one Jens Axboe's.
+
+Signed-off-by: Ryan Murray <address-in-upstream-commit@localhost>
+
+[Not carried over: the t6050-k114s.dts hunk of the original. The shared AOP file gives
+aop_audio the spkr and sense DMA channels, which the K114s sound card must not have.]
+
+[re-cut onto the K114s r3d tree]
+---
+ arch/arm64/boot/dts/apple/t6050-aop.dtsi  | 57 +++++++++++++++++++++++
+ arch/arm64/boot/dts/apple/t6050-j714c.dts | 11 ++++-
+ arch/arm64/boot/dts/apple/t6050-j714s.dts | 37 ++-------------
+ arch/arm64/boot/dts/apple/t6050-j716c.dts |  7 +++
+ arch/arm64/boot/dts/apple/t6050-j716s.dts |  7 +++
+ arch/arm64/boot/dts/apple/t6050-k114c.dts | 37 ++-------------
+ arch/arm64/boot/dts/apple/t6050-k116c.dts |  7 +++
+ arch/arm64/boot/dts/apple/t6050-k116s.dts | 56 ++--------------------
+ 8 files changed, 97 insertions(+), 122 deletions(-)
+ create mode 100644 arch/arm64/boot/dts/apple/t6050-aop.dtsi
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-aop.dtsi b/arch/arm64/boot/dts/apple/t6050-aop.dtsi
+new file mode 100644
+index 00000000000..4e8882f7e3f
+--- /dev/null
++++ b/arch/arm64/boot/dts/apple/t6050-aop.dtsi
+@@ -0,0 +1,57 @@
++// SPDX-License-Identifier: GPL-2.0+ OR MIT
++/*
++ * The AOP of the T6050 MacBook Pros (J714c, J714s, J716c, J716s, K114c, K114s, K116c, K116s),
++ * with its sensor services (ambient light, lid angle) and its audio service, and the
++ * microphone array that service captures.
++ *
++ * Each of these boards' ADTs has the same nodes here: the AOP (ASC 0x290600000, interrupts
++ * 578-581), its setup port (aop-exclave-mailbox at 0x2d067c000, dart-aop stream 1), dart-aop
++ * (0x290fc0000, IRQ 616), admac-base-ns (0x293800000, IRQ 637, dart-aop stream 8), the
++ * ambient light sensor and the audio service under the AOP, and the same microphone array:
++ * audio-hp-mic, three microphones on leap-s ADMAC RX0, which the AP reaches through the proxy
++ * aperture admac-hp-mic-ec-proxy (0x2d3200000, dma-channel 0, admac-leap-s interrupt 638,
++ * dart-aop stream 11). The nodes themselves are in t6050-die0.dtsi and t6050-peripherals.dtsi,
++ * disabled. The lid angle is a service the AOP firmware announces; it has no node of its own.
++ *
++ * The LEAP leaves have no AP power state: the firmware raises them with the hpai service's
++ * "pw0 " when the capture opens, and the proxy ADMAC's registers are first touched after
++ * that, when the capture requests its channel.
++ *
++ * Only the chassis name, the microphone card's identity (Apple<chassis>HPAI), differs: each
++ * board sets &aop_audio's apple,chassis-name before it includes this file, after
++ * t6050-peripherals.dtsi.
++ */
++
++/* The AOP, booted through its setup port, with its sensor and audio services. */
++&aop_mbox {
++	status = "okay";
++};
++
++&aop_setup_mbox {
++	status = "okay";
++};
++
++&aop_dart {
++	status = "okay";
++};
++
++&aop {
++	status = "okay";
++};
++
++&admac_base_ns {
++	status = "okay";
++};
++
++&admac_ec_proxy {
++	status = "okay";
++};
++
++&aop_audio {
++	apple,machine-kind = "MacBook Pro";
++	/* hpai: leap-s RX0 is Linux channel 1 of the proxy ADMAC (2N for TX N, 2N+1 for RX N) */
++	dmas = <&admac_base_ns 4>, <&admac_base_ns 5>,
++	       <&admac_base_ns 0>, <&admac_base_ns 1>,
++	       <&admac_ec_proxy 1>;
++	dma-names = "cout", "cin", "spkr", "sense", "hpai";
++};
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714c.dts b/arch/arm64/boot/dts/apple/t6050-j714c.dts
+index 49d744c7918..d51135a6a73 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j714c.dts
+@@ -146,8 +146,8 @@ &usb_drd3_dart_1 {
+  * 0 left woofer 1, 1 right woofer 1, 2 left woofer 2, 3 right woofer 2, 4 left tweeter,
+  * 5 right tweeter.
+  *
+- * There is no sound card yet: the AOP audio driver is not on this branch, and the jack codec
+- * (i2c2) is not described. The amps stay in shutdown until a stream asks for them.
++ * There is no sound card yet: the jack codec (i2c2) is not described. The amps stay in
++ * shutdown until a stream asks for them.
+  */
+ / {
+ 	speaker_sdz: regulator-sn012776-sdz {
+@@ -483,3 +483,10 @@ &avd {
+ 
+ /* The camera. The loader sets the platform ID from the ADT isp0 sensor-type (0x73). */
+ #include "t6050-isp.dtsi"
++
++/* The AOP, its sensors and the microphone array (t6050-aop.dtsi) */
++&aop_audio {
++	apple,chassis-name = "J714";
++};
++
++#include "t6050-aop.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714s.dts b/arch/arm64/boot/dts/apple/t6050-j714s.dts
+index 3b07d8abaa2..09263dbd880 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j714s.dts
+@@ -1011,44 +1011,13 @@ codec {
+ 	};
+ };
+ 
+-/* The AOP, booted through its setup port, with its sensor and audio services. */
+-&aop_mbox {
+-	status = "okay";
+-};
+-
+-&aop_setup_mbox {
+-	status = "okay";
+-};
+-
+-&aop_dart {
+-	status = "okay";
+-};
+-
+-&aop {
+-	status = "okay";
+-};
+-
+-/*
+- * The microphone array: ADT audio-hp-mic, three microphones on leap-s RX0 through the
+- * proxy ADMAC (Linux channel 1, as on J813), captured by the AOP audio service's own card.
+- */
+-&admac_base_ns {
+-	status = "okay";
+-};
+-
+-&admac_ec_proxy {
+-	status = "okay";
+-};
+-
++/* The AOP, its sensors and the microphone array (t6050-aop.dtsi) */
+ &aop_audio {
+ 	apple,chassis-name = "J714";
+-	apple,machine-kind = "MacBook Pro";
+-	dmas = <&admac_base_ns 4>, <&admac_base_ns 5>,
+-	       <&admac_base_ns 0>, <&admac_base_ns 1>,
+-	       <&admac_ec_proxy 1>;
+-	dma-names = "cout", "cin", "spkr", "sense", "hpai";
+ };
+ 
++#include "t6050-aop.dtsi"
++
+ /* The video decoder (J714sAP ADT avd0, as on the J714c), its DART and power states. */
+ &pmgr4 {
+ 	status = "okay";
+diff --git a/arch/arm64/boot/dts/apple/t6050-j716c.dts b/arch/arm64/boot/dts/apple/t6050-j716c.dts
+index 19080a5d618..8681cf506b7 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j716c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j716c.dts
+@@ -255,6 +255,13 @@ &smc_pcio {
+ 
+ #include "t6050-max-atc2.dtsi"
+ 
++/* The AOP, its sensors and the microphone array (t6050-aop.dtsi) */
++&aop_audio {
++	apple,chassis-name = "J716";
++};
++
++#include "t6050-aop.dtsi"
++
+ /* This unit's host DROM (router UUID from an earlier boot) */
+ &acio2_nhi {
+ 	apple,thunderbolt-drom = [ff 92 e6 6e ee 18 7c ac 05 90 19 c3 8c 00 5c 00
+diff --git a/arch/arm64/boot/dts/apple/t6050-j716s.dts b/arch/arm64/boot/dts/apple/t6050-j716s.dts
+index b10a24902eb..9af9d404820 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j716s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j716s.dts
+@@ -571,5 +571,12 @@ tp-accel {
+ #define T6050_J716S
+ #include "t6050-peripherals.dtsi"
+ 
++/* The AOP, its sensors and the microphone array (t6050-aop.dtsi) */
++&aop_audio {
++	apple,chassis-name = "J716";
++};
++
++#include "t6050-aop.dtsi"
++
+ /* The camera. The loader sets the platform ID from the ADT isp0 sensor-type (0x76). */
+ #include "t6050-isp.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114c.dts b/arch/arm64/boot/dts/apple/t6050-k114c.dts
+index 5aba8d47b94..4d395b980e1 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k114c.dts
+@@ -230,23 +230,6 @@ codec {
+ 	};
+ };
+ 
+-/* The AOP, booted through its setup port, with its sensor and audio services. */
+-&aop_mbox {
+-	status = "okay";
+-};
+-
+-&aop_setup_mbox {
+-	status = "okay";
+-};
+-
+-&aop_dart {
+-	status = "okay";
+-};
+-
+-&aop {
+-	status = "okay";
+-};
+-
+ /*
+  * This board's AOP firmware asks for the sensor's setup buffer and starts the sensor only once the
+  * setup port has had its calibration: the 193-byte blob the driver sends again as the sensor's
+@@ -256,27 +239,13 @@ &aop_als {
+ 	firmware-name = "apple/aop-als-cal.bin";
+ };
+ 
+-/*
+- * The microphone array: ADT audio-hp-mic, three microphones on leap-s RX0 through the
+- * proxy ADMAC (Linux channel 1, as on J813), captured by the AOP audio service's own card.
+- */
+-&admac_base_ns {
+-	status = "okay";
+-};
+-
+-&admac_ec_proxy {
+-	status = "okay";
+-};
+-
++/* The AOP, its sensors and the microphone array (t6050-aop.dtsi) */
+ &aop_audio {
+ 	apple,chassis-name = "K114";
+-	apple,machine-kind = "MacBook Pro";
+-	dmas = <&admac_base_ns 4>, <&admac_base_ns 5>,
+-	       <&admac_base_ns 0>, <&admac_base_ns 1>,
+-	       <&admac_ec_proxy 1>;
+-	dma-names = "cout", "cin", "spkr", "sense", "hpai";
+ };
+ 
++#include "t6050-aop.dtsi"
++
+ /*
+  * The USB-C ports ATC1 and ATC2, as on the other K boards (t6050-k114-k116-usb.dtsi). This
+  * board also gives nub-spmi-a0 its generation 4 fault queue (reg[1], which macOS empties when
+diff --git a/arch/arm64/boot/dts/apple/t6050-k116c.dts b/arch/arm64/boot/dts/apple/t6050-k116c.dts
+index 65b6a517ef6..df6f64ac707 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k116c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k116c.dts
+@@ -34,4 +34,11 @@ &mtp_multitouch {
+ /* The camera. The loader sets the platform ID from the ADT isp0 sensor-type (0xbb). */
+ #include "t6050-isp.dtsi"
+ 
++/* The AOP, its sensors and the microphone array (t6050-aop.dtsi) */
++&aop_audio {
++	apple,chassis-name = "K116";
++};
++
++#include "t6050-aop.dtsi"
++
+ #include "t6050-gpu-g17c.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-k116s.dts b/arch/arm64/boot/dts/apple/t6050-k116s.dts
+index 74938962fe3..2a1db178069 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k116s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k116s.dts
+@@ -501,19 +501,13 @@ jack_codec: codec@4b {
+ 	};
+ };
+ 
+-/* ADT admac-base-ns: 0x293800000, IRQ 637, 13 TX + 13 RX channels, dart-aop stream 8 */
+-&admac_base_ns {
+-	status = "okay";
+-};
+-
+ /*
+  * The AOP audio service (apple,t6050-aop-audio, t6050-die0.dtsi: dmas cout/cin/spkr/sense =
+- * base-ns 4/5/0/1). The chassis name is the microphone card's identity (AppleK116HPAI), the
+- * machine kind the card's long name.
++ * base-ns 4/5/0/1). The chassis name is the microphone card's identity (AppleK116HPAI); the
++ * rest of the AOP is in t6050-aop.dtsi, below.
+  */
+ &aop_audio {
+ 	apple,chassis-name = "K116";
+-	apple,machine-kind = "MacBook Pro";
+ };
+ 
+ /*
+@@ -575,51 +569,9 @@ codec {
+ 	};
+ };
+ 
+-/*
+- * The AOP, booted through its setup port (ADT aop-exclave-mailbox at 0x2d067c000, dart-aop
+- * stream 1), with its RTKit mailbox (ADT aop interrupts 578-581), dart-aop (0x290fc0000,
+- * IRQ 616, 17 streams, locked tables on the ADT l1-tt-0 root) and the AOP itself
+- * (0x290c00000 SRAM window, ASC 0x290600000). All four nodes are in t6050-die0.dtsi /
+- * t6050-peripherals.dtsi of the PR tree, disabled.
+- */
+-&aop_mbox {
+-	status = "okay";
+-};
++/* The AOP, its sensors and the microphone array */
++#include "t6050-aop.dtsi"
+ 
+-&aop_setup_mbox {
+-	status = "okay";
+-};
+-
+-&aop_dart {
+-	status = "okay";
+-};
+-
+-&aop {
+-	status = "okay";
+-};
+-
+-/*
+- * The microphone array: ADT audio-hp-mic ("Digital Mic", three microphones imi1/imi2/imi3,
+- * 48 kHz float32) on leap-s ADMAC RX0, which the AP reaches through the proxy aperture ADT
+- * admac-hp-mic-ec-proxy: reg 0x2d3200000 size 0x34000 (not behind the arm-io translation,
+- * like the AOP setup port), dma-channel 0, admac-leap-s interrupt 638, dart-aop
+- * mapper-admac-leap-s stream 11 (vm-base-11 0x10040000000, vm-size-11 0xffff0000). The K116s
+- * ADT has the J714s values in each of these. The AOP audio service captures the array on a
+- * card of its own (AppleK116HPAI). The LEAP leaves have no AP power state: the firmware
+- * raises them with the hpai service's "pw0 " when the capture opens, and the ADMAC's
+- * registers are first touched after that, when the capture requests its channel.
+- */
+-&admac_ec_proxy {
+-	status = "okay";
+-};
+-
+-&aop_audio {
+-	/* hpai: leap-s RX0 is Linux channel 1 of the proxy ADMAC (2N for TX N, 2N+1 for RX N) */
+-	dmas = <&admac_base_ns 4>, <&admac_base_ns 5>,
+-	       <&admac_base_ns 0>, <&admac_base_ns 1>,
+-	       <&admac_ec_proxy 1>;
+-	dma-names = "cout", "cin", "spkr", "sense", "hpai";
+-};
+ /* The GPU, handed over by the boot loader */
+ #include "t6050-k116s-gpu.dtsi"
+ 

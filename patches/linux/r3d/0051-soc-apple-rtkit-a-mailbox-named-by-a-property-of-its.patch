@@ -1,0 +1,156 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Mon, 23 Nov 2026 15:12:06 -0700
+Subject: [PATCH 51/93] soc: apple: rtkit: a mailbox named by a property of its
+ own
+
+apple_rtkit_init() finds its mailbox in mboxes, by index or by name. The
+K116s's boot loader hands the display over only to a coprocessor node with
+a single mailbox in mboxes, so the DCP's secure port is named there by
+apple,secure-mbox instead.
+
+Add apple_mbox_get_prop() for a mailbox named by another property, and
+apple_rtkit_init_mbox_prop() on top of it.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ drivers/soc/apple/mailbox.c       | 10 ++++++++--
+ drivers/soc/apple/rtkit.c         | 22 +++++++++++++++++-----
+ include/linux/soc/apple/mailbox.h |  2 ++
+ include/linux/soc/apple/rtkit.h   |  5 +++++
+ 4 files changed, 32 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/soc/apple/mailbox.c b/drivers/soc/apple/mailbox.c
+index 5b5b69500db..7973d07a825 100644
+--- a/drivers/soc/apple/mailbox.c
++++ b/drivers/soc/apple/mailbox.c
+@@ -1339,14 +1339,14 @@ static void apple_mbox_quiesce(void *data)
+ 	pm_runtime_barrier(mbox->dev);
+ }
+ 
+-struct apple_mbox *apple_mbox_get(struct device *dev, int index)
++struct apple_mbox *apple_mbox_get_prop(struct device *dev, const char *prop, int index)
+ {
+ 	struct of_phandle_args args;
+ 	struct platform_device *pdev;
+ 	struct apple_mbox *mbox;
+ 	int ret;
+ 
+-	ret = of_parse_phandle_with_args(dev->of_node, "mboxes", "#mbox-cells",
++	ret = of_parse_phandle_with_args(dev->of_node, prop, "#mbox-cells",
+ 					 index, &args);
+ 	if (ret || !args.np)
+ 		return ERR_PTR(ret);
+@@ -1373,6 +1373,12 @@ struct apple_mbox *apple_mbox_get(struct device *dev, int index)
+ 
+ 	return mbox;
+ }
++EXPORT_SYMBOL(apple_mbox_get_prop);
++
++struct apple_mbox *apple_mbox_get(struct device *dev, int index)
++{
++	return apple_mbox_get_prop(dev, "mboxes", index);
++}
+ EXPORT_SYMBOL(apple_mbox_get);
+ 
+ struct apple_mbox *apple_mbox_get_byname(struct device *dev, const char *name)
+diff --git a/drivers/soc/apple/rtkit.c b/drivers/soc/apple/rtkit.c
+index e516f9d6cb6..47440572e9d 100644
+--- a/drivers/soc/apple/rtkit.c
++++ b/drivers/soc/apple/rtkit.c
+@@ -2302,6 +2302,7 @@ static int apple_rtkit_inherit_buffers(
+ }
+ 
+ static struct apple_rtkit *__apple_rtkit_init(struct device *dev, void *cookie,
++					      const char *mbox_prop,
+ 					      const char *mbox_name, int mbox_idx,
+ 					      const struct apple_rtkit_ops *ops,
+ 					      bool adopted,
+@@ -2366,7 +2367,9 @@ static struct apple_rtkit *__apple_rtkit_init(struct device *dev, void *cookie,
+ 	set_bit(APPLE_RTKIT_EP_MGMT, rtk->endpoints);
+ 	set_bit(APPLE_RTKIT_EP_MGMT, rtk->started);
+ 
+-	if (mbox_name)
++	if (mbox_prop)
++		rtk->mbox = apple_mbox_get_prop(dev, mbox_prop, 0);
++	else if (mbox_name)
+ 		rtk->mbox = apple_mbox_get_byname(dev, mbox_name);
+ 	else
+ 		rtk->mbox = apple_mbox_get(dev, mbox_idx);
+@@ -2414,16 +2417,25 @@ struct apple_rtkit *apple_rtkit_init(struct device *dev, void *cookie,
+ 					    const char *mbox_name, int mbox_idx,
+ 					    const struct apple_rtkit_ops *ops)
+ {
+-	return __apple_rtkit_init(dev, cookie, mbox_name, mbox_idx, ops, false,
++	return __apple_rtkit_init(dev, cookie, NULL, mbox_name, mbox_idx, ops, false,
+ 				  NULL, 0, false);
+ }
+ EXPORT_SYMBOL_GPL(apple_rtkit_init);
+ 
++struct apple_rtkit *apple_rtkit_init_mbox_prop(struct device *dev, void *cookie,
++					       const char *mbox_prop,
++					       const struct apple_rtkit_ops *ops)
++{
++	return __apple_rtkit_init(dev, cookie, mbox_prop, NULL, 0, ops, false,
++				  NULL, 0, false);
++}
++EXPORT_SYMBOL_GPL(apple_rtkit_init_mbox_prop);
++
+ struct apple_rtkit *apple_rtkit_init_adopted(struct device *dev, void *cookie,
+ 					     const char *mbox_name, int mbox_idx,
+ 					     const struct apple_rtkit_ops *ops)
+ {
+-	return __apple_rtkit_init(dev, cookie, mbox_name, mbox_idx, ops, true,
++	return __apple_rtkit_init(dev, cookie, NULL, mbox_name, mbox_idx, ops, true,
+ 				  NULL, 0, false);
+ }
+ EXPORT_SYMBOL_GPL(apple_rtkit_init_adopted);
+@@ -2482,7 +2494,7 @@ struct apple_rtkit *apple_rtkit_init_adopted_with_buffers(
+ 	const struct apple_rtkit_ops *ops,
+ 	const struct apple_rtkit_inherited_buffer *buffers, unsigned int count)
+ {
+-	return __apple_rtkit_init(dev, cookie, mbox_name, mbox_idx, ops, true,
++	return __apple_rtkit_init(dev, cookie, NULL, mbox_name, mbox_idx, ops, true,
+ 				  buffers, count, false);
+ }
+ EXPORT_SYMBOL_GPL(apple_rtkit_init_adopted_with_buffers);
+@@ -3539,7 +3551,7 @@ struct apple_rtkit *devm_apple_rtkit_init_m5_saved(struct device *dev, void *coo
+ 	struct apple_rtkit *rtk;
+ 	int ret;
+ 
+-	rtk = __apple_rtkit_init(dev, cookie, mbox_name, mbox_idx, ops, false,
++	rtk = __apple_rtkit_init(dev, cookie, NULL, mbox_name, mbox_idx, ops, false,
+ 				NULL, 0, true);
+ 	if (IS_ERR(rtk))
+ 		return rtk;
+diff --git a/include/linux/soc/apple/mailbox.h b/include/linux/soc/apple/mailbox.h
+index 0159bbc356c..d543769a6d9 100644
+--- a/include/linux/soc/apple/mailbox.h
++++ b/include/linux/soc/apple/mailbox.h
+@@ -96,6 +96,8 @@ struct apple_mbox {
+ };
+ 
+ struct apple_mbox *apple_mbox_get(struct device *dev, int index);
++/* As apple_mbox_get(), for a mailbox named by a property other than mboxes */
++struct apple_mbox *apple_mbox_get_prop(struct device *dev, const char *prop, int index);
+ struct apple_mbox *apple_mbox_get_byname(struct device *dev, const char *name);
+ 
+ int apple_mbox_start(struct apple_mbox *mbox);
+diff --git a/include/linux/soc/apple/rtkit.h b/include/linux/soc/apple/rtkit.h
+index c76e50bd67d..c5cdecc34cb 100644
+--- a/include/linux/soc/apple/rtkit.h
++++ b/include/linux/soc/apple/rtkit.h
+@@ -164,6 +164,11 @@ struct apple_rtkit *apple_rtkit_init(struct device *dev, void *cookie,
+ 					  const char *mbox_name, int mbox_idx,
+ 					  const struct apple_rtkit_ops *ops);
+ 
++/* As apple_rtkit_init(), with the mailbox named by @mbox_prop instead of mboxes. */
++struct apple_rtkit *apple_rtkit_init_mbox_prop(struct device *dev, void *cookie,
++					       const char *mbox_prop,
++					       const struct apple_rtkit_ops *ops);
++
+ /*
+  * Initialize an instance for a co-processor that the bootloader left running
+  * and that cannot be reset. No HELLO/EPMAP handshake takes place: the system

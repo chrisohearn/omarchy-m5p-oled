@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: k114s-integration <integration@localhost>
+Date: Mon, 16 Nov 2026 17:35:39 -0700
+Subject: [PATCH 25/93] soc: apple: sep: Admit the K114s to the T6050 profile
+
+The K114s (MacBook Pro 14-inch, M5 Pro, OLED; Mac17,13) ADT describes
+the J714s's SEP: iop-sep at 0x502600000 and 0x502050000 (interrupts
+533 to 536), dart-sep at 0x500b80000 with vm-base-0 0x10000004000 and
+vm-size-0 0xffff0000, and the Mesa sensor (sensor-id 0x3356, V3) on
+spi2 at 0x505108000, 8 MHz, powered by nub-gpio0 pin 21 with data
+ready on AP GPIO 138. Those are the values #1587 validated on the
+J714s and #1649 admitted for the K116s, so the K114s takes the T6050
+profile as the K116s does.
+
+[re-cut onto integration/aurora 0bbe021a for the K114s]
+---
+ drivers/soc/apple/profile.rs | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/soc/apple/profile.rs b/drivers/soc/apple/profile.rs
+index 29e74e2df0c..0fcff300805 100644
+--- a/drivers/soc/apple/profile.rs
++++ b/drivers/soc/apple/profile.rs
+@@ -469,7 +469,7 @@ pub(crate) struct PlatformProfile {
+ /// SEP, so T6040's profile with this sensor bus. J716c has the same pre-booted
+ /// ASC, DART aperture, sensor revision, bus address and SPI frequency.
+ pub(crate) const T6050: PlatformProfile = PlatformProfile {
+-    name: "T6050/J714s, K116s, J716c",
++    name: "T6050/J714s, K116s, J716c, K114s",
+     sensor: SensorProfile {
+         controller_base: 0x5_0510_8000,
+         ..T6040.sensor
+@@ -705,7 +705,10 @@ fn select(
+         return Ok(&T6041);
+     }
+     if has(b"apple,t6050")
+-        && (has(b"apple,j714s") || has(b"apple,k116s") || has(b"apple,j716c"))
++        && (has(b"apple,j714s")
++            || has(b"apple,k116s")
++            || has(b"apple,j716c")
++            || has(b"apple,k114s"))
+     {
+         return Ok(&T6050);
+     }
+@@ -825,6 +828,7 @@ fn t8132_selection_is_limited_to_the_m4_airs() {
+         assert_eq!(picked(&[b"apple,j714s", b"apple,t6050"]), Some(T6050.name));
+         assert_eq!(picked(&[b"apple,k116s", b"apple,t6050"]), Some(T6050.name));
+         assert_eq!(picked(&[b"apple,j716c", b"apple,t6050"]), Some(T6050.name));
++        assert_eq!(picked(&[b"apple,k114s", b"apple,t6050"]), Some(T6050.name));
+         assert_eq!(picked(&[b"apple,j716c", b"apple,t6041"]), None);
+         assert_eq!(picked(&[b"apple,t6050"]), None);
+     }

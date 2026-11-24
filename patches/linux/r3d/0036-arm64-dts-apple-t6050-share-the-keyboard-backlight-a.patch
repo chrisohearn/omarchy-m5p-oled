@@ -1,0 +1,187 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <address-in-upstream-commit@localhost>
+Date: Thu, 19 Nov 2026 22:56:39 +1100
+Subject: [PATCH 36/93] arm64: dts: apple: t6050: share the keyboard backlight,
+ add it to J716c
+
+The J716c leaves fpwm0 disabled and has no keyboard backlight LED. Its
+ADT has the same pwm0 kbd-backlight node as the J714s, J716s and the
+K114/K116 boards: channel 0 of fpwm0 at 25 kHz.
+
+Move the pwm-leds node and the fpwm0 enable, which the J714s and J716s
+each carried as an identical copy, into a new t6050-kbd-backlight.dtsi.
+Include it from the J714s, J716s, J716c and t6050-k114-k116.dtsi. The
+K boards keep their own LED label and no default-state through a small
+override, and keep their rear logo LED in the same controller.
+
+The J716c gains the LED and an enabled fpwm0. The J714s, J716s, K114c,
+K114s, K116c and K116s DTBs are byte-identical; no other T6050 board
+changes. The J714c can take the same include.
+
+The J714s block was added by DjDeveloperr, the J716s one by Rolando
+Trevino.
+
+Signed-off-by: Ryan Murray <address-in-upstream-commit@localhost>
+---
+ arch/arm64/boot/dts/apple/t6050-j714s.dts     | 18 +-----------
+ arch/arm64/boot/dts/apple/t6050-j716c.dts     |  2 ++
+ arch/arm64/boot/dts/apple/t6050-j716s.dts     | 19 +------------
+ .../arm64/boot/dts/apple/t6050-k114-k116.dtsi | 17 ++++-------
+ .../boot/dts/apple/t6050-kbd-backlight.dtsi   | 28 +++++++++++++++++++
+ 5 files changed, 38 insertions(+), 46 deletions(-)
+ create mode 100644 arch/arm64/boot/dts/apple/t6050-kbd-backlight.dtsi
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714s.dts b/arch/arm64/boot/dts/apple/t6050-j714s.dts
+index b9b8378c7f6..30140956bad 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j714s.dts
+@@ -213,30 +213,14 @@ &dart_apcie1 {
+ 	status = "okay";
+ };
+ 
+-/* The keyboard backlight: ADT pwm0/kbd-backlight, channel 0 at 25 kHz */
+ / {
+ 	aliases {
+ 		/* The loader fills the keyboard layout from the ADT's keyboard node */
+ 		keyboard = &keyboard;
+ 	};
+-
+-	led-controller {
+-		compatible = "pwm-leds";
+-
+-		led-0 {
+-			pwms = <&fpwm0 0 40000>;
+-			label = "kbd_backlight";
+-			function = LED_FUNCTION_KBD_BACKLIGHT;
+-			color = <LED_COLOR_ID_WHITE>;
+-			max-brightness = <255>;
+-			default-state = "keep";
+-		};
+-	};
+ };
+ 
+-&fpwm0 {
+-	status = "okay";
+-};
++#include "t6050-kbd-backlight.dtsi"
+ 
+ /* The MTP and its DockChannel FIFO, which carry the keyboard and trackpad */
+ &mtp_mbox {
+diff --git a/arch/arm64/boot/dts/apple/t6050-j716c.dts b/arch/arm64/boot/dts/apple/t6050-j716c.dts
+index acc1034a340..aef59221185 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j716c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j716c.dts
+@@ -52,6 +52,8 @@ framebuffer0: framebuffer@0 {
+ 	};
+ };
+ 
++#include "t6050-kbd-backlight.dtsi"
++
+ /*
+  * PCIe port 0: the N1 (Wi-Fi and Bluetooth), the only GP port this board uses besides the SD
+  * reader on port 1 (not yet described). The boot loader trains the link after the SMC releases
+diff --git a/arch/arm64/boot/dts/apple/t6050-j716s.dts b/arch/arm64/boot/dts/apple/t6050-j716s.dts
+index 72ef21fce1b..aa2833ad72f 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j716s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j716s.dts
+@@ -44,26 +44,9 @@ framebuffer0: framebuffer@0 {
+ 			status = "disabled";
+ 		};
+ 	};
+-
+-	/* Keyboard backlight: ADT pwm0/kbd-backlight, channel 0 at 25 kHz */
+-	led-controller {
+-		compatible = "pwm-leds";
+-
+-		led-0 {
+-			pwms = <&fpwm0 0 40000>;
+-			label = "kbd_backlight";
+-			function = LED_FUNCTION_KBD_BACKLIGHT;
+-			color = <LED_COLOR_ID_WHITE>;
+-			max-brightness = <255>;
+-			default-state = "keep";
+-		};
+-	};
+ };
+ 
+-/* The keyboard backlight PWM (ADT pwm0) */
+-&fpwm0 {
+-	status = "okay";
+-};
++#include "t6050-kbd-backlight.dtsi"
+ 
+ /* A block t6050-die0.dtsi does not describe yet: the third HPM bus */
+ &die0 {
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+index a111be4aad5..c18eb95aa27 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+@@ -49,17 +49,16 @@ framebuffer0: framebuffer@0 {
+ 			status = "disabled";
+ 		};
+ 	};
++};
+ 
++#include "t6050-kbd-backlight.dtsi"
++
++/ {
+ 	led-controller {
+-		compatible = "pwm-leds";
+-
+-		/* ADT /arm-io/pwm0/kbd-backlight: default-hz 25000 */
++		/* Here the keyboard light keeps its "apple::" name and no boot state */
+ 		led-0 {
+-			pwms = <&fpwm0 0 40000>;
+ 			label = "apple::kbd_backlight";
+-			function = LED_FUNCTION_KBD_BACKLIGHT;
+-			color = <LED_COLOR_ID_WHITE>;
+-			max-brightness = <255>;
++			/delete-property/ default-state;
+ 		};
+ 
+ 		/*
+@@ -170,10 +169,6 @@ &dockchannel {
+ 	status = "okay";
+ };
+ 
+-&fpwm0 {
+-	status = "okay";
+-};
+-
+ &ps_fpwm1 {
+ 	status = "okay";
+ };
+diff --git a/arch/arm64/boot/dts/apple/t6050-kbd-backlight.dtsi b/arch/arm64/boot/dts/apple/t6050-kbd-backlight.dtsi
+new file mode 100644
+index 00000000000..8e1dba5c6fe
+--- /dev/null
++++ b/arch/arm64/boot/dts/apple/t6050-kbd-backlight.dtsi
+@@ -0,0 +1,28 @@
++// SPDX-License-Identifier: GPL-2.0+ OR MIT
++/*
++ * The keyboard backlight of the T6050 MacBook Pros. Each board's ADT has it
++ * as pwm0/kbd-backlight: channel 0 of fpwm0 at 25 kHz, a 40000 ns period.
++ *
++ * Copyright The Asahi Linux Contributors
++ */
++
++#include <dt-bindings/leds/common.h>
++
++/ {
++	led-controller {
++		compatible = "pwm-leds";
++
++		led-0 {
++			pwms = <&fpwm0 0 40000>;
++			label = "kbd_backlight";
++			function = LED_FUNCTION_KBD_BACKLIGHT;
++			color = <LED_COLOR_ID_WHITE>;
++			max-brightness = <255>;
++			default-state = "keep";
++		};
++	};
++};
++
++&fpwm0 {
++	status = "okay";
++};

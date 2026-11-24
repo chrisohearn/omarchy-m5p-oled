@@ -1,0 +1,215 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Erik Bourget <address-in-upstream-commit@localhost>
+Date: Sat, 21 Nov 2026 19:41:33 -0500
+Subject: [PATCH 34/93] drm/apple: send the firmware 27 calls named by ID in
+ the engine's build
+
+Besides the paired video calls, the firmware 27 paths name several calls by their 27.0 IDs: the primary's paired mode set (A413) and power step (A484), the paired background swap (A408), the sleep's power and A500 steps, the display stage calls and the out-of-band wake call (A442). On 27.2, which renumbered IOMobileFramebufferAP, several of those IDs are other methods: the paired mode's power step ran one and failed, and the second engine of a 4K240 mode never started.
+
+Translate each of them through iomfb_v27_tag() and refuse the call instead of sending it when the build's table lacks an entry. Zero the internal wake A442 payload's filler bytes on renumbered builds, where 27.2 rejects the 0xaa filler as an index count and block size. The J714s's A407 swap keeps its ID, which only its 27.0 table names, and its diagnostic now refuses a pair whose engines take different swap forms. 27.0 sends what it sent.
+
+Signed-off-by: Erik Bourget <address-in-upstream-commit@localhost>
+---
+ .../drm/apple/dcp-peer-modeset-probe-v27.inc  | 18 ++++++++---
+ .../gpu/drm/apple/dcp-peer-swap-probe-v27.inc | 14 +++++++--
+ drivers/gpu/drm/apple/iomfb.c                 | 30 +++++++++++++------
+ 3 files changed, 47 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/gpu/drm/apple/dcp-peer-modeset-probe-v27.inc b/drivers/gpu/drm/apple/dcp-peer-modeset-probe-v27.inc
+index a5aa449b446..0ac6d6c3447 100644
+--- a/drivers/gpu/drm/apple/dcp-peer-modeset-probe-v27.inc
++++ b/drivers/gpu/drm/apple/dcp-peer-modeset-probe-v27.inc
+@@ -7,11 +7,16 @@ static int dcp_peer_probe_power(struct apple_dcp *dcp, struct apple_dcp *peer,
+                                 bool on)
+ {
+ 	struct dcp_peer_video_wait *wait;
+-	struct dcp_method_entry method = { .name = "peer_power_test",
+-		.tag = {'A', '4', '8', '4'} };
++	struct dcp_method_entry method = { .name = "peer_power_test" };
+ 	u8 power[16] = {}, response[8];
++	char peer_tag[4];
+ 	int ret;
+ 
++	ret = iomfb_v27_tag(dcp->v27_methods, "A484", method.tag) ?:
++	      iomfb_v27_tag(peer->v27_methods, "A484", peer_tag);
++	if (ret)
++		return ret;
++
+ 	wait = kzalloc(sizeof(*wait), GFP_KERNEL);
+ 	if (!wait)
+ 		return -ENOMEM;
+@@ -134,13 +139,18 @@ static int dcp_peer_probe_modeset(struct apple_dcp *dcp, struct apple_dcp *peer,
+ 				 bool firmware_requires_merge)
+ {
+ 	struct dcp_peer_video_wait *wait;
+-	struct dcp_method_entry method = { .name = "peer_modeset_test",
+-		.tag = {'A', '4', '1', '3'} };
++	struct dcp_method_entry method = { .name = "peer_modeset_test" };
+ 	__le32 mode[2] = {video->color_id, video->timing_id};
+ 	u32 primary_id, peer_id, phase, status;
+ 	unsigned long deadline;
++	char peer_tag[4];
+ 	int ret;
+ 
++	ret = iomfb_v27_tag(dcp->v27_methods, "A413", method.tag) ?:
++	      iomfb_v27_tag(peer->v27_methods, "A413", peer_tag);
++	if (ret)
++		return ret;
++
+ 	{
+ 		guard(mutex)(&dcp_peer_lock);
+ 		if (dcp->peer_reserved != peer || peer->peer_owner != dcp ||
+diff --git a/drivers/gpu/drm/apple/dcp-peer-swap-probe-v27.inc b/drivers/gpu/drm/apple/dcp-peer-swap-probe-v27.inc
+index ed73f355eda..343fa1872ba 100644
+--- a/drivers/gpu/drm/apple/dcp-peer-swap-probe-v27.inc
++++ b/drivers/gpu/drm/apple/dcp-peer-swap-probe-v27.inc
+@@ -6,6 +6,7 @@ struct dcp_peer_background {
+ 	struct iomfb_transaction transaction;
+ 	struct dcp_peer_video_wait *wait;
+ 	struct dcp_swap_submit_req_v27 wire;
++	char tag[4];
+ 	bool sent;
+ };
+ 
+@@ -26,10 +27,11 @@ static void dcp_peer_background_start(struct apple_dcp *dcp,
+ {
+ 	struct dcp_peer_background *background =
+ 		container_of(transaction, struct dcp_peer_background, transaction);
+-	struct dcp_method_entry method = { .name = "peer_background_test",
+-		.tag = {'A', '4', '0', '8'} };
++	struct dcp_method_entry method = { .name = "peer_background_test" };
+ 	struct dcp_swap_submit_resp_v27 failed = { .ret = ~0U };
+ 
++	memcpy(method.tag, background->tag, sizeof(method.tag));
++
+ 	background->sent = true;
+ 	if (!dcp_present_begin_h17p(&dcp->present_state_h17p,
+ 				    background->wire.swap.swap_id)) {
+@@ -55,13 +57,18 @@ static int dcp_peer_queue_background(struct apple_dcp *dcp,
+ 				     struct dcp_peer_video_wait *wait)
+ {
+ 	struct dcp_peer_background *background;
++	char tag[4];
+ 	int ret;
+ 
++	ret = iomfb_v27_tag(dcp->v27_methods, "A408", tag);
++	if (ret)
++		return ret;
+ 	background = kzalloc_obj(*background);
+ 	if (!background)
+ 		return -ENOMEM;
+ 	background->wire = *wire;
+ 	background->wait = wait;
++	memcpy(background->tag, tag, sizeof(background->tag));
+ 	kref_get(&wait->refs);
+ 	background->transaction.start = dcp_peer_background_start;
+ 	background->transaction.release = dcp_peer_background_release;
+@@ -185,6 +192,7 @@ static void dcp_peer_a407_background_start(struct apple_dcp *dcp,
+ {
+ 	struct dcp_peer_a407_background *background =
+ 		container_of(transaction, struct dcp_peer_a407_background, transaction);
++	/* The J714s's 27.0 swap form, whose table names A407 (iomfb_v27_methods_j714s()). */
+ 	struct dcp_method_entry method = { .name = "peer_background_test",
+ 		.tag = {'A', '4', '0', '7'} };
+ 	struct dcp_swap_submit_resp_v27 failed = { .ret = ~0U };
+@@ -345,6 +353,8 @@ static ssize_t peer_swap_test_store(struct device *dev,
+ 		    dcp->crtc->base.state->active || peer->crtc->base.state->active ||
+ 		    dcp->fw_compat != DCP_FIRMWARE_V_27_0 ||
+ 		    peer->fw_compat != DCP_FIRMWARE_V_27_0 ||
++		    /* Both engines must take the swap form the owner sends. */
++		    dcp->v27_a407 != peer->v27_a407 ||
+ 		    !device_trylock(peer->dev)) {
+ 			ret = -EBUSY;
+ 			goto out;
+diff --git a/drivers/gpu/drm/apple/iomfb.c b/drivers/gpu/drm/apple/iomfb.c
+index b7a2c35b17f..f627218f989 100644
+--- a/drivers/gpu/drm/apple/iomfb.c
++++ b/drivers/gpu/drm/apple/iomfb.c
+@@ -916,11 +916,14 @@ static void iomfb_v27_sleep_start(struct apple_dcp *dcp,
+ 		 rpc->data, iomfb_v27_sleep_done, rpc);
+ 	dcp->push_out_prefill = NULL;
+ 	if ((rpc->a442 || rpc->a442_key) && !rpc->oob) {
+-		static const struct dcp_method_entry a442 = {
+-			.name = "v27_a442", .tag = { 'A', '4', '4', '2' },
+-		};
++		struct dcp_method_entry a442 = { .name = "v27_a442" };
+ 		u8 in[92];
+ 
++		if (iomfb_v27_tag(dcp->v27_methods, "A442", a442.tag)) {
++			dev_warn_once(dcp->dev, "skipping v27 wake A442: unmapped method tag\n");
++			return;
++		}
++
+ 		memset(in, 0xaa, sizeof(in));
+ 		memset(in, 0, 16);
+ 		in[8] = rpc->a442_key ?: 0x41;
+@@ -928,6 +931,9 @@ static void iomfb_v27_sleep_start(struct apple_dcp *dcp,
+ 		if (rpc->a442_key) {
+ 			memset(in + 80, 0, 12);
+ 			in[84] = 0x20;
++		} else if (iomfb_v27_methods_renumbered(dcp->v27_methods)) {
++			/* 27.2 reads the filler as an index count and a block size. */
++			memset(in + 16, 0, sizeof(in) - 16);
+ 		}
+ 		dcp_push(dcp, true, &a442, sizeof(in), 4100, in, iomfb_v27_a442_done, NULL);
+ 	}
+@@ -1005,6 +1011,9 @@ int iomfb_v27_sleep_plain(struct apple_dcp *dcp, bool on)
+ 
+ static int iomfb_v27_rpc(struct apple_dcp *dcp, bool a500, bool on, bool flags)
+ {
++	struct dcp_method_entry method = {
++		.name = a500 ? "v27_sleep_500" : "v27_sleep_power",
++	};
+ 	struct iomfb_v27_sleep_rpc *rpc;
+ 	u8 args[IOMFB_V27_SLEEP_ARGS];
+ 	int ret;
+@@ -1015,6 +1024,9 @@ static int iomfb_v27_rpc(struct apple_dcp *dcp, bool a500, bool on, bool flags)
+ 	    (a500 || flags ? iomfb_v27_sleep_args(dcp, a500, args) :
+ 			     iomfb_v27_display_args(dcp, false, args)))
+ 		return -EOPNOTSUPP;
++	ret = iomfb_v27_tag(dcp->v27_methods, a500 ? "A500" : "A484", method.tag);
++	if (ret)
++		return ret;
+ 	rpc = kzalloc_obj(*rpc);
+ 	if (!rpc)
+ 		return -ENOMEM;
+@@ -1023,10 +1035,7 @@ static int iomfb_v27_rpc(struct apple_dcp *dcp, bool a500, bool on, bool flags)
+ 	rpc->status = ~0U;
+ 	rpc->transaction.start = iomfb_v27_sleep_start;
+ 	rpc->transaction.release = iomfb_v27_sleep_release;
+-	rpc->method = (struct dcp_method_entry) {
+-		.name = a500 ? "v27_sleep_500" : "v27_sleep_power",
+-	};
+-	memcpy(rpc->method.tag, a500 ? "A500" : "A484", 4);
++	rpc->method = method;
+ 	/*
+ 	 * Off, before each DCP's and DCPEXT's sleep idle: A484 with the sleep's flags, then
+ 	 * A500's sleep form. On, after the wake: A500's wake form, then A484 with the flags.
+@@ -1098,6 +1107,7 @@ int iomfb_v27_sleep_a115(struct apple_dcp *dcp, bool awake)
+ static int iomfb_v27_call(struct apple_dcp *dcp, const char *tag, const void *in,
+ 			  u32 in_len, u32 out_len, bool inout, u8 a442_key)
+ {
++	struct dcp_method_entry method = { .name = "v27_display_stage" };
+ 	struct iomfb_v27_sleep_rpc *rpc;
+ 	int ret;
+ 
+@@ -1105,6 +1115,9 @@ static int iomfb_v27_call(struct apple_dcp *dcp, const char *tag, const void *in
+ 	    dcp->fw_compat != DCP_FIRMWARE_V_27_0 || in_len > sizeof(rpc->data) ||
+ 	    (inout && out_len > sizeof(rpc->data)))
+ 		return -EOPNOTSUPP;
++	ret = iomfb_v27_tag(dcp->v27_methods, tag, method.tag);
++	if (ret)
++		return ret;
+ 	rpc = kzalloc_obj(*rpc);
+ 	if (!rpc)
+ 		return -ENOMEM;
+@@ -1114,8 +1127,7 @@ static int iomfb_v27_call(struct apple_dcp *dcp, const char *tag, const void *in
+ 	rpc->any_reply = true;
+ 	rpc->transaction.start = iomfb_v27_sleep_start;
+ 	rpc->transaction.release = iomfb_v27_sleep_release;
+-	rpc->method = (struct dcp_method_entry) { .name = "v27_display_stage" };
+-	memcpy(rpc->method.tag, tag, 4);
++	rpc->method = method;
+ 	rpc->input = in_len;
+ 	rpc->output = out_len;
+ 	rpc->inout = inout;

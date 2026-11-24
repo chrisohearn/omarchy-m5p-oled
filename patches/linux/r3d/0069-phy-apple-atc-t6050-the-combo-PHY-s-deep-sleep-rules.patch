@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 19 Nov 2026 05:28:31 -0700
+Subject: [PATCH 69/93] phy: apple: atc-t6050: the combo PHY's deep-sleep rules
+ where the sleep is described
+
+The rules were in force on two boards by name. Apply them wherever the
+device tree describes T6050's deep sleep.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ drivers/phy/apple/atc-t6050-combo.h | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/phy/apple/atc-t6050-combo.h b/drivers/phy/apple/atc-t6050-combo.h
+index ae50930a7a8..83f97bc8356 100644
+--- a/drivers/phy/apple/atc-t6050-combo.h
++++ b/drivers/phy/apple/atc-t6050-combo.h
+@@ -122,13 +122,13 @@ static void combo_pipe_fault(struct t6050_dp *dp, const char *what, int ret)
+ /*
+  * What the combo PHY gained for a deep sleep outside its sleep callbacks (a wrapper domain
+  * still held at a stop is released, a safe state with a domain still held is stopped again,
+- * the always-on domain's hold over the sleep) is in force on the boards with a T6050 sleep,
+- * the J714s and the J716c. On another T6050 board the stop, the safe state and the probe are
++ * the always-on domain's hold over the sleep) is in force on the boards whose device tree
++ * describes a T6050 sleep. On another T6050 board the stop, the safe state and the probe are
+  * as before.
+  */
+ static bool combo_sleep_board(void)
+ {
+-	return of_machine_is_compatible("apple,j714s") || of_machine_is_compatible("apple,j716c");
++	return apple_t6050_sleep_described();
+ }
+ 
+ static bool combo_domains_held(struct t6050_dp *dp)

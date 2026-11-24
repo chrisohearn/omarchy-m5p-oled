@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 19 Nov 2026 05:28:30 -0700
+Subject: [PATCH 67/93] PCI: apple: T6050: the radio host's deep sleep where
+ the sleep is described
+
+The host registered for T6050's deep sleep on two boards by name.
+Register wherever the device tree describes that sleep.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ drivers/pci/controller/pcie-apple.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/drivers/pci/controller/pcie-apple.c b/drivers/pci/controller/pcie-apple.c
+index fb2aed80ec5..fe702d2d546 100644
+--- a/drivers/pci/controller/pcie-apple.c
++++ b/drivers/pci/controller/pcie-apple.c
+@@ -5499,8 +5499,7 @@ static void apple_pcie_t6050_sleep_probe(struct platform_device *pdev, struct ap
+ {
+ 	struct apple_pcie_port *port;
+ 
+-	if (pcie->managed_sids || !(of_machine_is_compatible("apple,j714s") ||
+-				    of_machine_is_compatible("apple,j716c")))
++	if (pcie->managed_sids || !apple_t6050_sleep_described())
+ 		return;
+ 	/* The one port a boot loader trained; an endpoint Linux powers is parked instead. */
+ 	list_for_each_entry(port, &pcie->ports, entry)

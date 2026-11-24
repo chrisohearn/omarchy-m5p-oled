@@ -1,0 +1,922 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Diljit Singh <address-in-upstream-commit@localhost>
+Date: Sun, 22 Nov 2026 19:14:39 -0500
+Subject: [PATCH 31/93] wifi: apple: centauri: t6050: harden keep-alive sleep
+ fallback and PME gating
+
+Harden the T6050 N1 keep-alive deep-sleep path on associated disconnects,
+partial keep-alive fallback unwinds, post-quiesce PCI saved state, and
+D3hot PME gating:
+
+- Drain in-flight data_tx_busy[] completions during wifi_disconnect(),
+  and skip keep-alive in favor of the existing warm-reset teardown when
+  cfg80211_leave_all() just disconnected inside wiphy_suspend()
+  (centauri_t6050_wifi_pm_disconnected()). With WoWLAN off (the default),
+  sleeps while associated now take the warm-reset path; keep-alive
+  applies only to WoWLAN-armed or unassociated sleeps.
+- Unwind partial keep-alive ACIPC host-sleep cleanly before falling back
+  to teardown: centauri_t6050_suspend() wakes Control and Alpha and logs
+  any unwind failure, marking Wi-Fi failed with
+  centauri_t6050_wifi_mark_failed() and scheduling recovery with
+  apple_centauri_sleep_recovery_needed() (also covering aborted suspends
+  where resume/rewake may not run) so centauri_t6050_quiesce() does not
+  issue ACIPC commands against sleeping firmware;
+  centauri_t6050_wifi_suspend() checks alpha_resume_locked() similarly;
+  and cen_quiesce() wakes Beta ACIPC (clearing running if wake fails)
+  before hci_unregister_dev().
+- Refresh pci_save_state() for fn 1/2 in centauri_t6050_domain_fence()
+  only when centauri_t6050_stop_dma() succeeded for that function, and
+  clear state_saved otherwise (or if pci_save_state() fails, handing
+  suspend_noirq state save and power-state selection back to the PCI
+  core). Because cen_suspend() runs before centauri_t6050_suspend() and
+  saves fn 2 PCI config while Bus Master is enabled in keep-alive mode,
+  an aborted suspend after a Control fallback would otherwise restore Bus
+  Master and the pre-quiesce header onto a quiesced function whose DMA
+  arena was already freed, while calling pci_save_state() on a gone or
+  unreadable function would snapshot 0xffff.
+- Gate PCI_PM_CTRL_PME_ENABLE in D3hot on actual wake arming
+  (centauri_t6050_wifi_wowlan_armed() for fn 0/1, device_may_wakeup() &&
+  running for fn 2), update the stale D3hot PME_En overview comment, and
+  add missing (__force u16) casts for PCI_D3hot and PCI_D0 in
+  btcentauri_t6050.c. Because btcentauri_t6050 does not call
+  device_init_wakeup() at probe, Bluetooth PME is intentionally off by
+  default and follows sysfs wakeup policy.
+
+Extend tools/asahi/centauri-{wifi-pm,bt-arena,recovery}-tests.py and
+centauri-physical-recovery-tests.c to cover disconnect TX drain,
+PM disconnect/WoWLAN/mark-failed helpers, Beta fallback ACIPC unwind,
+and post-fence fn 1/2 state_saved refresh/unreadable-function clearing
+with negative controls.
+
+Signed-off-by: Diljit Singh <address-in-upstream-commit@localhost>
+---
+ drivers/bluetooth/btcentauri_t6050.c          |  24 +++-
+ .../apple/centauri/t6050/centauri_pci.c       |  76 ++++++++++---
+ .../apple/centauri/t6050/centauri_t6050.h     |  18 +++
+ .../apple/centauri/t6050/centauri_wifi.c      | 103 ++++++++++++++----
+ tools/asahi/centauri-bt-arena-tests.py        |  36 ++++--
+ .../asahi/centauri-physical-recovery-tests.c  |   4 +-
+ tools/asahi/centauri-recovery-tests.py        |  55 +++++++++-
+ tools/asahi/centauri-wifi-pm-tests.py         |  53 +++++++--
+ 8 files changed, 301 insertions(+), 68 deletions(-)
+
+diff --git a/drivers/bluetooth/btcentauri_t6050.c b/drivers/bluetooth/btcentauri_t6050.c
+index b436effc29b..36fcc4b686c 100644
+--- a/drivers/bluetooth/btcentauri_t6050.c
++++ b/drivers/bluetooth/btcentauri_t6050.c
+@@ -815,6 +815,8 @@ static int cen_request_irqs(struct cen_bt *bt)
+ 	return 0;
+ }
+ 
++static int cen_transport_state(struct cen_bt *bt, bool asleep);
++
+ /*
+  * Called with the participant device locked, outside Control's boot_lock. Keep
+  * the transport alive through HCI unregister: its close may send final commands.
+@@ -824,11 +826,23 @@ static int cen_request_irqs(struct cen_bt *bt)
+ static int cen_quiesce(void *data)
+ {
+ 	struct cen_bt *bt = data;
++	int wake_ret = 0;
+ 
+ 	if (bt->host_quiesced)
+ 		return 0;
++	if (bt->transport_sleep_sent) {
++		bt->transport_sleep_sent = false;
++		wake_ret = cen_transport_state(bt, false);
++		if (wake_ret)
++			dev_warn(&bt->pdev->dev,
++				 "Beta ACIPC host wake failed during teardown (%d)\n",
++				 wake_ret);
++	}
+ 	mutex_lock(&bt->lock);
+ 	bt->quiescing = true;
++	if (wake_ret)
++		bt->running = false;
++	WRITE_ONCE(bt->transport_paused, false);
+ 	mutex_unlock(&bt->lock);
+ 	if (bt->hci_registered) {
+ 		hci_unregister_dev(bt->hdev);
+@@ -1153,9 +1167,11 @@ static int cen_suspend_noirq(struct device *dev)
+ 	if (!bt->transport_sleep_sent || !pm_suspend_via_firmware() || !pdev->pm_cap)
+ 		return 0;
+ 	if (!pci_read_config_word(pdev, pdev->pm_cap + PCI_PM_CTRL, &pmctrl)) {
+-		pci_write_config_word(pdev, pdev->pm_cap + PCI_PM_CTRL,
+-				      (pmctrl & ~PCI_PM_CTRL_STATE_MASK) |
+-				      PCI_D3hot | PCI_PM_CTRL_PME_ENABLE);
++		pmctrl &= ~(PCI_PM_CTRL_STATE_MASK | PCI_PM_CTRL_PME_ENABLE);
++		pmctrl |= (__force u16)PCI_D3hot;
++		if (device_may_wakeup(dev) && READ_ONCE(bt->running))
++			pmctrl |= PCI_PM_CTRL_PME_ENABLE;
++		pci_write_config_word(pdev, pdev->pm_cap + PCI_PM_CTRL, pmctrl);
+ 		mdelay(pdev->d3hot_delay);
+ 	}
+ 	return 0;
+@@ -1181,7 +1197,7 @@ static int cen_resume_noirq(struct device *dev)
+ 	}
+ 	if (pdev->pm_cap &&
+ 	    !pci_read_config_word(pdev, pdev->pm_cap + PCI_PM_CTRL, &pmctrl) &&
+-	    (pmctrl & PCI_PM_CTRL_STATE_MASK) != PCI_D0) {
++	    (pmctrl & PCI_PM_CTRL_STATE_MASK) != (__force u16)PCI_D0) {
+ 		pci_write_config_word(pdev, pdev->pm_cap + PCI_PM_CTRL,
+ 				      pmctrl & ~PCI_PM_CTRL_STATE_MASK);
+ 		mdelay(pdev->d3hot_delay);
+diff --git a/drivers/net/wireless/apple/centauri/t6050/centauri_pci.c b/drivers/net/wireless/apple/centauri/t6050/centauri_pci.c
+index 6cda4019d8f..7856b358f9b 100644
+--- a/drivers/net/wireless/apple/centauri/t6050/centauri_pci.c
++++ b/drivers/net/wireless/apple/centauri/t6050/centauri_pci.c
+@@ -599,10 +599,10 @@ static void centauri_t6050_remove(struct pci_dev *pdev)
+ }
+ 
+ /*
+- * On a healthy firmware sleep, Beta (fn 2), Alpha (fn 1), and Control (fn 0) enter ACIPC
+- * host-sleep, save PCI config state, enter D3hot with PME_En, and ask pcie-apple to skip
+- * the wake warm reset so the N1 firmware, Bluetooth, and (when armed) Wi-Fi association
+- * survive across PERST#.
++ * On a healthy firmware sleep (WoWLAN-armed or unassociated), Beta (fn 2), Alpha (fn 1),
++ * and Control (fn 0) enter ACIPC host-sleep, save PCI config state, enter D3hot (with
++ * PME_En only when wake is armed), and ask pcie-apple to skip the wake warm reset so the
++ * N1 firmware, Bluetooth, and (when armed) Wi-Fi association survive across PERST#.
+  *
+  * If any function fails host-sleep or wake, or firmware is unhealthy, the driver falls back
+  * to teardown and warm-reset recovery:
+@@ -764,8 +764,22 @@ static bool centauri_t6050_domain_fence(struct centauri_t6050_rewake *rw)
+ 			pci_clear_master(fn[i]);
+ 	}
+ 	for (i = 0; i < 3; i++) {
+-		if (fn[i] && !centauri_t6050_stop_dma(fn[i]))
++		bool fn_stopped = !fn[i] || centauri_t6050_stop_dma(fn[i]);
++
++		if (!fn_stopped)
+ 			stopped = false;
++		/*
++		 * Refresh any keep-alive PCI state saved before Control fell
++		 * back to teardown so an aborted suspend cannot restore Bus
++		 * Master or the old header onto a quiesced function whose DMA
++		 * arena was freed. Never save an unreadable/gone function
++		 * (which would snapshot 0xffff); clearing state_saved hands
++		 * suspend_noirq state save and power-state selection back to
++		 * the PCI core.
++		 */
++		if (fn[i] && i > 0 && fn[i]->state_saved &&
++		    (!fn_stopped || pci_save_state(fn[i])))
++			fn[i]->state_saved = false;
+ 		pci_dev_put(fn[i]);
+ 	}
+ 	return stopped;
+@@ -1022,16 +1036,18 @@ void apple_centauri_sleep_mark_fallback(struct pci_dev *fn)
+ }
+ EXPORT_SYMBOL_GPL(apple_centauri_sleep_mark_fallback);
+ 
+-static void centauri_t6050_set_d3hot(struct pci_dev *pdev)
++static void centauri_t6050_set_d3hot(struct pci_dev *pdev, bool pme_enable)
+ {
+ 	u16 pmctrl;
+ 
+ 	if (!pdev || !pdev->pm_cap)
+ 		return;
+ 	if (!pci_read_config_word(pdev, pdev->pm_cap + PCI_PM_CTRL, &pmctrl)) {
+-		pci_write_config_word(pdev, pdev->pm_cap + PCI_PM_CTRL,
+-				      (pmctrl & ~PCI_PM_CTRL_STATE_MASK) |
+-				      (__force u16)PCI_D3hot | PCI_PM_CTRL_PME_ENABLE);
++		pmctrl &= ~(PCI_PM_CTRL_STATE_MASK | PCI_PM_CTRL_PME_ENABLE);
++		pmctrl |= (__force u16)PCI_D3hot;
++		if (pme_enable)
++			pmctrl |= PCI_PM_CTRL_PME_ENABLE;
++		pci_write_config_word(pdev, pdev->pm_cap + PCI_PM_CTRL, pmctrl);
+ 		mdelay(pdev->d3hot_delay);
+ 	}
+ }
+@@ -1128,19 +1144,26 @@ static int centauri_t6050_suspend(struct device *dev)
+ 
+ 	c->firmware_kept = false;
+ 	c->control_sleep_sent = false;
++	c->keep_alive_pme = false;
+ 	if (!beta_fallback && c->boot_phase == CEN_BOOT_READY && c->ipc && c->wifi &&
+ 	    !centauri_t6050_wifi_pm_error(c) &&
++	    !centauri_t6050_wifi_pm_disconnected(c) &&
+ 	    readl(c->bar + 0x8000) == 2 && readl(c->bar + 0x8050) == 2) {
++		bool wifi_sleep_sent = false;
++		int unwind_err = 0, wake_ret;
+ 		u32 id0 = 0, id1 = 0;
+ 
+ 		fn1 = centauri_t6050_ipc_alpha_dev(c);
+ 		if (!fn1 || pci_read_config_dword(pdev, PCI_VENDOR_ID, &id0) ||
+ 		    pci_read_config_dword(fn1, PCI_VENDOR_ID, &id1) ||
+ 		    (id0 & 0xffff) != pdev->vendor || (id1 & 0xffff) != fn1->vendor ||
+-		    id0 == ~0U || id1 == ~0U)
++		    id0 == ~0U || id1 == ~0U) {
+ 			ret = -ENODEV;
+-		else
++		} else {
+ 			ret = centauri_t6050_wifi_suspend(c);
++			if (!ret)
++				wifi_sleep_sent = true;
++		}
+ 		if (!ret) {
+ 			ret = centauri_t6050_ipc_control_sleep(c, true);
+ 			if (!ret)
+@@ -1156,13 +1179,38 @@ static int centauri_t6050_suspend(struct device *dev)
+ 			centauri_t6050_save_memswap(pdev, c->saved_memswap[0]);
+ 			centauri_t6050_save_memswap(fn1, c->saved_memswap[1]);
+ 			apple_pcie_t6050_sleep_keep_alive(pdev->bus->self);
++			c->keep_alive_pme = centauri_t6050_wifi_wowlan_armed(c);
+ 			c->firmware_kept = true;
+ 			dev_dbg(dev, "N1 kept alive for firmware sleep\n");
+ 			return 0;
+ 		}
+ 		dev_warn(dev, "N1 keep-alive suspend failed (%d); falling back to warm-reset sleep\n",
+ 			 ret);
+-		c->control_sleep_sent = false;
++		if (c->control_sleep_sent) {
++			wake_ret = centauri_t6050_ipc_control_sleep(c, false);
++			if (wake_ret) {
++				dev_warn(dev,
++					 "Control ACIPC host wake failed during fallback (%d)\n",
++					 wake_ret);
++				unwind_err = wake_ret;
++			}
++			c->control_sleep_sent = false;
++		}
++		if (wifi_sleep_sent) {
++			wake_ret = centauri_t6050_wifi_resume(c);
++			if (wake_ret) {
++				dev_warn(dev,
++					 "Alpha host wake failed during fallback (%d)\n",
++					 wake_ret);
++				if (!unwind_err)
++					unwind_err = wake_ret;
++			}
++		}
++		if (unwind_err) {
++			centauri_t6050_wifi_mark_failed(c);
++			/* Also covers an aborted suspend where resume/rewake may not run. */
++			apple_centauri_sleep_recovery_needed(pdev, unwind_err);
++		}
+ 	}
+ 
+ 	ret = centauri_t6050_quiesce(c);
+@@ -1189,8 +1237,8 @@ static int centauri_t6050_suspend_noirq(struct device *dev)
+ 	if (!c->firmware_kept || !pm_suspend_via_firmware())
+ 		return 0;
+ 	fn1 = centauri_t6050_ipc_alpha_dev(c);
+-	centauri_t6050_set_d3hot(fn1);
+-	centauri_t6050_set_d3hot(pdev);
++	centauri_t6050_set_d3hot(fn1, c->keep_alive_pme);
++	centauri_t6050_set_d3hot(pdev, c->keep_alive_pme);
+ 	return 0;
+ }
+ 
+diff --git a/drivers/net/wireless/apple/centauri/t6050/centauri_t6050.h b/drivers/net/wireless/apple/centauri/t6050/centauri_t6050.h
+index 17a92ca3339..828b510ce02 100644
+--- a/drivers/net/wireless/apple/centauri/t6050/centauri_t6050.h
++++ b/drivers/net/wireless/apple/centauri/t6050/centauri_t6050.h
+@@ -62,6 +62,7 @@ struct centauri_t6050 {
+ 	/* Kept alive across a firmware sleep via ACIPC host-sleep */
+ 	bool firmware_kept;
+ 	bool control_sleep_sent;
++	bool keep_alive_pme;
+ 	u32 saved_pci_id[2];
+ 	u32 saved_memswap[2][3];
+ 	struct centauri_t6050_ipc *ipc;
+@@ -88,6 +89,9 @@ int centauri_t6050_wifi_register(struct centauri_t6050 *c);
+ void centauri_t6050_wifi_unregister(struct centauri_t6050 *c);
+ void centauri_t6050_wifi_pm_prepare(struct centauri_t6050 *c);
+ int centauri_t6050_wifi_pm_error(struct centauri_t6050 *c);
++bool centauri_t6050_wifi_pm_disconnected(struct centauri_t6050 *c);
++bool centauri_t6050_wifi_wowlan_armed(struct centauri_t6050 *c);
++void centauri_t6050_wifi_mark_failed(struct centauri_t6050 *c);
+ void centauri_t6050_wifi_pm_complete(struct centauri_t6050 *c);
+ int centauri_t6050_wifi_suspend(struct centauri_t6050 *c);
+ int centauri_t6050_wifi_resume(struct centauri_t6050 *c);
+@@ -113,6 +117,20 @@ static inline int centauri_t6050_wifi_pm_error(struct centauri_t6050 *c)
+ 	return 0;
+ }
+ 
++static inline bool centauri_t6050_wifi_pm_disconnected(struct centauri_t6050 *c)
++{
++	return false;
++}
++
++static inline bool centauri_t6050_wifi_wowlan_armed(struct centauri_t6050 *c)
++{
++	return false;
++}
++
++static inline void centauri_t6050_wifi_mark_failed(struct centauri_t6050 *c)
++{
++}
++
+ static inline void centauri_t6050_wifi_pm_complete(struct centauri_t6050 *c)
+ {
+ }
+diff --git a/drivers/net/wireless/apple/centauri/t6050/centauri_wifi.c b/drivers/net/wireless/apple/centauri/t6050/centauri_wifi.c
+index ffb4793934c..92f923c7f2f 100644
+--- a/drivers/net/wireless/apple/centauri/t6050/centauri_wifi.c
++++ b/drivers/net/wireless/apple/centauri/t6050/centauri_wifi.c
+@@ -94,7 +94,7 @@ struct centauri_t6050_wifi {
+ 	bool connecting, connected, connect_event, disconnect_event;
+ 	bool disconnect_pending;
+ 	/* PM callbacks and the normal disconnect producer serialize on lock. */
+-	bool pm_prepared;
++	bool pm_prepared, pm_wowlan_armed;
+ 	struct centauri_wifi_disconnect_receipt pm_disconnect;
+ 	u16 connect_status, scan_status, disconnect_status;
+ 	struct ieee80211_channel *connect_channel;
+@@ -2019,6 +2019,32 @@ static int wait_disconnect(struct centauri_t6050_wifi *wifi)
+ 	return 0;
+ }
+ 
++static bool data_tx_in_flight(struct centauri_t6050_wifi *wifi)
++{
++	unsigned int i;
++
++	for (i = 0; i < DATA_TX_SLOTS; i++)
++		if (wifi->data_tx_busy[i])
++			return true;
++	return false;
++}
++
++static void drain_tx_in_flight(struct centauri_t6050_wifi *wifi)
++{
++	unsigned long deadline = jiffies + msecs_to_jiffies(100);
++
++	lockdep_assert_held(&wifi->lock);
++	while (data_tx_in_flight(wifi) && time_before(jiffies, deadline)) {
++		drain(wifi);
++		if (!data_tx_in_flight(wifi) || wifi->command_failed ||
++		    READ_ONCE(wifi->stopping) || readl(wifi->a.bar + 8) != 2)
++			break;
++		usleep_range(500, 1000);
++	}
++	if (data_tx_in_flight(wifi))
++		drain(wifi);
++}
++
+ static int wifi_disconnect(struct wiphy *wiphy, struct net_device *netdev,
+ 			   u16 reason)
+ {
+@@ -2065,6 +2091,8 @@ static int wifi_disconnect(struct wiphy *wiphy, struct net_device *netdev,
+ 	wifi->connected = false;
+ 	netif_stop_queue(netdev);
+ 	skb_queue_purge(&wifi->data_tx_queue);
++	if (!READ_ONCE(wifi->stopping))
++		drain_tx_in_flight(wifi);
+ 	netif_carrier_off(netdev);
+ 	if (connected)
+ 		cfg80211_disconnected(netdev, reason, NULL, 0, true,
+@@ -2083,6 +2111,7 @@ void centauri_t6050_wifi_pm_prepare(struct centauri_t6050 *c)
+ 		return;
+ 	mutex_lock(&wifi->lock);
+ 	wifi->pm_disconnect = (struct centauri_wifi_disconnect_receipt) {};
++	wifi->pm_wowlan_armed = false;
+ 	wifi->pm_prepared = true;
+ 	mutex_unlock(&wifi->lock);
+ }
+@@ -2101,6 +2130,46 @@ int centauri_t6050_wifi_pm_error(struct centauri_t6050 *c)
+ 	return ret;
+ }
+ 
++bool centauri_t6050_wifi_pm_disconnected(struct centauri_t6050 *c)
++{
++	struct centauri_t6050_wifi *wifi = c->wifi;
++	bool disconnected = false;
++
++	if (!wifi)
++		return false;
++	mutex_lock(&wifi->lock);
++	if (wifi->pm_prepared)
++		disconnected = wifi->pm_disconnect.seen;
++	mutex_unlock(&wifi->lock);
++	return disconnected;
++}
++
++bool centauri_t6050_wifi_wowlan_armed(struct centauri_t6050 *c)
++{
++	struct centauri_t6050_wifi *wifi = c->wifi;
++	bool armed = false;
++
++	if (!wifi)
++		return false;
++	mutex_lock(&wifi->lock);
++	if (wifi->pm_prepared)
++		armed = wifi->pm_wowlan_armed;
++	mutex_unlock(&wifi->lock);
++	return armed;
++}
++
++void centauri_t6050_wifi_mark_failed(struct centauri_t6050 *c)
++{
++	struct centauri_t6050_wifi *wifi = c->wifi;
++
++	if (!wifi)
++		return;
++	mutex_lock(&wifi->lock);
++	WRITE_ONCE(wifi->stopping, true);
++	wifi->command_failed = true;
++	mutex_unlock(&wifi->lock);
++}
++
+ void centauri_t6050_wifi_pm_complete(struct centauri_t6050 *c)
+ {
+ 	struct centauri_t6050_wifi *wifi = c->wifi;
+@@ -2109,6 +2178,7 @@ void centauri_t6050_wifi_pm_complete(struct centauri_t6050 *c)
+ 		return;
+ 	mutex_lock(&wifi->lock);
+ 	/* Keep the receipt until the next prepare; it is not a sleep proof. */
++	wifi->pm_wowlan_armed = false;
+ 	wifi->pm_prepared = false;
+ 	mutex_unlock(&wifi->lock);
+ }
+@@ -2187,16 +2257,6 @@ static int alpha_host_power(struct centauri_t6050_wifi *wifi, bool asleep)
+ 	return ret;
+ }
+ 
+-static bool data_tx_in_flight(struct centauri_t6050_wifi *wifi)
+-{
+-	unsigned int i;
+-
+-	for (i = 0; i < DATA_TX_SLOTS; i++)
+-		if (wifi->data_tx_busy[i])
+-			return true;
+-	return false;
+-}
+-
+ static int alpha_resume_locked(struct centauri_t6050_wifi *wifi)
+ {
+ 	int ret;
+@@ -2229,7 +2289,6 @@ static int alpha_resume_locked(struct centauri_t6050_wifi *wifi)
+ int centauri_t6050_wifi_suspend(struct centauri_t6050 *c)
+ {
+ 	struct centauri_t6050_wifi *wifi = c->wifi;
+-	unsigned long deadline;
+ 	unsigned int i;
+ 	int ret;
+ 
+@@ -2255,16 +2314,7 @@ int centauri_t6050_wifi_suspend(struct centauri_t6050 *c)
+ 		mutex_unlock(&wifi->lock);
+ 		return -EIO;
+ 	}
+-	deadline = jiffies + msecs_to_jiffies(100);
+-	while (data_tx_in_flight(wifi) && time_before(jiffies, deadline)) {
+-		drain(wifi);
+-		if (!data_tx_in_flight(wifi) || wifi->command_failed ||
+-		    READ_ONCE(wifi->stopping) || readl(wifi->a.bar + 8) != 2)
+-			break;
+-		usleep_range(500, 1000);
+-	}
+-	if (data_tx_in_flight(wifi))
+-		drain(wifi);
++	drain_tx_in_flight(wifi);
+ 	if (data_tx_in_flight(wifi) || wifi->command_failed ||
+ 	    READ_ONCE(wifi->stopping) || readl(wifi->a.bar + 8) != 2) {
+ 		ret = data_tx_in_flight(wifi) ? -EBUSY : -EIO;
+@@ -2291,7 +2341,12 @@ int centauri_t6050_wifi_suspend(struct centauri_t6050 *c)
+ 		mutex_unlock(&wifi->lock);
+ 		return 0;
+ 	}
+-	alpha_resume_locked(wifi);
++	if (alpha_resume_locked(wifi)) {
++		dev_warn(&c->pdev->dev,
++			 "Alpha host wake failed during suspend unwind\n");
++		WRITE_ONCE(wifi->stopping, true);
++		wifi->command_failed = true;
++	}
+ 	mutex_unlock(&wifi->lock);
+ 	return ret;
+ 
+@@ -2329,9 +2384,11 @@ static int wifi_suspend(struct wiphy *wiphy, struct cfg80211_wowlan *wowlan)
+ 		ret = (wowlan->any && wifi->connected && !wifi->connecting &&
+ 		       !wifi->disconnect_pending && !wifi->command_failed &&
+ 		       !READ_ONCE(wifi->stopping)) ? 0 : 1;
++		wifi->pm_wowlan_armed = !ret;
+ 		mutex_unlock(&wifi->lock);
+ 		return ret;
+ 	}
++	wifi->pm_wowlan_armed = false;
+ 	/* cfg80211 already called normal leave; do not send another command. */
+ 	if (wifi->pm_prepared)
+ 		ret = wifi->pm_disconnect.error;
+diff --git a/tools/asahi/centauri-bt-arena-tests.py b/tools/asahi/centauri-bt-arena-tests.py
+index c8272d0a9d2..a8715ca8a80 100755
+--- a/tools/asahi/centauri-bt-arena-tests.py
++++ b/tools/asahi/centauri-bt-arena-tests.py
+@@ -49,7 +49,7 @@ typedef uint16_t u16;
+ #define READ_ONCE(x) (x)
+ #define WRITE_ONCE(x, v) ((x) = (v))
+ struct device { int dummy; };
+-struct pci_dev { struct device dev; void *data; };
++struct pci_dev { struct device dev; void *data; bool state_saved; };
+ struct hci_dev { int dummy; };
+ struct cen_bt {
+     struct pci_dev *pdev;
+@@ -67,7 +67,7 @@ static struct cen_bt *active;
+ static int config_error, pending, command, saves, save_error, requests, recovery_error;
+ static int unregisters, closes, hci_frees, arena_frees, irq_frees;
+ static int owner_unregisters, handoffs, fallbacks, transport_sleeps, transport_wakes;
+-static int transport_sleep_error;
++static int transport_sleep_error, transport_wake_error;
+ static unsigned int bar_exec, bar_ipc;
+ static void *handed_arena;
+ static uintptr_t handed_dma;
+@@ -93,7 +93,7 @@ static int cen_transport_state(struct cen_bt *bt, bool asleep) {
+         return transport_sleep_error;
+     }
+     transport_wakes++;
+-    return 0;
++    return transport_wake_error;
+ }
+ static void apple_centauri_sleep_mark_fallback(struct pci_dev *p) {
+     assert(p == active->pdev);
+@@ -102,6 +102,7 @@ static void apple_centauri_sleep_mark_fallback(struct pci_dev *p) {
+ static void *hci_get_drvdata(struct hci_dev *p) { assert(p); return active; }
+ static void hci_unregister_dev(struct hci_dev *p) {
+     assert(p && active->arena && active->quiescing);
++    assert(!active->transport_sleep_sent && !active->transport_paused);
+     /* The arena must remain available through HCI's close barrier. */
+     unregisters++;
+ }
+@@ -159,7 +160,7 @@ static void apple_centauri_sleep_unregister(struct pci_dev *p) {
+         handoffs++;
+     }
+ }
+-static int pci_save_state(struct pci_dev *p) { (void)p; saves++; return save_error; }
++static int pci_save_state(struct pci_dev *p) { saves++; if (!save_error) p->state_saved = true; return save_error; }
+ #define dev_warn(...) ((void)0)
+ '''
+ 
+@@ -169,6 +170,7 @@ static struct hci_dev hdev;
+ static struct cen_bt bt;
+ static void reset(void) {
+     memset(&bt, 0, sizeof(bt));
++    dev.state_saved = false;
+     active = &bt;
+     bt.pdev = &dev; dev.data = &bt;
+     bt.hdev = &hdev; bt.hci_registered = true;
+@@ -180,7 +182,7 @@ static void reset(void) {
+     config_error = saves = save_error = requests = recovery_error = 0;
+     unregisters = closes = hci_frees = arena_frees = irq_frees = 0;
+     owner_unregisters = handoffs = fallbacks = transport_sleeps = transport_wakes = 0;
+-    transport_sleep_error = 0;
++    transport_sleep_error = transport_wake_error = 0;
+     bar_exec = bar_ipc = 2;
+     handed_arena = NULL; handed_dma = 0;
+     sleep_reboot = true;
+@@ -258,7 +260,19 @@ int main(void) {
+     assert(cen_suspend(&dev.dev) == 0);
+     assert(bt.transport_sleep_sent && !bt.asleep && bt.hdev == &hdev);
+     assert(bt.arena && arena_frees == 0 && transport_sleeps == 1 && fallbacks == 0);
+-    assert(saves == 1 && requests == 0);
++    assert(saves == 1 && requests == 0 && dev.state_saved && (command & PCI_COMMAND_MASTER));
++    /* Control fallback quiesce after Beta keep-alive wakes Beta ACIPC first. */
++    assert(cen_quiesce(&bt) == 0);
++    assert(!bt.transport_sleep_sent && !bt.transport_paused && bt.asleep && !bt.hdev);
++    assert(transport_wakes == 1 && unregisters == 1 && hci_frees == 1);
++    /* Fallback quiesce with failed Beta ACIPC wake clears running before unregister. */
++    reset(); bt.bar = (void *)0x3000;
++    assert(cen_suspend(&dev.dev) == 0);
++    assert(bt.transport_sleep_sent && bt.transport_paused && bt.running);
++    transport_wake_error = -EIO;
++    assert(cen_quiesce(&bt) == 0);
++    assert(!bt.transport_sleep_sent && !bt.transport_paused && !bt.running && bt.asleep);
++    assert(transport_wakes == 1 && unregisters == 1 && hci_frees == 1);
+     /* Keep-alive save failure unwinds ACIPC sleep and falls back to teardown. */
+     reset(); bt.bar = (void *)0x3000; save_error = -ENOMEM;
+     assert(cen_suspend(&dev.dev) == -ENOMEM);
+@@ -270,7 +284,7 @@ int main(void) {
+     assert(cen_suspend(&dev.dev) == 0);
+     assert(!bt.transport_sleep_sent && bt.asleep && bt.arena && !bt.hdev);
+     assert(transport_sleeps == 1 && transport_wakes == 0 && fallbacks == 1);
+-    assert(saves == 1 && requests == 0);
++    assert(saves == 1 && requests == 0 && dev.state_saved && !(command & PCI_COMMAND_MASTER));
+     /* A published arena cannot be reclaimed by a local-only detach. */
+     reset();
+     assert(cen_stop(&bt) == -EBUSY && bt.arena && arena_frees == 0);
+@@ -400,9 +414,9 @@ int main(void) {
+ def probe_stubs():
+     stubs = STUBS.replace('struct device { int dummy; };',
+                          'struct device { struct device *parent; void *of_node; };')
+-    stubs = stubs.replace('struct pci_dev { struct device dev; void *data; };',
++    stubs = stubs.replace('struct pci_dev { struct device dev; void *data; bool state_saved; };',
+                          'struct pci_bus { int number; };\n'
+-                         'struct pci_dev { struct device dev; void *data; struct pci_bus *bus; int devfn; };')
++                         'struct pci_dev { struct device dev; void *data; bool state_saved; struct pci_bus *bus; int devfn; };')
+     stubs = stubs.replace('struct hci_dev { int dummy; };', 'struct sk_buff;\nstruct hci_dev {\n    int bus;\n    int (*open)(struct hci_dev *), (*close)(struct hci_dev *);\n    int (*flush)(struct hci_dev *), (*setup)(struct hci_dev *);\n    int (*post_init)(struct hci_dev *), (*reset_dup_filter)(struct hci_dev *);\n    int (*send)(struct hci_dev *, struct sk_buff *);\n};')
+     stubs = stubs.replace('static struct cen_bt *active;',
+                          'static struct cen_bt *active;\nstatic bool probe_hci_registered;')
+@@ -472,12 +486,16 @@ def main():
+                 "missing-final-work-drain": (
+                     "cancel_work_sync(&bt->io_work);\n\tskb_queue_purge(&bt->txq);",
+                     "if (false) cancel_work_sync(&bt->io_work);\n\tskb_queue_purge(&bt->txq);"),
++                "missing-quiesce-acipc-wake": (
++                    "if (bt->transport_sleep_sent) {",
++                    "if (false && bt->transport_sleep_sent) {"),
+             }
+             failures = {
+                 'lost-retained-tuple': 'bt.asleep && bt.arena && arena_frees == 0 && requests == 0',
+                 'missing-pending-fence': 'cen_release(&bt) == -EBUSY',
+                 'missing-save-recovery': 'bt.asleep && bt.arena && requests == 1 && recovery_error == -ENOMEM',
+                 'missing-final-work-drain': 'p && !active->running && !active->io_work && !active->irq_count',
++                'missing-quiesce-acipc-wake': '!active->transport_sleep_sent && !active->transport_paused',
+             }
+             for name, (old, new) in controls.items():
+                 assert helpers.count(old) == 1, name
+diff --git a/tools/asahi/centauri-physical-recovery-tests.c b/tools/asahi/centauri-physical-recovery-tests.c
+index 4c765125fe7..475edceb42c 100644
+--- a/tools/asahi/centauri-physical-recovery-tests.c
++++ b/tools/asahi/centauri-physical-recovery-tests.c
+@@ -35,7 +35,7 @@ struct pci_dev {
+  struct pci_bus *bus, *subordinate;
+  void *drvdata;
+  int devfn, refs, command, reads, writes;
+- bool visible, pending;
++	bool visible, pending, state_saved;
+ };
+ struct work_struct { int unused; };
+ struct kref { int count; };
+@@ -110,6 +110,8 @@ static void *pci_get_drvdata(struct pci_dev *p) { return p->drvdata; }
+ static bool can_config(struct pci_dev *p) { return link_active && p->visible; }
+ static void pci_clear_master(struct pci_dev *p)
+ { p->reads++; p->writes++; if (can_config(p)) p->command &= ~PCI_COMMAND_MASTER; }
++static int pci_save_state(struct pci_dev *p)
++{ p->reads++; if (!can_config(p)) return -EIO; p->state_saved = true; return 0; }
+ static int pci_read_config_word(struct pci_dev *p, int where, u16 *v)
+ { (void)where; p->reads++; *v = can_config(p) ? p->command : 0xffff; return 0; }
+ static int pcibios_err_to_errno(int x) { return x ? -EIO : 0; }
+diff --git a/tools/asahi/centauri-recovery-tests.py b/tools/asahi/centauri-recovery-tests.py
+index 0950b1edab6..e46538f6838 100644
+--- a/tools/asahi/centauri-recovery-tests.py
++++ b/tools/asahi/centauri-recovery-tests.py
+@@ -46,7 +46,7 @@ PRELUDE = r'''
+ #define list_for_each_entry(v,h,n) for ((v)=owner; (v); (v)=NULL)
+ struct device { int lock; void *data; };
+ struct pci_bus;
+-struct pci_dev { struct device dev; struct pci_bus *bus, *subordinate; unsigned devfn; };
++struct pci_dev { struct device dev; struct pci_bus *bus, *subordinate; unsigned devfn; bool state_saved; };
+ struct pci_bus { struct pci_dev *self; struct pci_bus *subordinate; };
+ struct kref { int refs; };
+ struct work_struct { int queued; };
+@@ -72,9 +72,9 @@ static int cen_recovery_lock, cen_recovery_owners, cen_rewake_wq;
+ static bool cen_exiting, supported_sleep=true;
+ static struct centauri_t6050_rewake *owner;
+ static struct pci_dev *slots[3];
+-static int events[100], nevents, stop_error, beta_error, release_error;
+-static int wifi_error, requested_error, requests, queues;
+-enum { STOP_BOOT=1, QUIESCE, WIFI_STOP, IRQ_STOP, CLEAR, FENCE, RELEASE, FREE,
++static int events[100], nevents, stop_error, beta_error, release_error, save_error;
++static int wifi_error, requested_error, requests, queues, saved_fns[3];
++enum { STOP_BOOT=1, QUIESCE, WIFI_STOP, IRQ_STOP, CLEAR, FENCE, SAVE, RELEASE, FREE,
+        PM_ERROR, PM_COMPLETE, REQUEST };
+ static void event(int n) { assert(nevents < 100); events[nevents++]=n; }
+ static void mutex_lock(int *p) { assert(!*p); *p=1; }
+@@ -90,6 +90,16 @@ static void pci_clear_master(struct pci_dev *p)
+ { assert(p); event(CLEAR); }
+ static bool centauri_t6050_stop_dma(struct pci_dev *p)
+ { assert(p); event(FENCE); return !stop_error; }
++static int pci_save_state(struct pci_dev *p)
++{
++    assert(p && (p->devfn & 7) < 3);
++    event(SAVE);
++    if (save_error)
++        return save_error;
++    p->state_saved = true;
++    saved_fns[p->devfn & 7]++;
++    return 0;
++}
+ static bool centauri_t6050_ipc_fenced(struct centauri_t6050_ipc *p)
+ { return !p || p->fenced; }
+ static void cancel_delayed_work_sync(int *p) { (void)p; event(STOP_BOOT); }
+@@ -130,7 +140,8 @@ static void reset(struct centauri_t6050 *c, struct centauri_t6050_rewake *rw,
+     rw->ref.refs=1; rw->generation=1;
+     c->pdev=&fn[0]; c->recovery=rw; c->ready=true;
+     fn[0].dev.data=c;
+-    nevents=stop_error=beta_error=release_error=wifi_error=requests=queues=0;
++    nevents=stop_error=beta_error=release_error=save_error=wifi_error=requests=queues=0;
++    memset(saved_fns,0,sizeof(saved_fns));
+     cen_exiting=false;
+ }
+ static int count(int value)
+@@ -175,6 +186,34 @@ int main(void)
+     reset(&c,&rw,fn,&bridge,&bus); slots[2]=NULL;
+     assert(!centauri_t6050_domain_fence(&rw)); /* old-owner identity cannot vanish */
+ 
++    /* Keep-alive saved PCI state on fn1/fn2 must be refreshed after fence, before release. */
++    reset(&c,&rw,fn,&bridge,&bus);
++    ipc.fenced=true;
++    c.ipc=&ipc; c.firmware=&c; c.descriptor=&rw;
++    fn[0].state_saved=fn[1].state_saved=fn[2].state_saved=true;
++    assert(!centauri_t6050_quiesce(&c));
++    assert(!saved_fns[0] && saved_fns[1]==1 && saved_fns[2]==1);
++    assert(fn[1].state_saved && fn[2].state_saved);
++    assert(first(SAVE)>first(FENCE) && first(RELEASE)>first(SAVE));
++
++    /* If re-save fails, clear stale state_saved so aborted resume cannot restore it. */
++    reset(&c,&rw,fn,&bridge,&bus);
++    c.ipc=&ipc; c.firmware=&c; c.descriptor=&rw;
++    fn[1].state_saved=fn[2].state_saved=true;
++    save_error=-ENOMEM;
++    assert(!centauri_t6050_quiesce(&c));
++    assert(!saved_fns[1] && !saved_fns[2]);
++    assert(!fn[1].state_saved && !fn[2].state_saved);
++
++    /* Unreadable/gone function (stop_dma fails) must clear state_saved without saving 0xffff. */
++    reset(&c,&rw,fn,&bridge,&bus);
++    c.ipc=&ipc; c.firmware=&c; c.descriptor=&rw;
++    fn[1].state_saved=fn[2].state_saved=true;
++    stop_error=1;
++    assert(centauri_t6050_quiesce(&c)==-EBUSY);
++    assert(!saved_fns[1] && !saved_fns[2]);
++    assert(!fn[1].state_saved && !fn[2].state_saved);
++
+     reset(&c,&rw,fn,&bridge,&bus);
+     rw.beta_fallback=true;
+     assert(!centauri_t6050_prepare(&fn[0].dev) && c.pm_prepared && !rw.beta_fallback);
+@@ -226,7 +265,7 @@ typedef uint64_t dma_addr_t;
+ struct module { int refs; };
+ struct device { int lock, leases, refs; };
+ struct pci_bus;
+-struct pci_dev { struct device dev; struct pci_bus *bus, *subordinate; unsigned devfn; };
++struct pci_dev { struct device dev; struct pci_bus *bus, *subordinate; unsigned devfn; bool state_saved; };
+ struct pci_bus { struct pci_dev *self; };
+ struct kref { int refs; };
+ struct apple_centauri_sleep_ops {
+@@ -484,6 +523,8 @@ def run():
+     variants = [('baseline', bodies),
+                 ('negative-skip-fence', bodies.replace('!centauri_t6050_domain_fence(c->recovery)', 'false')),
+                 ('negative-skip-release', bodies.replace('ret = centauri_t6050_beta_call(c->recovery, true);', 'ret = 0;')),
++                ('negative-stale-state-saved', bodies.replace('fn[i]->state_saved &&', 'false && fn[i]->state_saved &&')),
++                ('negative-save-unreadable-fn', bodies.replace('(!fn_stopped || pci_save_state(fn[i]))', 'pci_save_state(fn[i])')),
+                 ('negative-lost-pm-error', bodies.replace('error = centauri_t6050_wifi_pm_error(c);', 'error = 0;')),
+                 ('negative-drop-new-generation', bodies.replace('rw->rerun = true;', 'rw->rerun = false;'))]
+     ownership = '\n'.join(block(name) for name in [
+@@ -502,6 +543,8 @@ def run():
+         'negative-unlock-before-tuples': '!remove_done && original->dev.locked && rw->control==original',
+         'negative-skip-fence': 'first(WIFI_STOP)<first(CLEAR)',
+         'negative-skip-release': 'first(RELEASE)>first(FENCE) && first(FREE)>first(RELEASE)',
++        'negative-stale-state-saved': '!saved_fns[0] && saved_fns[1]==1 && saved_fns[2]==1',
++        'negative-save-unreadable-fn': '!saved_fns[1] && !saved_fns[2]',
+         'negative-lost-pm-error': '!c.pm_prepared && rw.active && rw.error==-ETIMEDOUT && queues==1',
+         'negative-drop-new-generation': 'rw.rerun && queues==1 && rw.ref.refs==2',
+         'negative-lost-orphan': '!rw.ops && !rw.data && rw.arena==arena && rw.beta==&fn',
+diff --git a/tools/asahi/centauri-wifi-pm-tests.py b/tools/asahi/centauri-wifi-pm-tests.py
+index 56a259fd9c1..78c3e98ebc1 100644
+--- a/tools/asahi/centauri-wifi-pm-tests.py
++++ b/tools/asahi/centauri-wifi-pm-tests.py
+@@ -17,7 +17,7 @@ import tempfile
+ 
+ 
+ def block(source, name):
+-    match = re.search(r"^(?:static )?(?:int|void) " + re.escape(name) + r"\(", source, re.M)
++    match = re.search(r"^(?:static )?(?:int|void|bool) " + re.escape(name) + r"\(", source, re.M)
+     if not match:
+         raise RuntimeError(f"Production function {name} missing")
+     brace = source.index("{", match.start())
+@@ -39,22 +39,26 @@ typedef uint8_t u8;
+ typedef uint16_t u16;
+ typedef uint32_t u32;
+ #define BIT(n) (1U << (n))
++#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+ #define READ_ONCE(x) (x)
+ #define WRITE_ONCE(x, v) ((x) = (v))
+ #define GFP_KERNEL 0
+-#define BUFFER_SIZE 128
++#define BUFFER_SIZE 256
++#define DATA_TX_SLOTS 8
+ #define TX_BUFFER 2048
+ #define TR_BASE 0
+ #define dma_rmb() ((void)0)
+ #define dma_wmb() ((void)0)
+ #define dev_err(...) ((void)0)
+ #define dev_dbg(...) ((void)0)
++#define lockdep_assert_held(l) assert(*(l))
+ #define msecs_to_jiffies(x) (x)
+ #define time_before(a, b) ((long)((a) - (b)) < 0)
+ #define time_after_eq(a, b) (!time_before(a, b))
+ static unsigned long jiffies;
+ struct centauri_t6050_wifi;
+-struct centauri_t6050 { struct centauri_t6050_wifi *wifi; bool removing; };
++struct pci_dev { int dev; };
++struct centauri_t6050 { struct pci_dev *pdev; struct centauri_t6050_wifi *wifi; bool removing; };
+ struct wiphy { struct centauri_t6050_wifi *wifi; };
+ struct net_device { int unused; };
+ struct cfg80211_wowlan { bool any; };
+@@ -66,7 +70,8 @@ struct centauri_t6050_wifi {
+     struct { u8 *window, *bar; uint64_t window_dma; } a;
+     int lock, connect_work, link_work, data_tx_queue;
+     bool command_failed, stopping, connect_abort, disconnect_pending, connecting, connected;
+-    bool reply_valid, pm_prepared;
++    bool reply_valid, pm_prepared, pm_wowlan_armed;
++    bool data_tx_busy[DATA_TX_SLOTS];
+     u16 command_head, sequence, reply_capture, reply_sequence, reply_status;
+     u32 reply_command;
+     u8 *reply_buffer;
+@@ -74,7 +79,7 @@ struct centauri_t6050_wifi {
+     struct centauri_wifi_disconnect_receipt pm_disconnect;
+ };
+ static const u16 ring_size[5] = {0, 64};
+-static unsigned int doorbells, drains, notifications, consumer;
++static unsigned int doorbells, drains, notifications, consumer, tx_drain_rounds;
+ static u16 firmware_status;
+ static bool async_reply, async_event, wrong_reply;
+ static bool *submission_probe;
+@@ -101,6 +106,11 @@ static void drain(struct centauri_t6050_wifi *wifi)
+ {
+     assert(wifi->lock);
+     drains++;
++    if (tx_drain_rounds) {
++        tx_drain_rounds--;
++        if (!tx_drain_rounds)
++            memset(wifi->data_tx_busy, 0, sizeof(wifi->data_tx_busy));
++    }
+     if (transport_mode != REPLY)
+         return;
+     if (!wifi->reply_valid) {
+@@ -124,22 +134,23 @@ static void cfg80211_disconnected(struct net_device *netdev, u16 reason, void *i
+ '''
+ 
+ TESTS = r'''
++static struct pci_dev pdev;
+ static struct centauri_t6050 control;
+ static struct centauri_t6050_wifi wifi;
+ static struct wiphy wiphy;
+ static struct net_device netdev;
+-static u8 window[16384], bar[8192];
++static u8 window[32768], bar[8192];
+ static void reset(void)
+ {
+     memset(&wifi, 0, sizeof(wifi));
+     memset(window, 0, sizeof(window));
+-    control = (struct centauri_t6050) { .wifi = &wifi };
++    control = (struct centauri_t6050) { .pdev = &pdev, .wifi = &wifi };
+     wifi.control = &control;
+     wifi.a.window = window;
+     wifi.a.bar = bar;
+     wifi.connected = true;
+     wiphy.wifi = &wifi;
+-    doorbells = drains = notifications = consumer = 0;
++    doorbells = drains = notifications = consumer = tx_drain_rounds = 0;
+     firmware_status = 0;
+     async_reply = async_event = wrong_reply = false;
+     transport_mode = REPLY;
+@@ -188,12 +199,16 @@ int main(void)
+     assert(!wifi.pm_disconnect.seen);
+     expect_error(0); /* Missing transaction remains missing. */
+     struct cfg80211_wowlan wowlan = {};
++    assert(!centauri_t6050_wifi_wowlan_armed(&control));
+     assert(call_registered_suspend(&wiphy, &wowlan) == 1);
++    assert(!centauri_t6050_wifi_wowlan_armed(&control));
+     wowlan.any = true;
+     assert(call_registered_suspend(&wiphy, &wowlan) == 0);
+-    assert(!doorbells && !wifi.pm_disconnect.seen);
++    assert(centauri_t6050_wifi_wowlan_armed(&control));
++    assert(!doorbells && !wifi.pm_disconnect.seen && !centauri_t6050_wifi_pm_disconnected(&control));
+     wifi.connected = false;
+     assert(call_registered_suspend(&wiphy, &wowlan) == 1);
++    assert(!centauri_t6050_wifi_wowlan_armed(&control));
+     wifi.connected = true;
+     wifi.connecting = true;
+     assert(call_registered_suspend(&wiphy, &wowlan) == 1);
+@@ -204,8 +219,12 @@ int main(void)
+     assert(!doorbells && !wifi.pm_disconnect.seen);
+ 
+     firmware_status = 326;
++    wifi.data_tx_busy[0] = true;
++    tx_drain_rounds = 2;
+     assert(disconnect() == 0);
++    assert(!data_tx_in_flight(&wifi));
+     assert(wifi.pm_disconnect.seen && wifi.pm_disconnect.submitted);
++    assert(centauri_t6050_wifi_pm_disconnected(&control));
+     assert(wifi.pm_disconnect.replied && wifi.pm_disconnect.status == 326);
+     assert(wifi.pm_disconnect.command_error == -EREMOTEIO);
+     expect_error(0); /* Keep the existing helper normalization. */
+@@ -303,6 +322,15 @@ int main(void)
+     mutex_unlock(&wifi.lock);
+     assert(published);
+     submission_probe = NULL;
++
++    /* Failed keep-alive unwind marks Wi-Fi failed so teardown skips ACIPC. */
++    prepare();
++    wifi.data_tx_busy[0] = true;
++    centauri_t6050_wifi_mark_failed(&control);
++    assert(wifi.stopping && wifi.command_failed);
++    assert(disconnect() == 0);
++    assert(wifi.pm_disconnect.stopping_skip && !doorbells && !drains);
++
+     puts("PASS: production disconnect/transport/PM callbacks and first-error retention");
+     return 0;
+ }
+@@ -322,9 +350,12 @@ def main():
+     receipt = re.search(r"struct centauri_wifi_disconnect_receipt \{.*?\n\};", source, re.S)
+     if not receipt:
+         raise RuntimeError("Production receipt structure missing")
+-    names = ["command_reply", "wait_disconnect", "wifi_disconnect",
++    names = ["command_reply", "wait_disconnect", "data_tx_in_flight",
++             "drain_tx_in_flight", "wifi_disconnect",
+              "centauri_t6050_wifi_pm_prepare", "centauri_t6050_wifi_pm_error",
+-             "centauri_t6050_wifi_pm_complete", "wifi_suspend"]
++             "centauri_t6050_wifi_pm_disconnected", "centauri_t6050_wifi_wowlan_armed",
++             "centauri_t6050_wifi_mark_failed", "centauri_t6050_wifi_pm_complete",
++             "wifi_suspend"]
+     has_resume = bool(re.search(r"^static int wifi_resume\(", source, re.M))
+     if has_resume:
+         names.append("wifi_resume")

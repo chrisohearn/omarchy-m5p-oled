@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 19 Nov 2026 05:28:30 -0700
+Subject: [PATCH 68/93] iommu/apple-dart: the T6050 sleep rules where the sleep
+ is described
+
+The display DARTs' V27 provider was admitted on two boards by name and
+the ISP DART's sleep on one. Take both wherever the device tree
+describes T6050's deep sleep: the sleep takes the ISP DART's stream
+registers on any of them.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ drivers/iommu/apple-dart-v27-admission.inc | 4 +---
+ drivers/iommu/apple-dart.c                 | 2 +-
+ 2 files changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/iommu/apple-dart-v27-admission.inc b/drivers/iommu/apple-dart-v27-admission.inc
+index 906be5ef222..7b6c2be51b9 100644
+--- a/drivers/iommu/apple-dart-v27-admission.inc
++++ b/drivers/iommu/apple-dart-v27-admission.inc
+@@ -10,9 +10,7 @@ static bool apple_dart_v27_provider(struct device *dev, resource_size_t base)
+ 	unsigned int i;
+ 
+ 	if (!IS_ENABLED(CONFIG_APPLE_SOC_SLEEP) ||
+-	    !(of_machine_is_compatible("apple,j714s") ||
+-	      (of_machine_is_compatible("apple,j716c") &&
+-	       of_machine_is_compatible("apple,t6050"))) ||
++	    !apple_t6050_sleep_described() ||
+ 	    !of_device_is_compatible(dev->of_node, "apple,t6050-dart"))
+ 		return false;
+ 	for (i = 0; i < ARRAY_SIZE(ids); i++)
+diff --git a/drivers/iommu/apple-dart.c b/drivers/iommu/apple-dart.c
+index bf7a4fc0807..75514098cd1 100644
+--- a/drivers/iommu/apple-dart.c
++++ b/drivers/iommu/apple-dart.c
+@@ -5735,7 +5735,7 @@ static int apple_dart_probe(struct platform_device *pdev)
+ 	if (dart->cold_ane && !IS_BUILTIN(CONFIG_APPLE_DART))
+ 		return -EOPNOTSUPP;
+ 	dart->isp_host = of_device_is_compatible(dev->of_node, "apple,t6050-isp-dart");
+-	dart->isp_sleep = dart->isp_host && of_machine_is_compatible("apple,j714s");
++	dart->isp_sleep = dart->isp_host && apple_t6050_sleep_described();
+ 	dart->power_retained = dart->isp_host;
+ 	dart->per_stream = dart->isp_host ||
+ 			   of_device_is_compatible(dev->of_node, "apple,t8140-dart") ||
