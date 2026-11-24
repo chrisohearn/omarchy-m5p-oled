@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Fri, 20 Nov 2026 05:42:26 -0700
+Subject: mfd: macsmc: count a port's dark wake on every board with a sleep
+ policy
+
+apple_smc_prepare_guard() waits for a command in flight only when
+dark_wakes is set, and apple_smc_dark_wake() returns for every board but
+the J714s before it counts a wake that apple_sleep_port_wake() already
+made dark. On the other boards with a sleep policy (the J716c) the guard
+at .suspend after a port's wake with the lid closed is then a single
+trylock: if a command of the wake is still running, .suspend returns
+-EBUSY and the dark wake ends in a full one.
+
+Count the wake first, then keep the J714s's own rule to the J714s. The
+comment on the wait no longer names the J714s.
+
+A board without a sleep policy (the J813) does not get here and is not
+changed.
+
+Fixes: 18b493373c7c ("mfd: macsmc: J714s: keep the port and radio dark wakes to the J714s")
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ drivers/mfd/macsmc.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mfd/macsmc.c b/drivers/mfd/macsmc.c
+index 9fee7a0c5d0..dad38e98e24 100644
+--- a/drivers/mfd/macsmc.c
++++ b/drivers/mfd/macsmc.c
+@@ -1070,14 +1070,14 @@ static void apple_smc_dark_wake(struct apple_smc *smc)
+ 	const char *why = is_radio ? "wifibt" : "USB-C_plug";
+ 	s64 asleep_ms;
+ 
+-	/* The J714s's rule alone: other boards with a sleep policy keep these wakes full. */
+-	if (smc->wake_reasons != apple_smc_j714s_wake_reasons)
+-		return;
+ 	/* Already dark (a port's wake with the lid closed): counted, so the re-entry waits as after ours. */
+ 	if (pm_dark_wake()) {
+ 		smc->dark_wakes++;
+ 		return;
+ 	}
++	/* The J714s's rule alone: other boards with a sleep policy keep these wakes full. */
++	if (smc->wake_reasons != apple_smc_j714s_wake_reasons)
++		return;
+ 	if (!is_radio && (port < 0 || smc->wake_record != BIT_ULL(port)))
+ 		return;
+ 	asleep_ms = ktime_ms_delta(ktime_get_boottime(), smc->sleep_entry_boot) -
+@@ -1618,7 +1618,7 @@ static int apple_smc_prepare_policy(struct apple_smc *smc)
+ 
+ /*
+  * The saved-context guard, under the command mutex, without waiting for it: a sleep a user asks
+- * for doesn't wait on a stuck command. The re-entry right after a J714s dark wake does, for at
++ * for doesn't wait on a stuck command. The re-entry right after a counted dark wake does, for at
+  * most SMC_DARK_REENTRY_MS: the notification of the event that woke it is still being handled
+  * then, its ordinary command in flight, and refusing ended every dark wake in a full one.
+  */

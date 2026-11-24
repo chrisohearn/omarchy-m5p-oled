@@ -1,0 +1,99 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <address-in-upstream-commit@localhost>
+Date: Thu, 19 Nov 2026 22:42:10 +1100
+Subject: arm64: dts: apple: t6050: describe the GPU on J714c, J873s, K114s,
+ K116c
+
+These four boards inherit the inventory GPU node from t6050-peripherals.dtsi,
+compatible "apple,agx-t6050". Neither drm/asahi (which matches "gpu,t6050"
+and "apple,agx-g17s") nor the loader's GPU handoff (which looks for
+"apple,agx-g17s", or "apple,agx-g17c" under /soc@2300000000) accepts it, so
+the GPU never binds on them.
+
+Describe the GPU as on the booted boards of the same part:
+ - J714c and K116c (M5 Max): t6050-gpu-g17c.dtsi, as J716c, on its own
+   /soc@2300000000 bus (T6050_GPU_BUS). J714c already runs its PMP, so its
+   GPU stays on the PMP's GFX report entry as before.
+ - J873s and K114s (M5 Pro): t6050-gpu-g17s.dtsi, as K116s and J714s.
+
+Nothing here is per board: the driver picks its configuration from the GPU's
+ID registers, the loader fills the reservations and operating points from
+the ADT the Mac boots with and checks the firmware build before it enables
+anything. Everything stays disabled until it does, so a loader that refuses
+leaves these boards as they are now.
+
+No other board's DTB changes. Not yet booted on any of the four.
+
+Signed-off-by: Ryan Murray <address-in-upstream-commit@localhost>
+---
+ arch/arm64/boot/dts/apple/t6050-j714c.dts | 5 ++++-
+ arch/arm64/boot/dts/apple/t6050-j873s.dts | 3 +++
+ arch/arm64/boot/dts/apple/t6050-k114s.dts | 3 +++
+ arch/arm64/boot/dts/apple/t6050-k116c.dts | 4 ++++
+ 4 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714c.dts b/arch/arm64/boot/dts/apple/t6050-j714c.dts
+index 7d8399529d6..789779e56ae 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j714c.dts
+@@ -15,6 +15,8 @@
+ /dts-v1/;
+ 
+ #define T6050_J714C
++/* The GPU in the M5 Max layout (t6050-gpu-g17c.dtsi), under its own bus */
++#define T6050_GPU_BUS
+ #include "t6050-max.dtsi"
+ 
+ / {
+@@ -272,6 +274,7 @@ stm {
+ };
+ 
+ #include "t6050-peripherals.dtsi"
++#include "t6050-gpu-g17c.dtsi"
+ 
+ /*
+  * The PMP (ADT pmp0, /chosen, /arm-io/pmgr), as on the J714s. iBoot loads its firmware and the
+@@ -320,7 +323,7 @@ &pmc {
+ 	apple,pmp = <&pmp0>;
+ };
+ 
+-&sgx {
++&gpu {
+ 	power-domains = <&pmp0_gfx>;
+ };
+ 
+diff --git a/arch/arm64/boot/dts/apple/t6050-j873s.dts b/arch/arm64/boot/dts/apple/t6050-j873s.dts
+index 0a7976e5023..6ef82f23638 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j873s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j873s.dts
+@@ -34,3 +34,6 @@ &pcie0 {
+ 
+ #define T6050_J873S
+ #include "t6050-peripherals.dtsi"
++
++/* The GPU in the M5 Pro layout */
++#include "t6050-gpu-g17s.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114s.dts b/arch/arm64/boot/dts/apple/t6050-k114s.dts
+index caa609babef..79fa200d3a9 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k114s.dts
+@@ -22,3 +22,6 @@ &mtp_multitouch {
+ 
+ #define T6050_K114S
+ #include "t6050-peripherals.dtsi"
++
++/* The GPU in the M5 Pro layout */
++#include "t6050-gpu-g17s.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-k116c.dts b/arch/arm64/boot/dts/apple/t6050-k116c.dts
+index ff9e875fb19..b1c00982840 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k116c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k116c.dts
+@@ -21,4 +21,8 @@ &mtp_multitouch {
+ };
+ 
+ #define T6050_K116C
++/* The GPU in the M5 Max layout (t6050-gpu-g17c.dtsi), under its own bus */
++#define T6050_GPU_BUS
+ #include "t6050-peripherals.dtsi"
++
++#include "t6050-gpu-g17c.dtsi"

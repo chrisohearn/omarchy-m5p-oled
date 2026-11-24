@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Wed, 18 Nov 2026 06:40:15 -0700
+Subject: arm64: dts: apple: t6050-j714s-sleep-soc: make the CIO sleep part
+ optional
+
+The SoC values file ends with the J714s's USB4 router sleep (acio2, its
+DART, the clock protection syscon), which needs nodes only
+t6050-max.dtsi has. A board that includes the SoC values without that
+router defines T6050_SLEEP_SOC_NO_CIO first. No change for the J714s.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ arch/arm64/boot/dts/apple/t6050-j714s-sleep-soc.dtsi | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714s-sleep-soc.dtsi b/arch/arm64/boot/dts/apple/t6050-j714s-sleep-soc.dtsi
+index 9b0f2f0c337..5ef086dee57 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714s-sleep-soc.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-j714s-sleep-soc.dtsi
+@@ -4576,7 +4576,11 @@ &sgx {
+  * taking that DART down and back to the live value before using it again. The router's host
+  * also needs the port's PHY, which it stops after the router and starts before it. The left
+  * port's router was never up in a trace: it has none of this and is powered off for a sleep.
++ *
++ * A board that includes these SoC values without that router (no acio2) defines
++ * T6050_SLEEP_SOC_NO_CIO first.
+  */
++#ifndef T6050_SLEEP_SOC_NO_CIO
+ &die0 {
+ 	ps_prot: syscon@2803f0000 {
+ 		compatible = "apple,t6050-ps-prot", "syscon";
+@@ -4595,3 +4599,4 @@ &acio2_dart {
+ &apciec2_dart {
+ 	apple,clock-protection = <&ps_prot 31>;
+ };
++#endif /* T6050_SLEEP_SOC_NO_CIO */

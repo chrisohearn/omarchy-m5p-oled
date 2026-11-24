@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Wed, 18 Nov 2026 07:33:57 -0700
+Subject: dt-bindings: soc: apple,t6050-sleep: allow an empty
+ apple,pinctrl-skip-pins
+
+Without the property no pin is saved. A board whose ADT names no pin to
+leave alone, the K116s, has every pin saved: the property is there and
+empty.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ .../devicetree/bindings/soc/apple/apple,t6050-sleep.yaml    | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/soc/apple/apple,t6050-sleep.yaml b/Documentation/devicetree/bindings/soc/apple/apple,t6050-sleep.yaml
+index 7d26c0049f8..a8908c524d1 100644
+--- a/Documentation/devicetree/bindings/soc/apple/apple,t6050-sleep.yaml
++++ b/Documentation/devicetree/bindings/soc/apple/apple,t6050-sleep.yaml
+@@ -117,10 +117,12 @@ properties:
+     description: The AP pin controller, whose pins a deep sleep resets.
+ 
+   apple,pinctrl-skip-pins:
+-    $ref: /schemas/types.yaml#/definitions/uint32-array
++    oneOf:
++      - $ref: /schemas/types.yaml#/definitions/uint32-array
++      - type: boolean
+     description: |
+       Pins neither saved nor restored. From the ADT, set by the bootloader;
+-      without it no pin is saved.
++      without it no pin is saved. Empty where every pin is saved.
+ 
+   apple,sleep-low-pins:
+     $ref: /schemas/types.yaml#/definitions/uint32-array

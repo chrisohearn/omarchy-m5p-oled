@@ -1,0 +1,139 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 19 Nov 2026 05:28:30 -0700
+Subject: mfd: macsmc: the T6050 saved-context path where the sleep is
+ described
+
+The saved-context lane is for T6050's deep sleep and was enabled on the
+boards named here. Enable it wherever the device tree describes that
+sleep.
+
+The J714s's numbering of the wake record was a table picked by the
+board's name. It is the ADT's smc-pmu numbering: read it from the SMC's
+node (apple,wake-reasons, apple,wake-reason-names). Without them the
+SoC's table is used as before, and the J714s's built-in one on a J714s.
+
+The J714s's port and radio dark wake rule was keyed on that table's
+address. Give it a flag of its own, so the rule holds with either table.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto aurora-silicon/linux main c3369f4855e for the K114s]
+---
+ drivers/mfd/macsmc-test.c  |  7 +++++--
+ drivers/mfd/macsmc.c       | 42 +++++++++++++++++++++++++++++++-------
+ include/linux/mfd/macsmc.h |  1 +
+ 3 files changed, 41 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/mfd/macsmc-test.c b/drivers/mfd/macsmc-test.c
+index fedc84197d8..3fbdccd5c0f 100644
+--- a/drivers/mfd/macsmc-test.c
++++ b/drivers/mfd/macsmc-test.c
+@@ -361,6 +361,9 @@ static void macsmc_lid_wake_test(struct kunit *test)
+ 
+ static void macsmc_wake_reason_test(struct kunit *test)
+ {
++	static const struct apple_smc_wake_reason j714s[] = {
++		{ 8, "lid" }, { 9, "sdconn" }, { 13, "wifibt" }, { }
++	};
+ 	struct macsmc_test_context *ctx = test->priv;
+ 	char names[128];
+ 
+@@ -380,8 +383,8 @@ static void macsmc_wake_reason_test(struct kunit *test)
+ 	KUNIT_EXPECT_EQ(test, apple_smc_wake_reason_bit(&ctx->smc, "lid"), 8);
+ 	KUNIT_EXPECT_EQ(test, apple_smc_wake_reason_bit(&ctx->smc, "ipd_touch"), -1);
+ 
+-	/* The J714s's: T8132's lid and radio bits, its SD reader at bit 9. */
+-	ctx->smc.wake_reasons = apple_smc_j714s_wake_reasons;
++	/* A device tree's own, here the J714s's: its SD reader at bit 9. */
++	ctx->smc.wake_reasons = j714s;
+ 	apple_smc_wake_reason_names(&ctx->smc, BIT_ULL(8) | BIT_ULL(9) | BIT_ULL(10) | BIT_ULL(13),
+ 				    names, sizeof(names));
+ 	KUNIT_EXPECT_STREQ(test, names, "lid sdconn wifibt");
+diff --git a/drivers/mfd/macsmc.c b/drivers/mfd/macsmc.c
+index dad38e98e24..3ae7d442a84 100644
+--- a/drivers/mfd/macsmc.c
++++ b/drivers/mfd/macsmc.c
+@@ -662,9 +662,34 @@ static void apple_smc_probe_wktp(struct apple_smc *smc)
+ 	apple_smc_write_full_wake(smc);
+ }
+ 
++/* A board's own numbering, from its device tree (apple,wake-reasons and their names) */
++static const struct apple_smc_wake_reason *apple_smc_dt_wake_reasons(struct device *dev)
++{
++	struct device_node *np = dev->of_node;
++	struct apple_smc_wake_reason *r;
++	int i, n;
++
++	n = of_property_count_u32_elems(np, "apple,wake-reasons");
++	if (n <= 0 || n != of_property_count_strings(np, "apple,wake-reason-names"))
++		return NULL;
++	r = devm_kcalloc(dev, n + 1, sizeof(*r), GFP_KERNEL);
++	if (!r)
++		return NULL;
++	for (i = 0; i < n; i++) {
++		u32 bit;
++
++		if (of_property_read_u32_index(np, "apple,wake-reasons", i, &bit) || bit > 63 ||
++		    of_property_read_string_index(np, "apple,wake-reason-names", i, &r[i].name))
++			return NULL;
++		r[i].bit = bit;
++	}
++	return r;
++}
++
+ static int apple_smc_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
++	const struct apple_smc_wake_reason *dt_reasons;
+ 	struct apple_smc *smc;
+ 	__be32 count = 0;
+ 	bool t6050;
+@@ -673,17 +698,20 @@ static int apple_smc_probe(struct platform_device *pdev)
+ 	smc = devm_kzalloc(dev, sizeof(*smc), GFP_KERNEL);
+ 	if (!smc)
+ 		return -ENOMEM;
+-	smc->wake_reasons = of_device_is_compatible(dev->of_node, "apple,t8132-smc") ?
+-			    apple_smc_t8132_wake_reasons : apple_smc_t8140_wake_reasons;
++	dt_reasons = apple_smc_dt_wake_reasons(dev);
++	smc->wake_reasons = dt_reasons;
++	if (!smc->wake_reasons)
++		smc->wake_reasons = of_device_is_compatible(dev->of_node, "apple,t8132-smc") ?
++				    apple_smc_t8132_wake_reasons : apple_smc_t8140_wake_reasons;
+ 
+ 	mutex_init(&smc->mutex);
+ 	spin_lock_init(&smc->lock);
+ 	smc->dev = &pdev->dev;
+-	smc->saved_enabled = of_machine_is_compatible("apple,t6050") &&
+-		(of_machine_is_compatible("apple,j714s") ||
+-		 of_machine_is_compatible("apple,j716c")) &&
++	smc->saved_enabled = apple_t6050_sleep_described() &&
+ 		of_device_is_compatible(dev->of_node, "apple,t6050-smc");
+-	if (smc->saved_enabled && of_machine_is_compatible("apple,j714s"))
++	smc->port_dark_wake = smc->saved_enabled && of_machine_is_compatible("apple,j714s");
++	/* A J714s device tree from before apple,wake-reasons */
++	if (smc->port_dark_wake && !dt_reasons)
+ 		smc->wake_reasons = apple_smc_j714s_wake_reasons;
+ 	/* J813's late notice needs the bounded, IRQ-independent transport too. */
+ 	if (of_machine_is_compatible("apple,j813"))
+@@ -1076,7 +1104,7 @@ static void apple_smc_dark_wake(struct apple_smc *smc)
+ 		return;
+ 	}
+ 	/* The J714s's rule alone: other boards with a sleep policy keep these wakes full. */
+-	if (smc->wake_reasons != apple_smc_j714s_wake_reasons)
++	if (!smc->port_dark_wake)
+ 		return;
+ 	if (!is_radio && (port < 0 || smc->wake_record != BIT_ULL(port)))
+ 		return;
+diff --git a/include/linux/mfd/macsmc.h b/include/linux/mfd/macsmc.h
+index 9f92d3087e8..8ebd1d059e1 100644
+--- a/include/linux/mfd/macsmc.h
++++ b/include/linux/mfd/macsmc.h
+@@ -133,6 +133,7 @@ struct apple_smc {
+ 	 * resolve only the matching pending ID; timeout never cancels SRAM use.
+ 	 */
+ 	bool saved_enabled, saved_blocked, saved_scope, saved_committed;
++	bool port_dark_wake;
+ 	bool saved_pending, saved_recovery, saved_wake;
+ 	int saved_fault, saved_notice_error, saved_restore_error;
+ 	/*

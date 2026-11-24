@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <address-in-upstream-commit@localhost>
+Date: Sun, 22 Nov 2026 21:21:42 +1100
+Subject: arm64: dts: apple: t6050: expose the K boards' jack pins with the
+ PCIe PERST# pin
+
+The K board headphone jack change opens pins 134 and 139 (the CS42L84's
+interrupt and reset) in the shared K114/K116 pinctrl_ap list, and this branch
+opens pin 80 for PCIe port 0. Use the union, <0 80>, <81 53>, <135 4>,
+<140 81>, in both so they land in either order. Both pins read cleanly; only
+pin 112 takes an SError.
+
+Signed-off-by: Ryan Murray <address-in-upstream-commit@localhost>
+
+[re-cut onto the K114s r3d tree]
+---
+ arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+index 757df032c13..d5ff788f8a6 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+@@ -120,11 +120,11 @@ &i2c2 {
+ 
+ /*
+  * As on J716c, where reading pin 112 takes an SError, only the pins a node
+- * names are exposed: here 80, PCIe port 0's PERST#. A board that names more
+- * pins replaces the list.
++ * names are exposed: 80, PCIe port 0's PERST#, and 134 and 139, the jack
++ * codec's interrupt and reset. A board that names more pins replaces the list.
+  */
+ &pinctrl_ap {
+-	gpio-reserved-ranges = <0 80>, <81 140>;
++	gpio-reserved-ranges = <0 80>, <81 53>, <135 4>, <140 81>;
+ };
+ 
+ /*

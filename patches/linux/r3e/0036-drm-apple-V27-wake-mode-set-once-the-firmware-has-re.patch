@@ -1,0 +1,129 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Wed, 18 Nov 2026 06:39:40 -0700
+Subject: drm/apple: V27 wake: mode set once the firmware has reported the
+ panel
+
+After a V27 sleep the first mode set of the internal panel is kept, not
+sent: on the J714s (27.0) the firmware brings link and mode back once
+frames arrive. That mode set also comes before the firmware has
+announced the panel's video interface again.
+
+On firmware 27.2 it now waits for two events of the wake and is then
+sent: the open of the panel's video interface (up to 1.5 s) and the
+firmware's hotplug report that follows it (up to 250 ms). A wait that
+runs out is logged. On the K116s the firmware answers that the mode is
+already set and the link up. 27.0 keeps the mode as before.
+
+Whether 27.2 needs the mode set has not been tested separately.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ drivers/gpu/drm/apple/dcp-internal.h    |  4 ++++
+ drivers/gpu/drm/apple/dcp-v27-sleep.inc |  2 ++
+ drivers/gpu/drm/apple/dcp.c             |  2 ++
+ drivers/gpu/drm/apple/epic/panelavep.c  |  4 +++-
+ drivers/gpu/drm/apple/iomfb_template.c  | 15 +++++++++++++++
+ drivers/gpu/drm/apple/iomfb_v27.c       |  3 +++
+ 6 files changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/apple/dcp-internal.h b/drivers/gpu/drm/apple/dcp-internal.h
+index e8c10a8124f..2d7144179b2 100644
+--- a/drivers/gpu/drm/apple/dcp-internal.h
++++ b/drivers/gpu/drm/apple/dcp-internal.h
+@@ -1026,6 +1026,10 @@ struct apple_dcp {
+ 
+ 	/* V27 sleep: the panel's next mode set is the mode it already has */
+ 	bool v27_keep_mode;
++	/* Since the V27 wake: the panel's video interface opened, firmware reported the panel */
++	struct completion v27_wake_video, v27_wake_hotplug;
++#define V27_WAKE_VIDEO_MS	1500
++#define V27_WAKE_HOTPLUG_MS	250
+ 	/* V27 sleep: the output area of the call being pushed holds this (an in/out word) */
+ 	const void *push_out_prefill;
+ 
+diff --git a/drivers/gpu/drm/apple/dcp-v27-sleep.inc b/drivers/gpu/drm/apple/dcp-v27-sleep.inc
+index 526c0c2f272..f800e37f18c 100644
+--- a/drivers/gpu/drm/apple/dcp-v27-sleep.inc
++++ b/drivers/gpu/drm/apple/dcp-v27-sleep.inc
+@@ -1252,6 +1252,8 @@ static int dcp_v27_reopen_live(struct apple_dcp *dcp)
+ 					return ret;
+ 				s->soft_off = false;
+ 			}
++			reinit_completion(&dcp->v27_wake_video);
++			reinit_completion(&dcp->v27_wake_hotplug);
+ 			WRITE_ONCE(dcp->v27_keep_mode, true);
+ 		} else if (s->ext_wake) {
+ 			ret = dcp_v27_ext_wake_calls(s);
+diff --git a/drivers/gpu/drm/apple/dcp.c b/drivers/gpu/drm/apple/dcp.c
+index e395bbb5b82..3d9becbd37e 100644
+--- a/drivers/gpu/drm/apple/dcp.c
++++ b/drivers/gpu/drm/apple/dcp.c
+@@ -7569,6 +7569,8 @@ static int dcp_platform_probe_pipe(struct platform_device *pdev)
+ 
+ 	INIT_LIST_HEAD(&dcp->swapped_out_fbs);
+ 	mutex_init(&dcp->swapped_out_fbs_lock);
++	init_completion(&dcp->v27_wake_video);
++	init_completion(&dcp->v27_wake_hotplug);
+ 	ret = dcp_backlight_init(dcp, dev);
+ 	if (ret)
+ 		return ret;
+diff --git a/drivers/gpu/drm/apple/epic/panelavep.c b/drivers/gpu/drm/apple/epic/panelavep.c
+index cd4507b2bf7..6e7a0cb682b 100644
+--- a/drivers/gpu/drm/apple/epic/panelavep.c
++++ b/drivers/gpu/drm/apple/epic/panelavep.c
+@@ -131,9 +131,11 @@ static void panelav_open_worker(struct work_struct *work)
+ 	if (ret)
+ 		dev_warn(service->ep->dcp->dev, "panel AV: video interface %u OPEN failed: %d\n",
+ 			 service->channel, ret);
+-	else
++	else {
++		complete(&service->ep->dcp->v27_wake_video);
+ 		dev_info(service->ep->dcp->dev, "panel AV: video interface %u opened\n",
+ 			 service->channel);
++	}
+ 	afk_service_put(service);
+ 	kfree(w);
+ }
+diff --git a/drivers/gpu/drm/apple/iomfb_template.c b/drivers/gpu/drm/apple/iomfb_template.c
+index 308e3119346..872b138b7da 100644
+--- a/drivers/gpu/drm/apple/iomfb_template.c
++++ b/drivers/gpu/drm/apple/iomfb_template.c
+@@ -4303,6 +4303,21 @@ int DCP_FW_NAME(iomfb_modeset)(struct apple_dcp *dcp,
+ 	keep_mode = dcp->v27_j714s && xchg(&dcp->v27_keep_mode, false) &&
+ 		    dcp->mode.color_mode_id == mode->color_mode_id &&
+ 		    dcp->mode.timing_mode_id == mode->timing_mode_id;
++	/*
++	 * Firmware 27.2: sent once the panel's video interface is open again and the firmware
++	 * has reported the panel, which it does after the open.
++	 */
++	if (keep_mode && iomfb_v27_methods_renumbered(dcp->v27_methods)) {
++		if (!wait_for_completion_timeout(&dcp->v27_wake_video,
++						 msecs_to_jiffies(V27_WAKE_VIDEO_MS)))
++			dev_warn(dcp->dev, "V27 wake: panel video interface not open after %u ms\n",
++				 V27_WAKE_VIDEO_MS);
++		else if (!wait_for_completion_timeout(&dcp->v27_wake_hotplug,
++						      msecs_to_jiffies(V27_WAKE_HOTPLUG_MS)))
++			dev_warn(dcp->dev, "V27 wake: no hotplug report %u ms after the panel's open\n",
++				 V27_WAKE_HOTPLUG_MS);
++		keep_mode = false;
++	}
+ #endif
+ 	scoped_guard(spinlock_irqsave, &dcp->hdr.lock) {
+ 		dcp->mode = (struct dcp_set_digital_out_mode_req){
+diff --git a/drivers/gpu/drm/apple/iomfb_v27.c b/drivers/gpu/drm/apple/iomfb_v27.c
+index def54604d8c..1f2e8121127 100644
+--- a/drivers/gpu/drm/apple/iomfb_v27.c
++++ b/drivers/gpu/drm/apple/iomfb_v27.c
+@@ -513,6 +513,9 @@ static bool trampoline_hotplug_h17p(struct apple_dcp *dcp, int tag,
+ 	if (!(request->tiled_display_null & 1))
+ 		memcpy(out, request->tiled_display,
+ 		       sizeof(request->tiled_display));
++	/* The V27 wake's mode set waits for the firmware's report of the panel */
++	if (request->connected && dcp->v27_j714s)
++		complete(&dcp->v27_wake_hotplug);
+ 	return trampoline_hotplug(dcp, tag, out, in);
+ }
+ 

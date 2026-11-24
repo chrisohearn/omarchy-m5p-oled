@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 19 Nov 2026 08:12:11 -0700
+Subject: dt-bindings: soc: apple,t6050-sleep: add apple,display-method-sleep
+
+The drivers tell one T6050 sleep description from another by the board
+or by the node's compatible. What differs for the display coprocessors
+is how they take the sleep: through their firmware 27 method table,
+with the panel's AV and DP services, or through the sleep's endpoint
+transport alone. Say so in the description.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ .../devicetree/bindings/soc/apple/apple,t6050-sleep.yaml  | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/soc/apple/apple,t6050-sleep.yaml b/Documentation/devicetree/bindings/soc/apple/apple,t6050-sleep.yaml
+index c32148802bd..7d26c0049f8 100644
+--- a/Documentation/devicetree/bindings/soc/apple/apple,t6050-sleep.yaml
++++ b/Documentation/devicetree/bindings/soc/apple/apple,t6050-sleep.yaml
+@@ -144,6 +144,14 @@ properties:
+       The GFX die's wake sources left enabled for a sleep. From the ADT, set by
+       the bootloader.
+ 
++  apple,display-method-sleep:
++    type: boolean
++    description: |
++      The display coprocessors take the sleep through their firmware 27 method
++      table: its sleep call and its swap, the panel's AV and DP services and the
++      external processors' handling around a sleep. Without it they keep the
++      method table they had and take the sleep's endpoint transport alone.
++
+   apple,clk-gating-boot:
+     $ref: /schemas/types.yaml#/definitions/uint32-matrix
+     items:

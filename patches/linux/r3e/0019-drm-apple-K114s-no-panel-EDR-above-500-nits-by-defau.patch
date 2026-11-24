@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: k114s-integration <integration@localhost>
+Date: Mon, 16 Nov 2026 09:51:02 -0700
+Subject: drm/apple: K114s: no panel EDR above 500 nits by default
+
+The K114s kernel is built for one machine, whose OLED panel's ADT
+gives a 2000 nit peak. Nobody has shown PQ content on a K-board OLED
+under this driver, so the K114s build starts with
+fw27_panel_edr_max_nits at 500. With the panel's SDR maximum of 1000
+nits that leaves no headroom: the panel offers no EDR, its EDID
+advertises no PQ, and PQ commits are refused. SDR brightness is not
+affected. Setting the parameter on the kernel command line or in
+modprobe.d raises the cap once EDR is to be tested.
+
+K114s-only: not for upstream, where the default stays 0.
+
+Co-Authored-By: Claude Opus 5.5 <address-in-upstream-commit@localhost>
+
+[re-cut onto integration/aurora 0bbe021a for the K114s]
+---
+ drivers/gpu/drm/apple/dcp.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/apple/dcp.c b/drivers/gpu/drm/apple/dcp.c
+index 23f4e62ad54..0b0aa777ec1 100644
+--- a/drivers/gpu/drm/apple/dcp.c
++++ b/drivers/gpu/drm/apple/dcp.c
+@@ -1295,10 +1295,10 @@ static void dcp_panel_read_min_brightness(struct apple_dcp *dcp,
+  * headroom, so the panel offers no EDR at all: its EDID advertises no PQ and
+  * PQ commits are refused.  Read once, when the display processor binds.
+  */
+-static unsigned int fw27_panel_edr_max_nits;
++static unsigned int fw27_panel_edr_max_nits = 500;	/* K114s build */
+ module_param(fw27_panel_edr_max_nits, uint, 0444);
+ MODULE_PARM_DESC(fw27_panel_edr_max_nits,
+-		 "Firmware 27 panels: most nits an EDR swap may ask for, 0 for the panel's peak (default: 0)");
++		 "Firmware 27 panels: most nits an EDR swap may ask for, 0 for the panel's peak (default: 500)");
+ 
+ static void dcp_panel_read_adt(struct apple_dcp *dcp)
+ {
