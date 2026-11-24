@@ -57,9 +57,16 @@ panel's SDR maximum of 1000 nits, left no EDR headroom: no PQ in the EDID, PQ co
 line is now `static unsigned int fw27_panel_edr_max_nits;` (default 0, "the panel's own peak"; the parameter still exists and
 can lower the peak by hand, `modinfo -F parm appledrm` shows `(default: 0)`). With #2694 and the K114s ADT (peak 2000 nits,
 EDR potential headroom 16, from the r3e notes) the panel should now offer the 2000-nit peak, advertise PQ and the HDR
-connector properties, and a PQ frame ramps the panel towards 2000 nits. **Nobody has shown PQ content on this OLED under
-this driver** (the original reason for the cap, [r3-hdr.md](r3-hdr.md)). That is what the trial should look at, and a
-`fw27_panel_edr_max_nits=<n>` on the kernel command line goes back to a cap with no rebuild.
+connector properties, and a PQ frame ramps the panel towards 2000 nits. PQ content has been shown on this OLED only up to a 1200-nit
+cap (owner-observed 2026-11-16, [r3-hdr.md](r3-hdr.md) sections 8 and 9), never at the full 2000-nit peak.
+
+**On this Mac the trial still runs at 1200 nits.** The managed HDR default, `/etc/modprobe.d/k114s-edr-cap.conf`
+(`linux/display/k114s-edr-cap`), sets `options appledrm fw27_panel_edr_max_nits=1200`, and it applies to r3f as it did to
+r3e1. The owner chose that cap on 2026-11-16, and the 2026-11-24 decision was about the kernel's own default, so the
+override stays (a reversible default; `sudo bash linux/display/k114s-edr-cap --undo` and a reboot give the panel's own
+peak). What r3f changes on this Mac is the code path: #2694 decides EDR from the ADT's headroom. The r3f check records the
+parameter, the EDR kernel lines, the EDID's HDR blocks and the CLPC platform profile. A
+`appledrm.fw27_panel_edr_max_nits=<n>` on the kernel command line (or `options appledrm fw27_panel_edr_max_nits=<n>` in `/etc/modprobe.d`) goes back to a cap with no rebuild.
 
 **Kept, and not superseded by #2694:**
 
@@ -98,8 +105,10 @@ run on this Mac):
 
 ## 5. Build and checks
 
-    git worktree add -b r3f ~/k114s-build/src/r3f origin/main     # 4abf0f83c290fd7275d44b09dc490e34b405749b
-    grep -v '^#' patches/linux/r3f.series | grep . | while read p; do git am --3way patches/linux/$p; done
+    REPO=~/Developer/Personal/Projects/omarchy-m5p-oled               # this repository
+    git worktree add -b r3f ~/k114s-build/src/r3f 4abf0f83c290fd7275d44b09dc490e34b405749b   # main at the time; run in a linux clone
+    cd ~/k114s-build/src/r3f
+    grep -v '^#' "$REPO/patches/linux/r3f.series" | grep . | while read p; do git am --3way "$REPO/patches/linux/$p"; done
     printf -- '-17.v272-18-k114s-r3f' > localversion.10-pkgrel
     cp ~/k114s-build/out/r3e1/.config ~/k114s-build/out/r3f/.config      # then: kmake O=... olddefconfig (no change)
     K114S_LABEL=K114S-R3F kmake O=~/k114s-build/out/r3f -j16 Image modules dtbs
