@@ -14,6 +14,6 @@
 #include "t6050-k114s-r3c.dts"
 
 /* and adds, at board level, the media engines (#2278: encoder, ProRes, JPEG) and the shared camera tree (#2275). The
- * camera still probes ENODEV until the K114s activity light is described (#231). */
+ * camera node stays disabled until a loader hands the camera over; the K114s also needs its activity light (#231). */
 #include "t6050-media.dtsi"
 #include "t6050-isp.dtsi"

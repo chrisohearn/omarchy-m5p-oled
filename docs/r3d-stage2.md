@@ -26,20 +26,30 @@ Build with `build/build-r3a-dtb.sh <r3d kernel tree> t6050-k114s-r3d <out>`, wit
 `K114S_PMP_TUNABLES` (sha256 `df27244e4900…`). The result is `26c3407f8793e3e11adcc0642f5bb2d35c3882dd50772d557b7c817631929d70`,
 153,819 bytes (agent-run). Without the three engine and camera enables it was `a3e27280…`, which the first review caught (P1).
 
-The node diff (`tests/dtb-node-diff.py`) is against the configured blob `8258c8a8…`: 2 nodes are added and none removed
-(agent-run).
-- **Added:** `memory-controller@2220000000` (`apple,t6050-mcc`, with `apple,boot-dma-devices = <&dcp>`). The r3d kernel
-  has `CONFIG_APPLE_MCC=y`, so its driver probes on the K114s for the first time. It waits for the display coprocessor
-  to retire the boot scanout, then enables system-level-cache allocation on each of its 16 windows. Those 16 windows sit
-  inside this Mac's four enabled memory controllers: the ADT `/arm-io/mcc` has `amcc-count` 8, `amcc-enable-mask` `0xf`
-  and `dcs-count-per-amcc` 4, and translates amcc0-3 to `0x22_2000_0000`, `0x22_2200_0000`, `0x22_2400_0000` and
-  `0x22_2600_0000`, `0x140000` each (agent-run, read from the ADT MTD). None of the windows lands in a disabled
-  controller. This is the part of the tree with real risk, and the test boot is its proof.
-- `/chosen/framebuffer@0` gets `display = <&dcp>`, and four DARTs get `reg-names`. The four MTP nodes are disabled and
-  then re-enabled, so they end up as before.
-- **Unchanged:** PCIe port 0 and the N1 (Wi-Fi and Bluetooth), the exposed pins, the USB-C ports, the PMP, the AOP
-  and the sound node. All other differences are phandle renumbering: an independent check mapped every changed cell
-  through both phandle tables and found no real change.
+The node diff (`tests/dtb-node-diff.py`) is against the configured blob `8258c8a8…` (agent-run). 12 nodes are added and
+none removed. The changes are real; this is not just phandle renumbering:
+- **Added:**
+  - `memory-controller@2220000000` (`apple,t6050-mcc`, with `apple,boot-dma-devices = <&dcp>`). The r3d kernel has
+    `CONFIG_APPLE_MCC=y`, so its driver probes on the K114s for the first time. It waits for the display coprocessor to
+    retire the boot scanout, then enables system-level-cache allocation on each of its 16 windows. Those windows sit
+    inside this Mac's four enabled memory controllers: the ADT `/arm-io/mcc` has `amcc-count` 8, `amcc-enable-mask`
+    `0xf` and `dcs-count-per-amcc` 4, and translates amcc0-3 to `0x22_2000_0000`, `0x22_2200_0000`, `0x22_2400_0000`
+    and `0x22_2600_0000`, `0x140000` each (agent-run, read from the ADT MTD).
+  - The Neural Engine's firmware reservations `reserved-memory/ane-firmware-text@0` and `ane-firmware-data@0` (`reg 0`,
+    disabled; the loader fills them in), the ISP sensor preset, and further PMGR power controllers.
+- **Status changes:**
+  - `disabled` -> `okay` on the Neural Engine, the video encoder at `0x2283100000`, ProRes, both JPEG engines, their
+    DARTs, and about 15 PMGR power domains. These include `fab9-soc` (`@398`, which loses its power-domains parent and
+    becomes `firmware-owned` and `no-auto-pm`) and `isp-sys` (`@3a0`, now `apple,always-on`). So the camera node stays
+    `disabled` while part of its power tree is on.
+  - The four MTP nodes are disabled and then re-enabled, so they end up as before.
+- **Other:** the ISP node's `reg`, `interrupts` and `reg-names` change and its `clocks` go. The ISP DARTs gain
+  `remap-streams`. `/chosen/framebuffer@0` gets `display = <&dcp>`, and the DARTs get `reg-names`.
+- **Unchanged:** PCIe port 0 and the N1, the exposed pins, the USB-C ports, the PMP, the AOP and the sound node.
+
+So test A tries out the MCC, five engines and their power domains, not just the MCC. Its check gates on the MCC
+enabling cleanly, on no new error-priority kernel line, and on each engine's binding (agent-run evidence goes in the
+boot record).
 
 | Check | Result | Label |
 | --- | --- | --- |
