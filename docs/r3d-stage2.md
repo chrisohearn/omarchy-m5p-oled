@@ -1,6 +1,6 @@
 # r3d Stage 2: the K114s tree on the r3d includes, and Aura b15
 
-Status 2026-11-24: **built and checked offline; not booted.** This is the loader-and-tree batch of the owner's request
+Status 2026-11-24: **test A booted once (section 4) and was not promoted; test A4, with the encoder off, is next.** This is the loader-and-tree batch of the owner's request
 to "get this device on the latest known code and fixes" (docs/r3d-kernel.md). The owner chose this batch next and
 standing one-boot tests ("Reboot when ready, tell me"). Evidence labels: **agent-run**, **inferred**.
 
@@ -124,11 +124,22 @@ Test A (`d9aab35c`, tree `26c3407f`) booted once through `aura-try` at 04:29Z (a
   - the engines: the Neural Engine bound to `ane_t6021`, ProRes to `apple-prores`, and both JPEG engines to
     `apple-jpeg`.
 - **Failed:** the video encoder. `apple-ave 2283100000.video-encoder: error -ENODEV: unsupported firmware (text CRC
-  1e27a926)`. Because the encoder stays unbound, its five VENC0 power states stay `sync_state() pending`, which holds
-  them on. Test A was not promoted.
+  1e27a926)`. After the failed probe, the five VENC0 power states stay `sync_state() pending`, which holds them on.
+  Test A was not promoted.
 
-`dts/t6050-k114s-r3d.dts` now leaves the encoder, its two DARTs and its six VENC0 power states disabled. `FAB0_SOC`
-stays on for the JPEG engines. The tree is `a99702584869461c7c86487456801be8aa23230811c0fe7781842d663b4b269d`
-(153,855 bytes; the four lints pass; `tree-check` gives jack only, no amplifier and no speaker channel). Test A3 is
-the b13 loader plus this tree, `1e791de612f1f992bb3f7db388a63f319fd1a479121baa284f9463bfcf1ca782`. The encoder can
-come back once the AVE driver accepts the K114s 27.2 encoder firmware.
+`dts/t6050-k114s-r3d.dts` now disables the encoder and its two DARTs. The six VENC0 power states stay described and
+enabled, so genpd finds them unused and powers them down at boot. Disabling them as well would leave nothing to turn
+them off, which the review of PR #237 caught (P1). `FAB0_SOC` stays on for the JPEG engines.
+
+| | Tree | Test file |
+| --- | --- | --- |
+| Test A4: b13 loader (installed) + the tree | `a0897a5a0b31de4c5300d74367a3747354febc9b4aca26edd2b0f98d3ff6fc30` (153,831 bytes) | `bd329c9fa8efffbc677b30c3202b439d85d5446caef5a01e43b989cfa4497aa5` |
+| Test B4: Aura b15 + the same tree | same | `6b9848118206371b050f2b606181f1776cf904432a01ca8a04c58c9350ec68b3` |
+
+These replace the A and B rows of section 3. The four lints pass, and `tree-check` gives jack only, no amplifier and
+no speaker channel (agent-run).
+
+What A4 must pass is section 3's list, without the encoder. The engines that must bind are the Neural Engine,
+ProRes and both JPEG engines; the encoder and the ISP must stay unbound. A4 also checks that no new error-priority
+kernel line appears. Test B4 falls back to whatever Stage 2 is configured when it is armed: A4's file if A4 was
+promoted. The encoder can come back once the AVE driver accepts the K114s 27.2 encoder firmware.
