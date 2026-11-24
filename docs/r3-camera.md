@@ -1,9 +1,24 @@
 # Camera (Apple ISP) for the K114s (#33)
 
-**Status (2026-11-20).** The K114s one-boot trial handed the ISP over to Linux. The driver stopped at
-probe because the device tree lacks a physical camera activity-light description. The normal r3c
-tree keeps the camera disabled. The trial source is reproducible against the current r3c-upstream
-kernel and remains separate from the default tree.
+**Status (2026-11-24).** The owner asked for the camera for meetings and chose (T3 decision grill, "Run it, on-screen
+dot") to run it without a verified activity light: the K114s ADT describes no light pin, and the light has not been
+traced from macOS. Built, not booted yet:
+
+| Part | What | Result |
+| --- | --- | --- |
+| Kernel | r3e with `patches/linux/r3e/0075`: the opt-in `apple,camera-light-undescribed` lets the T6050 ISP probe and stream with no light control. Boards without the property keep the gate | `apple-isp.ko` carries it; `Image` unchanged (`f9ed2bc5`) |
+| Tree | `dts/t6050-k114s-r3d-camera.dts`: the configured tree `a0897a5a`, unchanged, plus that property on `isp0` | `34ddb0a6…`, 153,874 bytes; the node diff against `a0897a5a` is that one property; the three tree lints pass |
+| Loader | Aura v1.0.0b15 + the K114s row `{"apple,k114s", 0xba, V27_2}` (`patches/aura/camera-b15/0001`) | `06b38fd0…`, 3,932,160 bytes, the size of the configured b15 |
+| Stage 2 test file | the loader + the camera tree + the configured U-Boot trailer | `bc2fc295…`; the same recipe with b15 and `a0897a5a` rebuilds the configured `6b984811` byte for byte |
+| Setfile | the IMX958 tuning `apple/isp_2226_02XX.dat` is not installed; it is carved from the macOS camera daemon, which Linux cannot read here | the driver then streams "without sensor tuning" (colour and exposure untuned) until the file is copied from macOS |
+
+The display's best-effort indicator (aurora-silicon/linux #2561, in r3e) is the only signal that the camera is on. The
+hardware LED may or may not light: nothing drives it. The trial follows the r3e kernel's promotion: one `aura-try` boot of the
+test file, checked by the camera kit (the ISP node enabled with platform ID `0xba`, the no-light probe line, a capture
+node from `apple-isp`, one frame with picture content), then promotion if every check passes.
+`tests/hardware/k114s-camera-check.sh` accepts the opt-in and still refuses an ISP with neither a light nor the opt-in.
+
+The rest of this record is the November 15-20 work.
 
 ## What was found
 

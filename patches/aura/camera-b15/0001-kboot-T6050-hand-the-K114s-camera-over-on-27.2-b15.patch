@@ -1,0 +1,22 @@
+K114s camera row for the aura v1.0.0b15 loader (the configured Stage 2 loader since 2026-11-24).
+
+The same row as patches/aura/camera/0001 ({"apple,k114s", 0xba, V27_2} in t6050_isp_boards), placed for
+aura v1.0.0b15, where the comment hunk of 0001 no longer applies. Build: copy the b15 source, apply this with
+`patch -p1`, then RELEASE=1 CHAINLOADING=1 ESP_STAGE2=1 USE_CLANG=1 with the Omarchy logo and AURA_VERSION_TAG=v1.0.0b15, as
+the omacom aura recipe does. Result on 2026-11-24: 3,932,160 bytes, sha256 06b38fd09a9a669ca0a21e500bd6fc6a7ae8f443981dbeed6aab10f0a5c25c4d.
+
+--- a/src/kboot.c
++++ b/src/kboot.c
+@@ -10235,6 +10235,12 @@
+      * the IPSW's isp_bni/adc-nyx-sck11pm; its K116 connection table has one FrontRGB IMX958.
+      */
+     {"apple,k116s", 0xbc, V27_2},
++    /*
++     * K114s (14-inch M5 Pro OLED, Mac17,13): ADT isp0 of 27.2 (26B8125). The same firmware uuid,
++     * connection scheme 0x10, interrupts, DARTs and two segments as the K116s; only the sensor
++     * type differs (0xba). Read from a K114s ADT; no K114s has booted this hand-off yet.
++     */
++    {"apple,k114s", 0xba, V27_2},
+ };
+ 
+ static int dt_set_t6050_isp(const char **why)
