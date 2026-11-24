@@ -240,7 +240,7 @@ cmd_arm() {
   # it, so no one-shot is written unless the record is
   { mkdir -p "$STATE" && printf '%s %s\n' "$BOOTID" "$id" > "$STATE/boot-once-armed.new" && mv -f "$STATE/boot-once-armed.new" "$STATE/boot-once-armed" &&
     [ "$(cat "$STATE/boot-once-armed")" = "$BOOTID $id" ]; } || { rm -f "$STATE/boot-once-armed.new"; die "cannot write the arming record $STATE/boot-once-armed: a trial boot could sleep; nothing armed"; }
-  cat "$tmp" > "$VAR" || die "cannot write $VAR"                                                           # one write(2), as efivarfs needs
+  cat "$tmp" > "$VAR" || { rm -f "$STATE/boot-once-armed"; die "cannot write $VAR; nothing armed"; }                                                           # one write(2), as efivarfs needs
   if [ -x "$SAVE" ]; then "$SAVE" || { drop_var; die "efi-vars-save failed: the request would be lost at reset; taken back"; }; else drop_var; die "no $SAVE: U-Boot's file cannot be updated; taken back"; fi
   store_has "$id"; rc=$?
   [ $rc = 0 ] || { cmd_clear >/dev/null 2>&1; die "U-Boot's variable file does not hold '$id' after the save (code $rc): not hang-safe; taken back"; }
