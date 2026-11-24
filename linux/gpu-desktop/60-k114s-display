@@ -1,0 +1,22 @@
+# Recheck the DCP display after UWSM's early environment generators.
+# Keep the boot-time software fallback if the display or render device is absent.
+if [ "${LIBGL_ALWAYS_SOFTWARE:-}" = 1 ] &&
+   [ "${GBM_ALWAYS_SOFTWARE:-}" = 1 ] &&
+   [ "${ASAHI_M5_BRINGUP:-}" = 0 ] &&
+   [ -c /dev/dri/by-path/platform-2300000000.gpu-render ] &&
+   [ -x /usr/lib/omarchy-aurora/aurora-m5-display-env ]; then
+    if [ -c /dev/dri/by-path/platform-display-subsystem-card ] ||
+       /usr/bin/udevadm wait --timeout=5 /dev/dri/by-path/platform-display-subsystem-card; then
+        if [ -c /dev/dri/by-path/platform-display-subsystem-card ]; then
+            while IFS= read -r k114s_display_var; do
+                [ -n "$k114s_display_var" ] && export "$k114s_display_var"
+            done <<K114S_DISPLAY_ENV
+$(/usr/lib/omarchy-aurora/aurora-m5-display-env)
+K114S_DISPLAY_ENV
+            unset k114s_display_var
+            if [ "${ASAHI_M5_BRINGUP:-}" = 1 ]; then
+                export LIBGL_ALWAYS_SOFTWARE=0 GBM_ALWAYS_SOFTWARE=0
+            fi
+        fi
+    fi
+fi

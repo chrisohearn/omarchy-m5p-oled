@@ -145,3 +145,26 @@ rm -f ~<user>/.config/k114s-gpu-desktop   # or, as that user: rm ~/.config/k114s
   Stage 2 hook about it (both still pin the r1 tree).
 - Kernel patches #1844, then lift the suspend block with the sleep work.
 - The display coprocessor step: native mode, 120 Hz, brightness.
+
+## Recover GPU rendering at desktop login on K114s
+
+If the GPU render node appears before the display coprocessor device at boot,
+the early user environment generators can select software rendering and leave
+Hyprland on llvmpipe. The UWSM fragment waits up to five seconds for the
+display device during desktop login. It uses the installed Aurora display
+helper and clears the software-rendering flags only after that helper selects
+the hardware path. A timeout preserves the software fallback.
+
+Install as the desktop user on the K114s:
+
+```sh
+install -Dm644 linux/gpu-desktop/60-k114s-display ~/.config/uwsm/env.d/60-k114s-display
+```
+
+Log out and back in to activate it. To undo it, rename the fragment to
+`60-k114s-display.disabled` and log in again.
+
+On the K114s, an attended normal reboot selected Zink on Apple M5 Pro at
+the first desktop login. The internal panel stayed at 10-bit Display P3 and
+120 Hz. The missing-device and timeout cases preserved software rendering
+in a shell fixture.
