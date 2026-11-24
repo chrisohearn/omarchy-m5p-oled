@@ -35,7 +35,7 @@
 # -k114s-r3b-t1-ARCH release keep its boot names and module directory separate from r3b.
 #
 # This file does not compile anything. It packages a finished build:
-#   K114S_CAND  the candidate, r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d, r3e   (default r3a, the one the runbook docs/r3-integration.md names;
+#   K114S_CAND  the candidate, r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d, r3e, r3e1   (default r3a, the one the runbook docs/r3-integration.md names;
 #               r3b: docs/r3b-kernel.md, K114S_CAND=r3b makepkg ...; r3b-b1: D5a, K114S_CAND=r3b-b1 makepkg ...;
 #               r3b-c1: docs/r3-hdr.md, K114S_CAND=r3b-c1 makepkg ...; r3b-c2: docs/r3b-kernel.md,
 #               K114S_CAND=r3b-c2 makepkg ...; r3b-c3: docs/r3-vrr.md, K114S_CAND=r3b-c3 makepkg ...;
@@ -67,7 +67,11 @@ case $_cand in
   # 7.3.0.r3c.upstream-1 -> 7.3.0.r3e-1, vercmp: newer). r3d stays in the linux-k114s slot as the way back while r3e
   # is tried by a one-shot; promotion points default_entry at Omarchy/linux-k114s-r3b
   r3e) pkgname=linux-k114s-r3b; _kcand=r3e; _ver=r3e; _rel=1 ;;
-  *) echo "K114S_CAND must be r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d or r3e" >&2; exit 1 ;;
+  # r3e1 (docs/r3e-kernel.md section 2b): r3e plus r3e/0076, the small camera indicator under the notch. It takes the
+  # linux-k114s slot, the Backup since r3e became Main (it holds r3d, 7.3.0.r3d-1 -> 7.3.0.r3e1-1, vercmp: newer), so r3e
+  # stays the way back while r3e1 is tried by a one-shot; promotion points default_entry at Omarchy/linux-k114s
+  r3e1) pkgname=linux-k114s; _kcand=r3e1; _ver=r3e1; _rel=1 ;;
+  *) echo "K114S_CAND must be r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d, r3e or r3e1" >&2; exit 1 ;;
 esac
 pkgbase=$pkgname
 pkgver=7.3.0.$_ver
@@ -137,7 +141,7 @@ package() {
   # carries a guarded item itself, the guard checks main's form: the adopted-link s2idle test is #2488's predicate (the
   # K114s qualifies through t6050_hw.adopt_link) and the NVRAM write path is #2817's (a DT nvram partition and a known
   # flash part, so the K114s, which has neither, stays read-only)
-  if [[ $_cand == r3e ]]; then
+  if [[ $_cand == r3e || $_cand == r3e1 ]]; then
     grep -q 'dcp_bl_set_minimum' "$_src/drivers/gpu/drm/apple/dcp_backlight.h" &&
       grep -q 'fw27_panel_edr_max_nits = 500;' "$_src/drivers/gpu/drm/apple/dcp.c" &&
       grep -q 'dcp_panel_color_target' "$_src/drivers/gpu/drm/apple/dcp-display-metadata.c" &&
@@ -158,6 +162,12 @@ package() {
       { echo "$_src is not the r3e series (patches/linux/r3e.series)" >&2; return 1; }
     [[ $(grep -c 'name: "27.2 (26B8125), G17S",' "$_src/drivers/gpu/drm/asahi/hw/t6050.rs") == 1 ]] ||
       { echo "$_src has the 26B8125 G17S firmware entry more than once" >&2; return 1; }
+  fi
+  # r3e1 adds r3e/0076: on apple,k114s the camera indicator is a solid 32x32 square under the notch
+  if [[ $_cand == r3e1 ]]; then
+    grep -q 'IND_COMPACT_SIDE	32' "$_src/drivers/gpu/drm/apple/dcp-indicator.c" &&
+      grep -q 'of_machine_is_compatible("apple,k114s")' "$_src/drivers/gpu/drm/apple/dcp-indicator.c" ||
+      { echo "$_src lacks r3e/0076 (the small camera indicator)" >&2; return 1; }
   fi
   # r3b-c2 must carry sleep-lid/0007: an unreadable manufacture date is -ENODATA, not -EOPNOTSUPP (aurora-silicon/linux#1615)
   if [[ $_cand == r3b-c[2-4] ]]; then
