@@ -1,0 +1,105 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: chrisohearn <address-in-upstream-commit@localhost>
+Date: Sat, 14 Nov 2026 15:33:51 -0700
+Subject: ASoC: apple: macaudio: Add K114 with the speakers off
+
+The K114s (14-inch M5 Pro MacBook Pro with the PROLED panel) has the sound
+hardware of the K116s and the J714s according to its Apple device tree,
+which matches the K116s's node for node: six SN012776 amps on the AOP's
+"spkr" stream and a CS42L84 jack codec on "cout", in the same frames. The
+K116 entry reuses macaudio_j714_cfg, which admits the speakers under the
+kernel's volume lock.
+
+For K114 there is no speaker protection data: speakersafetyd has no k114
+profile, speakerguardd v2 keeps K114 and K116 muted (its LSID unit is not
+at parity), and nothing has been measured on this chassis. Give it its own
+entry with J714's jack configuration and enable_speakers = false, as J873
+and J604 have: macaudio_speakers_allowed() then refuses a "Speaker" link
+whatever the device tree says, the speaker controls are not created, and
+the jack works alone. The amp type and layout stay J714's and are not
+used while enable_speakers is false; admitting the speakers needs
+protection data for this chassis first.
+
+The admission KUnit case asserts the refusal.
+
+Not tested on the hardware. The K114c (M5 Max) shares the chassis name; its
+device tree was not checked for this.
+
+Co-Authored-By: Claude Fable 5.2 <address-in-upstream-commit@localhost>
+
+[re-cut onto integration/aurora 0bbe021a for the K114s]
+---
+ .../bindings/sound/apple,macaudio.yaml        |  1 +
+ sound/soc/apple/macaudio-admission-test.h     |  2 ++
+ sound/soc/apple/macaudio.c                    | 26 +++++++++++++++++++
+ 3 files changed, 29 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/sound/apple,macaudio.yaml b/Documentation/devicetree/bindings/sound/apple,macaudio.yaml
+index c9880a39e9b..d1f19d065da 100644
+--- a/Documentation/devicetree/bindings/sound/apple,macaudio.yaml
++++ b/Documentation/devicetree/bindings/sound/apple,macaudio.yaml
+@@ -56,6 +56,7 @@ properties:
+               - apple,j813-macaudio
+               - apple,j815-macaudio
+               - apple,j873-macaudio
++              - apple,k114-macaudio
+               - apple,k116-macaudio
+           - const: apple,macaudio
+       - description:
+diff --git a/sound/soc/apple/macaudio-admission-test.h b/sound/soc/apple/macaudio-admission-test.h
+index 17c7f19c9cd..c5bf73b7556 100644
+--- a/sound/soc/apple/macaudio-admission-test.h
++++ b/sound/soc/apple/macaudio-admission-test.h
+@@ -17,6 +17,8 @@ static void macaudio_admission_needs_a_safe_level(struct kunit *test)
+ 	KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&macaudio_j873_cfg));
+ 	/* The Mac Studio M5: no sense and no protection owner yet, speaker off */
+ 	KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&macaudio_j775_cfg));
++	/* K114: J714's layout, but no protection data for the chassis */
++	KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&macaudio_k114_cfg));
+ 	cfg = macaudio_j413_cfg;
+ 	cfg.safe_vol = 0;
+ 	KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&cfg));
+diff --git a/sound/soc/apple/macaudio.c b/sound/soc/apple/macaudio.c
+index ae4c96a816f..b38474b32d0 100644
+--- a/sound/soc/apple/macaudio.c
++++ b/sound/soc/apple/macaudio.c
+@@ -4191,6 +4191,30 @@ struct macaudio_platform_cfg macaudio_j714_cfg = {
+ 	.tweeter_hpf_granted = true,
+ };
+ 
++/*
++ * K114 (T6050, MacBook Pro 14" M5 Pro with the PROLED panel; K114s):
++ * J714's AOP-fed card, with the CS42L84 jack on "cout" in the same frame.
++ * No speaker protection data exists for this chassis (no speakersafetyd
++ * profile, no qualified speakerguardd tuning), and nothing has been
++ * measured on it, so there is no safe level: macaudio_speakers_allowed()
++ * keeps the speakers off as on J873, whatever the device tree links. The
++ * jack is unaffected. The amp type and layout are the J714's and are not
++ * used while enable_speakers is false; admitting the speakers needs
++ * protection data for this chassis first.
++ */
++struct macaudio_platform_cfg macaudio_k114_cfg = {
++	.enable_speakers = false,
++	.amp = AMP_SN012776,
++	.speakers = SPKR_2W1T,
++	.stereo = true,
++	.safe_vol = -20,
++	.fe_dai_names = { "j873-pcm-0", "j873-pcm-1", "j873-pcm-2" },
++	.dai_fmt = SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_CBC_CFC | SND_SOC_DAIFMT_IB_NF,
++	.spk_dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBC_CFC |
++		       SND_SOC_DAIFMT_GATED | SND_SOC_DAIFMT_NB_IF,
++	.spk_secondary_only = true,
++};
++
+ /*
+  * J815 (T8142, MacBook Air M5 15"): J813's AOP-fed card with six SN012776,
+  * two woofers and a tweeter per side, in ADT speaker-config order (left
+@@ -4502,6 +4526,8 @@ static const struct of_device_id macaudio_snd_device_id[]  = {
+ 	{ .compatible = "apple,j714-macaudio", .data = &macaudio_j714_cfg },
+ 	/* k116    -       sn012776    15      2x 2W+1T (AOP-fed, V/I sense; the 16" PROLED chassis, J714's amps and frame) */
+ 	{ .compatible = "apple,k116-macaudio", .data = &macaudio_j714_cfg },
++	/* k114    -       sn012776    -       the jack only: speakers off, no protection data (AOP-fed) */
++	{ .compatible = "apple,k114-macaudio", .data = &macaudio_k114_cfg },
+ 	/* j713    -       sn012776    15      2x 1W+1T (AOP-fed, one serializer) */
+ 	{ .compatible = "apple,j713-macaudio", .data = &macaudio_j713_cfg },
+ 	/* The J713 jack runs on the AOP like the J616s one. */

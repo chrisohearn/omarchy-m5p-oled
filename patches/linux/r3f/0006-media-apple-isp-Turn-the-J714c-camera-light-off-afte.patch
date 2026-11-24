@@ -1,0 +1,108 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Eduard Moldovan <address-in-upstream-commit@localhost>
+Date: Sun, 8 Nov 2026 12:56:36 +0100
+Subject: media: apple: isp: Turn the J714c camera light off after a firmware
+ halt
+
+A firmware that dies mid-start can leave the sensor powered, and a
+powered sensor lights the camera light with its pin released: after a
+failed start the light stayed on until the next reset. Once the firmware
+is halted no frame can reach the host, so drive the light off then. A
+halted resident firmware does not start again. Remember the boot
+loader's pin setting at probe instead of at the first stream.
+
+Signed-off-by: Eduard Moldovan <address-in-upstream-commit@localhost>
+Co-Authored-By: Claude Opus 5.5 <address-in-upstream-commit@localhost>
+(cherry picked from commit 04606609e94c7af8daa464048388a4cd8f9e0af4)
+[re-cut onto integration/aurora 0bbe021a for the K114s]
+---
+ drivers/media/platform/apple/isp/isp-cam.c | 21 ++++++++++++++++++---
+ drivers/media/platform/apple/isp/isp-cam.h |  1 +
+ drivers/media/platform/apple/isp/isp-drv.c |  1 +
+ drivers/media/platform/apple/isp/isp-fw.c  |  2 +-
+ 4 files changed, 21 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/media/platform/apple/isp/isp-cam.c b/drivers/media/platform/apple/isp/isp-cam.c
+index 2094f3997d1..56a71137983 100644
+--- a/drivers/media/platform/apple/isp/isp-cam.c
++++ b/drivers/media/platform/apple/isp/isp-cam.c
+@@ -1278,8 +1278,6 @@ static int apple_isp_light_on(struct apple_isp *isp)
+ 
+ 	if (!isp->hw->camera_light)
+ 		return 0;
+-	if (!isp->cil_lit)
+-		isp->cil_saved = readl(isp->cil);
+ 	val = (isp->cil_config & ~ISP_GPIO_DATA) | ISP_GPIO_INPUT_ENABLE | on;
+ 	writel(val, isp->cil);
+ 	usleep_range(10, 20);
+@@ -1293,7 +1291,10 @@ static int apple_isp_light_on(struct apple_isp *isp)
+ 	return 0;
+ }
+ 
+-/* Only once the sensor has stopped streaming. */
++/*
++ * Only once the sensor has stopped streaming. The pin goes back to how the
++ * boot loader left it, where a powered sensor still lights the light.
++ */
+ void apple_isp_light_off(struct apple_isp *isp)
+ {
+ 	if (!isp->hw->camera_light || !isp->cil_lit)
+@@ -1303,6 +1304,20 @@ void apple_isp_light_off(struct apple_isp *isp)
+ 	writel(isp->cil_saved, isp->cil);
+ }
+ 
++/*
++ * Once the firmware is halted no frame can reach the host, but a sensor
++ * the dead firmware left powered would keep the light on until reset:
++ * drive it off. A halted resident firmware does not start again.
++ */
++void apple_isp_light_force_off(struct apple_isp *isp)
++{
++	if (!isp->hw->camera_light)
++		return;
++	apple_isp_light_off(isp);
++	writel((isp->cil_config & ~ISP_GPIO_DATA) | (isp->cil_on_high ? 0 : ISP_GPIO_DATA),
++	       isp->cil);
++}
++
+ /*
+  * The DCP contract function is implemented by the DRM side. This wrapper is
+  * the seam the KUnit tests stub, and the only caller of the contract.
+diff --git a/drivers/media/platform/apple/isp/isp-cam.h b/drivers/media/platform/apple/isp/isp-cam.h
+index a9843e08c51..9fd795e887e 100644
+--- a/drivers/media/platform/apple/isp/isp-cam.h
++++ b/drivers/media/platform/apple/isp/isp-cam.h
+@@ -24,6 +24,7 @@ void apple_isp_stop_capture(struct apple_isp *isp);
+ 
+ void apple_isp_wdt_init(struct apple_isp *isp);
+ void apple_isp_light_off(struct apple_isp *isp);
++void apple_isp_light_force_off(struct apple_isp *isp);
+ void apple_isp_wdt_stop(struct apple_isp *isp);
+ 
+ #endif /* __ISP_CAM_H__ */
+diff --git a/drivers/media/platform/apple/isp/isp-drv.c b/drivers/media/platform/apple/isp/isp-drv.c
+index da9f0dd52f4..de45d9ca266 100644
+--- a/drivers/media/platform/apple/isp/isp-drv.c
++++ b/drivers/media/platform/apple/isp/isp-drv.c
+@@ -968,6 +968,7 @@ static int apple_isp_probe(struct platform_device *pdev)
+ 		}
+ 		isp->cil_on_high = of_property_read_bool(dev->of_node,
+ 							 "apple,cil-active-high");
++		isp->cil_saved = readl(isp->cil);
+ 	}
+ 
+ 	isp->irq = platform_get_irq(pdev, 0);
+diff --git a/drivers/media/platform/apple/isp/isp-fw.c b/drivers/media/platform/apple/isp/isp-fw.c
+index 8c0f47e47d3..52a2e06e5f7 100644
+--- a/drivers/media/platform/apple/isp/isp-fw.c
++++ b/drivers/media/platform/apple/isp/isp-fw.c
+@@ -1452,8 +1452,8 @@ void apple_isp_firmware_halt(struct apple_isp *isp)
+ 		return;
+ 
+ 	isp_firmware_shutdown(isp);
+-	apple_isp_light_off(isp);
+ 	pm_runtime_put_sync(isp->dev);
++	apple_isp_light_force_off(isp);
+ 	isp->ipc_stale = NULL;
+ 	isp->fw_idle = false;
+ 	isp->fw_state = isp->hw->resident_fw && !isp->hw->fw_restart ?

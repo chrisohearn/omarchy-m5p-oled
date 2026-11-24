@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 19 Nov 2026 09:54:29 -0700
+Subject: arm64: dts: apple: t6050-j714s: the merged-mode limit of the external
+ display coprocessors
+
+The driver applies the limit on the J714s. Say so on its four external
+display coprocessors, for the driver to read.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ arch/arm64/boot/dts/apple/t6050-j714s.dts | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714s.dts b/arch/arm64/boot/dts/apple/t6050-j714s.dts
+index 612db696b07..5de41448e35 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j714s.dts
+@@ -796,6 +796,23 @@ &hpm5 {
+ #include "t6050-j714s-sleep-soc.dtsi"
+ #include "t6050-j714s-sleep-adt.dtsi"
+ 
++/* A merged mode's pair is given only while every external display has an engine */
++&dcpext0 {
++	apple,merged-mode-limit;
++};
++
++&dcpext1 {
++	apple,merged-mode-limit;
++};
++
++&dcpext2 {
++	apple,merged-mode-limit;
++};
++
++&dcpext3 {
++	apple,merged-mode-limit;
++};
++
+ /* The display coprocessors take the sleep through their firmware 27 method table */
+ &sleep {
+ 	apple,display-method-sleep;

@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Wed, 18 Nov 2026 06:40:14 -0700
+Subject: arm64: dts: apple: t6050-k116s: Add the PMU's RTC
+
+Describe the RTC of the PMU on nub-spmi0, as the J714s does: the
+registers are the T6041 PMU's, at the addresses this board's ADT gives.
+It is a second RTC beside the SMC's and the only one with an alarm. The
+PMU raises no alarm interrupt on this SoC, so the alarm is a wake source
+for a firmware sleep only.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ arch/arm64/boot/dts/apple/t6050-k116s.dts | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-k116s.dts b/arch/arm64/boot/dts/apple/t6050-k116s.dts
+index 73f1eb611bd..4143dd9b19e 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k116s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k116s.dts
+@@ -924,3 +924,19 @@ mesa: fingerprint@0 {
+ 		firmware-name = "apple/mesacal-k116s.bin", "apple/msrk-k116s.bin";
+ 	};
+ };
++
++/*
++ * The PMU's RTC and its alarm. ADT: the PMU's info-rtc (0x2002),
++ * info-rtc_alarm_offset (0x2008), info-rtc_irq_mask_offset (0x200e),
++ * info-rtc_alarm_ctrl (0x2000) and info-rtc_scrpad (0x2100), the registers of
++ * the T6041 PMU. It raises no interrupt on this SoC: an armed alarm can only
++ * wake the machine from a firmware sleep, not from s2idle.
++ */
++&pmu {
++	pmu_rtc: rtc {
++		compatible = "apple,t6050-pmu-rtc", "apple,t6041-pmu-rtc";
++		nvmem-cells = <&rtc_offset>;
++		nvmem-cell-names = "rtc_offset";
++		wakeup-source;
++	};
++};
