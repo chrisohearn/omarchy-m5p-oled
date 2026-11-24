@@ -87,4 +87,6 @@ mk "$t/o" "Omarchy/q\"x' \$HOME"; o=$(run "$t/o"); want "$o" 'names no kernel en
 mk "$t/p" Omarchy/linux-k114s; ubvar "$t/p/esp/ubootefi.var" 'bad value!'; o=$(run "$t/p")
 want "$o" "Next boot: a one-shot is present in U-Boot's variable file but undecoded" "an undecodable U-Boot value is reported, not decoded"
 nowant "$o" '  Test  ' "an undecodable U-Boot value marks no Test"
+mk "$t/m1" Omarchy/linux-k114s; printf '\x07\0\0\0' > "$t/m1/efivars/LoaderEntryOneShot-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f"; printf 'Omarchy.linux-k114s' | sed 's/./&\x00/g' >> "$t/m1/efivars/LoaderEntryOneShot-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f"; o=$(run "$t/m1")
+want "$o" 'Main    Omarchy/linux-k114s ' "a one-shot naming the default leaves it Main"
 [ $fails = 0 ] && echo "test-k114s-boot: all passed" || { echo "test-k114s-boot: $fails failed"; exit 1; }

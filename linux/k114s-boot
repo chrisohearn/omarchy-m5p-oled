@@ -60,7 +60,7 @@ while IFS=$'\t' read -r i p v; do
   [ -n "$p" ] && [ -n "$v" ] || continue
   role=Kernel; [ -n "$main" ] && role=Backup
   [ -n "$main" ] && [ "$p" = "$main" ] && role=Main
-  [ -n "$shot" ] && [ "$shot" = "$(entry_id "$p")" ] && role=Test
+  [ -n "$shot" ] && [ "$shot" = "$(entry_id "$p")" ] && [ "$role" != Main ] && role=Test   # a one-shot naming the default changes nothing: it stays Main
   now=
   if [ -n "$selpath" ]; then [ "$p" = "$selpath" ] && now="   <- running now"
   elif [ "$v" = "$run" ]; then now="   <- running now (by kernel version)"; fi
