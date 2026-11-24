@@ -1,8 +1,28 @@
 # Camera (Apple ISP) for the K114s (#33)
 
-**Status (2026-11-24).** The owner asked for the camera for meetings and chose (T3 decision grill, "Run it, on-screen
-dot") to run it without a verified activity light: the K114s ADT describes no light pin, and the light has not been
-traced from macOS. Built, not booted yet:
+**Status (2026-11-24): working, promoted.** On the owner's choice ("Run it, on-screen dot"), the camera runs without a
+verified activity light. The display's on-screen indicator shows while it streams, and after r3e1 that indicator is a
+small 32x32 green square centred under the notch. The camera Stage 2 trial passed every gate: the K114s loader row
+`0xba`, the no-light probe, the indicator bound, a 1920x1080 frame with picture content, and no new kernel warnings or
+errors. It was promoted, so the configured Stage 2 is `3e46007a` (b15 + the K114s camera row `06b38fd0` + the camera
+tree `b7efcc0d`). The owner saw the square. An ordinary boot on it passed. The IMX958 sensor tuning is installed (below), so the picture is tuned.
+
+**The IMX958 setfile, from this Mac's own macOS (2026-11-24, agent-run).** The driver reports `ch 0: sensor 0x958, ...,
+setfile apple/isp_2226_02XX.dat`. The file is carved from macOS's `appleh16camerad`, which Linux reads here without
+booting macOS:
+1. Build [linux-apfs-rw](https://github.com/linux-apfs/linux-apfs-rw) against the running kernel's build tree:
+   `kmake -C <kernel src> O=<kernel out> M=$PWD modules`.
+2. `insmod apfs.ko`, then mount the sealed System volume read-only: `mount -t apfs -o ro,vol=0 /dev/nvme0n1p2 <dir>`.
+   The FileVault data volume is not readable, and is not needed.
+3. Copy `usr/sbin/appleh16camerad`, unmount, and `rmmod apfs`.
+4. Run `asahi_firmware.isp`'s carver with two more table entries: `SetFile(0x958, 0x22260201, "2226_02XX", 0x6ff4)` and
+   `SetFile(0x958, 0x22240106, "2224_01XX", 0x6ff4)`. Each is found three times (one per binary slice), and the copies
+   are identical.
+5. Install `isp_2226_02XX.dat` and `isp_2224_01XX.dat` in `/lib/firmware/apple`, which is on the root filesystem and
+   survives reboots.
+
+The files are Apple's and are not in this repository. After a macOS update, repeat these steps. The driver then logged no
+setfile error, and a 1920x1080 capture worked.
 
 | Part | What | Result |
 | --- | --- | --- |
