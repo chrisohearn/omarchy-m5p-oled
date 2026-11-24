@@ -126,7 +126,7 @@ package() {
       grep -q '"apple,t6050-qspi", "apple,k114s"' "$_src/drivers/spi/spi-apple-qspi.c" &&
       grep -q 'pm_suspend_no_platform()' "$_src/drivers/pci/controller/pcie-apple.c" &&
       grep -q 'apple,k114-macaudio' "$_src/sound/soc/apple/macaudio.c" &&
-      grep -rq 'V26B123_M5' "$_src/drivers/gpu/drm/asahi/hw/t6050.rs" ||
+      grep -q 'name: "27.2 (26B8125), G17S",' "$_src/drivers/gpu/drm/asahi/hw/t6050.rs" ||
       { echo "$_src is not the r3d series (patches/linux/r3d.series)" >&2; return 1; }
   fi
   # r3b-c2 must carry sleep-lid/0007: an unreadable manufacture date is -ENODATA, not -EOPNOTSUPP (aurora-silicon/linux#1615)

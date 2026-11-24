@@ -75,7 +75,7 @@ deep sleep only if suspend-to-idle drains more than about 2% an hour.
 | QEMU `k114s-qemu-smoke shell` | PASS, `7.3.0-17.v272-18-k114s-r3d-ARCH` | emulator/replica |
 | QEMU, every module | `ok=1966 failed=7`, the same seven as every earlier kernel | emulator/replica |
 | `check-package.sh` (with the build's `Module.symvers`) | all passed. For r3d it also checks that apple-sep picks the T6050 profile by SoC (#2631), not by the `apple,k114s` string | agent-run |
-| The PKGBUILD's r3d source guard | the tree carries the brightness floor, the 500-nit EDR cap, Display P3, the unknown-SDR EDR guard, the battery-date fix, the light-sensor blob, the K114s NVRAM row, #2488's adopted-link test, the `apple,k114-macaudio` card and the 27.2 GPU firmware entry | agent-run |
+| The PKGBUILD's r3d source guard | the tree carries the brightness floor, the 500-nit EDR cap, Display P3, the unknown-SDR EDR guard, the battery-date fix, the light-sensor blob, the K114s NVRAM row, #2488's adopted-link test, the `apple,k114-macaudio` card and the 27.2 (26B8125) GPU firmware entry itself | agent-run |
 
 ## 3. The trial
 
