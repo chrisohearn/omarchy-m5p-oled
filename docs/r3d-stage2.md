@@ -88,13 +88,24 @@ There are two one-boot tests, in this order, each with its own record. If the se
 | B | b15 + tree `26c3407f` | `1ac3c9315cad838889dc0886b986a6f002878b759b0924c3c4fada657ab8cfb7` |
 
 - **How it boots:** each test goes through `aura-try`, which arms the trial file once. The configured Stage 2 stays the
-  default, so a hang is followed by `d1254de6` at the next power-on. The trial watchdog does not arm on this Mac, so a
-  hang needs a long press on the power button.
-- **What must pass:** the r3d checks (the speaker gate and both cards, P9, kernel health, the 120 Hz 10-bit panel, the
+  default, so a hang is followed by the configured file at the next power-on. For test A that is `d1254de6`. For test
+  B it is whatever is configured when B is armed: `d9aab35c` if test A was promoted, else `d1254de6`. The test B kit
+  pins that file, not `d1254de6`. The trial watchdog does not arm on this Mac, so a hang needs a long press on the
+  power button.
+- **What must pass:** the r3d checks: the speaker gate and both cards, P9, kernel health, the 120 Hz 10-bit panel, the
   GPU, the light sensor, the NVRAM read path, the SEP, the microphone, network, Bluetooth, the battery and bit-exact
-  decode). Also: the MCC driver bound with no error, the keyboard and trackpad, and the USB-C ports enumerating.
-- **Promotion:** a test that passes is promoted. Both pinned trees and, for B, the loader become the tested ones.
-  `update-boot-ctxr` must then write the tested file again.
+  decode. Test A also gates on:
+  - the MCC: its node in the booted tree, its line "system level cache allocation enabled on N planes", and none of
+    its failure or warning lines;
+  - no error-priority kernel line that the previous boot did not have, which catches an engine that fails to probe;
+  - the Apple MTP keyboard and multi-touch.
+
+  The binding of the Neural Engine, the encoder, ProRes and both JPEG engines is recorded for each device. The ISP is
+  expected to stay unbound, because its node is disabled.
+- **Promotion:** a test that passes is promoted: both pinned trees and, for B, the loader become the tested ones.
+  Before anything changes, the promote script proves that `update-boot-ctxr`'s own recipe (loader + tree + `boot.bin`'s
+  U-Boot trailer) gives the tested file. It then requires the written Stage 2 to be that file byte for byte. If
+  anything fails or is interrupted, it restores the trees, the Stage 2 and P9.
 - **Test B waits for the macOS repair tool.** `macos/tools/k114s_repair.py` recognises a Stage 2 only by the loader
   prefixes it knows: the r2c bundle's installed loader (3,997,696 bytes) and the pin loader (4,063,232 bytes). The
   Stage 2 configured since 2026-11-23 (`d1254de6`, Aura b13 at 3,932,160 bytes, with the aurora9 U-Boot trailer) is
