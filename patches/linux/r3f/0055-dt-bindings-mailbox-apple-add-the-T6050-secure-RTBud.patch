@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Wed, 18 Nov 2026 07:33:57 -0700
+Subject: dt-bindings: mailbox: apple: add the T6050 secure RTBuddy port
+
+The internal DCP of a T6050 on firmware 27.2 has the secure port T8140's
+has (ADT dcp-exclave-mailbox, iop,secure-rtbuddy-proxy).
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml b/Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml
+index 7626c8afced..e7f34eb39b1 100644
+--- a/Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml
++++ b/Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml
+@@ -98,6 +98,7 @@ properties:
+           iop,secure-rtbuddy-proxy. It is polled, with no interrupts described.
+         items:
+           - enum:
++              - apple,t6050-secure-rtbuddy-proxy
+               - apple,t8140-secure-rtbuddy-proxy
+           - const: apple,secure-rtbuddy-proxy
+ 

@@ -1,0 +1,68 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Wed, 18 Nov 2026 06:39:40 -0700
+Subject: soc: apple: rtkit: serve an endpoint's first buffer under the ANS
+ hold
+
+The T6050 ANS wake holds the buffers: a request under the hold fails
+the wake with -EBUSY and the driver then holds all I/O. ANS on firmware
+27.0 asks for none. On 27.2 it asks for its syslog buffer (endpoint 2,
+0x4000 bytes) about 2.4 s into the wake, having none yet.
+
+A first buffer for an endpoint replaces nothing the hold protects:
+serve it. A request for an endpoint that has a buffer is refused as
+before.
+
+With it ANS comes back and the controller is rebuilt after a deep sleep
+on a K116s (27.2).
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ drivers/soc/apple/rtkit.c | 17 ++++++++++++-----
+ 1 file changed, 12 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/soc/apple/rtkit.c b/drivers/soc/apple/rtkit.c
+index 88eb0141952..1276833aecc 100644
+--- a/drivers/soc/apple/rtkit.c
++++ b/drivers/soc/apple/rtkit.c
+@@ -558,11 +558,9 @@ static void apple_rtkit_management_rx(struct apple_rtkit *rtk, u64 msg)
+ 	}
+ }
+ 
+-static int apple_rtkit_alloc_shmem(struct apple_rtkit *rtk, u8 ep,
+-				   struct apple_rtkit_shmem *buffer)
++static int apple_rtkit_alloc_first_shmem(struct apple_rtkit *rtk, u8 ep,
++					 struct apple_rtkit_shmem *buffer)
+ {
+-	if (READ_ONCE(rtk->ans_hold))
+-		return apple_rtkit_ans_fail(rtk, -EBUSY);
+ 	/* The crash log's buffer is asked for only at a crash: serve it after a strict restart too. */
+ 	if (READ_ONCE(rtk->strict_retained_buffers) && ep != APPLE_RTKIT_EP_CRASHLOG)
+ 		return -EPROTO;
+@@ -577,6 +575,14 @@ static int apple_rtkit_alloc_shmem(struct apple_rtkit *rtk, u8 ep,
+ 	return buffer->buffer ? 0 : -ENOMEM;
+ }
+ 
++static int apple_rtkit_alloc_shmem(struct apple_rtkit *rtk, u8 ep,
++				   struct apple_rtkit_shmem *buffer)
++{
++	if (READ_ONCE(rtk->ans_hold))
++		return apple_rtkit_ans_fail(rtk, -EBUSY);
++	return apple_rtkit_alloc_first_shmem(rtk, ep, buffer);
++}
++
+ static int apple_rtkit_common_rx_get_buffer(struct apple_rtkit *rtk,
+ 					    struct apple_rtkit_shmem *buffer,
+ 					    u8 ep, u64 msg)
+@@ -650,7 +656,8 @@ static int apple_rtkit_common_rx_get_buffer(struct apple_rtkit *rtk,
+ 		goto error;
+ 	}
+ 
+-	err = apple_rtkit_alloc_shmem(rtk, ep, &request);
++	/* The endpoint has no buffer yet: a first one replaces nothing the ANS hold protects */
++	err = apple_rtkit_alloc_first_shmem(rtk, ep, &request);
+ 	if (err)
+ 		goto error;
+ 	*buffer = request;

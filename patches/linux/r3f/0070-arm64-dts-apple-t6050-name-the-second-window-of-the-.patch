@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <address-in-upstream-commit@localhost>
+Date: Thu, 19 Nov 2026 23:33:03 +1100
+Subject: arm64: dts: apple: t6050: name the second window of the AVE and JPEG
+ DARTs
+
+The apple,dart binding requires reg-names once a DART has two register
+windows. ave0_dart, ave0_dart1 and jpeg0_dart have two each but no names,
+so every board that enables them fails dtbs_check.
+
+Name them after the DART instance each window is in the board's ADT:
+ave0_dart's second window is its address filter ("dapf"); ave0_dart1's
+second window and jpeg0_dart's (a shared gateway page) are neither a
+DAPF nor a GAPF, so they are "auxiliary".
+
+No functional change: the driver reads a "dapf" window only together
+with apple,dapf-ranges, which these nodes do not have, and it does not
+use "auxiliary" windows.
+
+Signed-off-by: Ryan Murray <address-in-upstream-commit@localhost>
+
+[re-cut onto the K114s r3d tree]
+---
+ arch/arm64/boot/dts/apple/t6050-peripherals.dtsi | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-peripherals.dtsi b/arch/arm64/boot/dts/apple/t6050-peripherals.dtsi
+index 4781a4f2b1a..511028593a9 100644
+--- a/arch/arm64/boot/dts/apple/t6050-peripherals.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-peripherals.dtsi
+@@ -3242,6 +3242,8 @@ ave0_dart: iommu@22830a0000 {
+ 		compatible = "apple,t6050-dart", "apple,t8110-dart";
+ 		reg = <0x22 0x830a0000 0x0 0xc000>,
+ 		      <0x22 0x830b0000 0x0 0x4000>;
++		/* No apple,dapf-ranges: the driver leaves the DAPF page alone. */
++		reg-names = "dart", "dapf";
+ 		interrupts = <AIC_IRQ 0 2432 IRQ_TYPE_LEVEL_HIGH>;
+ 		power-domains = <&ps_venc0_sys>;
+ 		#iommu-cells = <1>;
+@@ -3253,6 +3255,7 @@ ave0_dart1: iommu@2283080000 {
+ 		compatible = "apple,t6050-dart", "apple,t8110-dart";
+ 		reg = <0x22 0x83080000 0x0 0xc000>,
+ 		      <0x22 0x83094000 0x0 0x4000>;
++		reg-names = "dart", "auxiliary";
+ 		interrupts = <AIC_IRQ 0 2432 IRQ_TYPE_LEVEL_HIGH>;
+ 		power-domains = <&ps_venc0_sys>;
+ 		#iommu-cells = <1>;
+@@ -3362,6 +3365,7 @@ jpeg0_dart: iommu@2281020000 {
+ 		compatible = "apple,t6050-dart", "apple,t8110-dart";
+ 		reg = <0x22 0x81020000 0x0 0xc000>,
+ 		      <0x2 0x74000000 0x0 0x4000>;
++		reg-names = "dart", "auxiliary";
+ 		interrupts = <AIC_IRQ 0 1356 IRQ_TYPE_LEVEL_HIGH>;
+ 		power-domains = <&ps_jpg>;
+ 		#iommu-cells = <1>;

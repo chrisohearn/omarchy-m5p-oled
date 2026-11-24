@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 19 Nov 2026 05:28:30 -0700
+Subject: soc: apple: rtkit: acknowledge the v2 PMP's CoreAnalytics events on
+ any board
+
+The empty CoreAnalytics event on the PMP's endpoint 7 is acknowledged
+on the J714s only. It is the firmware's doing, not the board's: a
+K116s's PMP sends it too, on the same endpoint. Acknowledge it for
+every registry-v2 PMP.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ drivers/soc/apple/rtkit.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/drivers/soc/apple/rtkit.c b/drivers/soc/apple/rtkit.c
+index 1276833aecc..0a329cf6cff 100644
+--- a/drivers/soc/apple/rtkit.c
++++ b/drivers/soc/apple/rtkit.c
+@@ -2408,8 +2408,7 @@ static struct apple_rtkit *__apple_rtkit_init(struct device *dev, void *cookie,
+ 		goto free_rtk;
+ 	rtk->pmp_registry_v2 =
+ 		of_device_is_compatible(dev->of_node, "apple,t6050-pmp-v2");
+-	rtk->pmp_ca_event_ack = rtk->pmp_registry_v2 &&
+-				of_machine_is_compatible("apple,j714s");
++	rtk->pmp_ca_event_ack = rtk->pmp_registry_v2;
+ 
+ 	init_completion(&rtk->epmap_completion);
+ 	init_completion(&rtk->coreanalytics_completion);
