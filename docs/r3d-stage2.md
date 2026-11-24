@@ -1,6 +1,6 @@
 # r3d Stage 2: the K114s tree on the r3d includes, and Aura b15
 
-Status 2026-11-24: **built and checked offline; not booted.** This is the loader-and-tree batch of the owner's request
+Status 2026-11-24: **test A booted once (section 4) and was not promoted; test A4, with the encoder off, is next.** This is the loader-and-tree batch of the owner's request
 to "get this device on the latest known code and fixes" (docs/r3d-kernel.md). The owner chose this batch next and
 standing one-boot tests ("Reboot when ready, tell me"). Evidence labels: **agent-run**, **inferred**.
 
@@ -111,3 +111,35 @@ There are two one-boot tests, in this order, each with its own record. If the se
   Stage 2 configured since 2026-11-23 (`d1254de6`, Aura b13 at 3,932,160 bytes, with the aurora9 U-Boot trailer) is
   already unknown to it. Test A keeps that loader, so it changes nothing here. Test B would configure another unknown
   prefix, so it is not promoted until the repair tool knows the configured loader and trailer (#234).
+
+## 4. Test A result, and the encoder (2026-11-24)
+
+Test A (`d9aab35c`, tree `26c3407f`) booted once through `aura-try` at 04:29Z (agent-run, record
+`owner-session-s2a/trial.20261124T042950.OFCJ`). Results:
+- **Passed:**
+  - the r3d checks: the speaker gate and both cards, P9, 0 Oops/WARNING lines, 120 Hz 10-bit, the GPU, the light
+    sensor, NVRAM read-only, the SEP, the microphone, network, Bluetooth, the battery and bit-exact decode;
+  - the Apple MTP keyboard and multi-touch;
+  - the MCC: "system level cache allocation enabled on 16 planes", and none of its failure lines;
+  - the engines: the Neural Engine bound to `ane_t6021`, ProRes to `apple-prores`, and both JPEG engines to
+    `apple-jpeg`.
+- **Failed:** the video encoder. `apple-ave 2283100000.video-encoder: error -ENODEV: unsupported firmware (text CRC
+  1e27a926)`. After the failed probe, the five VENC0 power states stay `sync_state() pending`, which holds them on.
+  Test A was not promoted.
+
+`dts/t6050-k114s-r3d.dts` now disables the encoder and its two DARTs. The six VENC0 power states stay described and
+enabled, so genpd finds them unused and powers them down at boot. Disabling them as well would leave nothing to turn
+them off, which the review of PR #237 caught (P1). `FAB0_SOC` stays on for the JPEG engines.
+
+| | Tree | Test file |
+| --- | --- | --- |
+| Test A4: b13 loader (installed) + the tree | `a0897a5a0b31de4c5300d74367a3747354febc9b4aca26edd2b0f98d3ff6fc30` (153,831 bytes) | `bd329c9fa8efffbc677b30c3202b439d85d5446caef5a01e43b989cfa4497aa5` |
+| Test B4: Aura b15 + the same tree | same | `6b9848118206371b050f2b606181f1776cf904432a01ca8a04c58c9350ec68b3` |
+
+These replace the A and B rows of section 3. The four lints pass, and `tree-check` gives jack only, no amplifier and
+no speaker channel (agent-run).
+
+What A4 must pass is section 3's list, without the encoder. The engines that must bind are the Neural Engine,
+ProRes and both JPEG engines; the encoder and the ISP must stay unbound. A4 also checks that no new error-priority
+kernel line appears. Test B4 falls back to whatever Stage 2 is configured when it is armed: A4's file if A4 was
+promoted. The encoder can come back once the AVE driver accepts the K114s 27.2 encoder firmware.
