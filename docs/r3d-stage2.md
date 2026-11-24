@@ -1,6 +1,6 @@
 # r3d Stage 2: the K114s tree on the r3d includes, and Aura b15
 
-Status 2026-11-24: **test A booted once (section 4) and was not promoted; test A4, with the encoder off, is next.** This is the loader-and-tree batch of the owner's request
+Status 2026-11-24: **promoted.** Test A booted once (section 4) and was not promoted. Test A4 (Aura b13 + tree `a0897a5a`, the video encoder and its DARTs off) passed and was promoted at 05:47Z: Stage 2 `bd329c9f`. Test B4 (the self-built Aura `v1.0.0b15` loader `788277b6` + the same tree) passed and was promoted at 05:56Z: the configured Stage 2 is `6b984811`, built through the loader override `/usr/lib/asahi-boot/m1n1-ctxr.bin`. A local pacman hook flags each new aura package while the override stands (owner's choice: "Promote my b15, watch for packages"). An ordinary boot at 05:58Z confirmed loader `1.0.0b15`. This is the loader-and-tree batch of the owner's request
 to "get this device on the latest known code and fixes" (docs/r3d-kernel.md). The owner chose this batch next and
 standing one-boot tests ("Reboot when ready, tell me"). Evidence labels: **agent-run**, **inferred**.
 

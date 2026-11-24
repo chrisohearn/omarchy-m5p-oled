@@ -1,6 +1,6 @@
 # r3d: the K114s kernel on integration/aurora `0bbe021a`, with the open sleep, display and device-tree PRs
 
-Status 2026-11-24: **built, packaged, emulator-tested; not booted on the K114s.** The owner asked to "look across all
+Status 2026-11-24: **promoted: r3d is Main (the default) since 2026-11-24 03:11Z, and r3c-upstream is Backup** (owner's choice in T3, "Make r3d the default"; `k114s-boot status` shows the roles). The text below is the record from before the first boot. The owner asked to "look across all
 repos we are tracking to get this device on the latest known code and fixes" (intake 2026-11-24). The answers: update
 the packages, the kernel and the loader; take every relevant open PR, drafts included; run unattended one-shot trials,
 and promote a trial that passes every check without asking; post test reports and PRs upstream. The speakers stay

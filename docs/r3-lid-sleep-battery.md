@@ -3,7 +3,7 @@
 Owner decision 2026-11-17, confirmed after two attended suspend-to-idle passes on 2026-11-24 on kernel r3d
 (`tests/hardware/k114s-sleep-check.sh pm-test freezer`, `devices`, `platform`, and two real cycles, woken by a key and by
 the lid: all PASS). Until now every sleep path was blocked three ways (docs/r3-integration.md step C, docs/r3-lid-lock.md).
-This opens exactly one of them, on ordinary boots only. Status: **implemented and tested in fake roots; not installed.**
+This opens exactly one of them, on ordinary boots only. Status: **installed 2026-11-24 05:50Z (#238).** A trial boot kept the gate closed, and the ordinary boot at 05:58Z opened it ("lid close suspends on battery, locks on external power"). The owner skipped the overnight drain measurement (2026-11-24), so drain while suspended is unmeasured and deep sleep stays an open question.
 All dates here are UTC. Evidence labels: agent-run (a command run on this Mac 2026-11-24, read only), source-read (man page of the installed systemd 262).
 
 ## What it does
