@@ -131,7 +131,7 @@ rimg=$B/promotion/omarchy_linux-aurora-k114s.efi
 RP() { python3 -I -c '
 import json, sys; sys.path.insert(0, sys.argv[1]); import k114s_repair as r
 c = json.load(open(sys.argv[2]))
-r.PIN_LOADER = (c["pin_bytes"], c["pin_sha"]); r.LOCAL_STAGE2[c["disp_sha"]] = "r3-display (test)"
+r.KNOWN_LOADERS = (("pin", c["pin_bytes"], c["pin_sha"]),); r.LOCAL_STAGE2[c["disp_sha"]] = "r3-display (test)"
 r.PROMOTED_STAGE2["r3-gpu"] = ("boot-ctxr-gpu.bin", "k114s.dtb.gpu", c["gpu_sha"], c["gputree_sha"], "installed")
 try: sys.exit(r.main(["k114s-repair"] + sys.argv[3:]))
 except r.Stop as stop: print("k114s-repair: STOPPED: %s" % stop); sys.exit(1)' "$B/tools" "$W/consts.json" "$@"; }
@@ -282,13 +282,70 @@ ok "D9: --check wrote nothing" "$(sum "$E")" "$before"
 mkesp display; rm "$E/EFI/Linux/omarchy_linux-k114s-r3b.efi"; out=$(RF 181000000 restore-repair --esp-dir "$E" 2>&1)
 has "D9: with the r3b image removed by hand first, restore-repair works" "$out" "Restored the repair entry as entry 1"
 ok "D9: restore-repair leaves the display Stage 2 alone (the way back names stage2 r3-gpu first)" "$(RP status --esp-dir "$E" 2>&1 | grep -c 'Stage 2 (boot-ctxr):   r3-display (test)')" 1
+# --- the Stage 2 configured since 2026-11-23 (issue #234): Aura b13 (another loader) and the aurora9 U-Boot tail --------------
+# A replica ESP holding it: a synthetic loader and tail, the K114s tree. The real hashes are in KNOWN_LOADERS and
+# KNOWN_TRAILERS (checked below); the JSON the Linux side keeps on the ESP is what lets the tool read the synthetic ones.
+mkb13() { # the ESP of layout $1 with the b13 Stage 2; $W/known.json lists its loader and tail
+  mkesp "$1"; python3 -I - "$E" "$W/known.json" <<'PY'
+import gzip, hashlib, json, sys
+h = lambda b: hashlib.sha256(b).hexdigest(); f = sys.argv[1] + "/m1n1/boot-ctxr.bin"; d = open(f, "rb").read()
+i = d.index(b"\xd0\x0d\xfe\xed"); tree = d[i:i + int.from_bytes(d[i + 4:i + 8], "big")]
+loader, tail = b"B13LDR", gzip.compress(b"aurora9-uboot")
+open(f, "wb").write(loader + tree + tail)
+json.dump({"loaders": [{"name": "aura-b13", "bytes": len(loader), "sha256": h(loader)}],
+           "trailers": [{"name": "aurora9", "sha256": h(tail)}]}, open(sys.argv[2], "w"))
+PY
+}
+RJ() { # RJ <known.json content or "-"> args...: the tool with the ESP known-loaders.json set to that file
+  local j=$1; shift; if [ "$j" != - ]; then cp "$j" "$E/k114s-repair/known-loaders.json"; fi; $R "$@" --esp-dir "$E" 2>&1; }
+mkb13 after; before=$(sum "$E")
+out=$($R status --esp-dir "$E" 2>&1); has "b13: with no list of loaders the Stage 2 is unknown (the failure of issue 234)" "$out" "Stage 2 (boot-ctxr):   unknown"
+has "b13: and status says the ESP has no known-loaders.json" "$out" "known-loaders.json: *absent"
+out=$($R stage2 r1 --esp-dir "$E" 2>&1); has "b13: stage2 refuses to replace an unknown Stage 2" "$out" "not one this bundle knows"; ok "b13: and wrote nothing" "$(sum "$E")" "$before"
+out=$(RJ "$W/known.json" status); has "b13: with the ESP known-loaders.json status names the loader" "$out" "Stage 2 (boot-ctxr):   aura-b13-loader-other-trees(1)"
+has "b13: and counts its entries" "$out" "known-loaders.json: *1 loaders, 1 U-Boot tails"
+b13=$(sum "$E"); cp "$E/m1n1/boot-ctxr.bin" "$W/b13.bin"
+out=$($R rollback stage2 --esp-dir "$E" 2>&1); has "b13: rollback stage2 works on it" "$out" "Rolled back: m1n1/boot-ctxr.bin"
+ok "b13: it put the backed-up Stage 2 back" "$(cmp -s "$E/m1n1/boot-ctxr.bin" "$E/k114s-repair/backup-before-r1/m1n1/boot-ctxr.bin"; echo $?)" 0
+cp "$W/b13.bin" "$E/m1n1/boot-ctxr.bin"
+out=$($R stage2 r1 --esp-dir "$E" 2>&1); has "b13: stage2 r1 replaces it" "$out" "Stage 2 is now: r1"
+ok "b13: with the bundle r1 file" "$(cmp -s "$E/m1n1/boot-ctxr.bin" "$B/payload/boot-ctxr-k114s-r1.bin"; echo $?)" 0
+# the digest checks stay: a loader or a tail that is not listed is not known, whatever else is
+python3 -I - "$W/known.json" "$W" <<'PY'
+import json, sys
+k = json.load(open(sys.argv[1])); w = sys.argv[2]
+json.dump({"loaders": k["loaders"]}, open(w + "/j-loader-only.json", "w")); json.dump({"trailers": k["trailers"]}, open(w + "/j-tail-only.json", "w"))
+k["loaders"][0]["sha256"] = k["loaders"][0]["sha256"][:-1] + ("0" if k["loaders"][0]["sha256"][-1] != "0" else "1"); json.dump(k, open(w + "/j-wrong-hash.json", "w"))
+k["loaders"][0]["sha256"] = "not hex"; json.dump(k, open(w + "/j-bad-entry.json", "w"))
+open(w + "/j-damaged.json", "w").write("{not json")
+PY
+mkb13 after
+for c in j-loader-only j-tail-only j-wrong-hash j-bad-entry; do mkb13 after; before=$(sum "$E")
+  out=$(RJ "$W/$c.json" status); has "b13: $c.json leaves the Stage 2 unknown" "$out" "Stage 2 (boot-ctxr):   unknown"
+  out=$($R stage2 r1 --esp-dir "$E" 2>&1); has "b13: $c.json: stage2 stops" "$out" "STOPPED"
+  ok "b13: $c.json: the Stage 2 was not replaced" "$(cmp -s "$E/m1n1/boot-ctxr.bin" "$B/payload/boot-ctxr-k114s-r1.bin"; echo $?)" 1; done
+mkb13 after; out=$(RJ "$W/j-damaged.json" status); has "b13: a damaged known-loaders.json is ignored, status still runs" "$out" "known-loaders.json: *damaged, ignored"
+has "b13: and the Stage 2 stays unknown" "$out" "Stage 2 (boot-ctxr):   unknown"
+# the built-in lists are the second source: the same Stage 2 is known without the file when the tool carries a loader and tail
+BI() { python3 -I -c '
+import json, sys; sys.path.insert(0, sys.argv[1]); import k114s_repair as r
+k = json.load(open(sys.argv[2])); r.KNOWN_LOADERS += tuple((e["name"], e["bytes"], e["sha256"]) for e in k["loaders"])
+r.KNOWN_TRAILERS += tuple((e["name"], e["sha256"]) for e in k["trailers"])
+try: sys.exit(r.main(["k114s-repair"] + sys.argv[3:]))
+except r.Stop as stop: print("k114s-repair: STOPPED: %s" % stop); sys.exit(1)' "$B/tools" "$W/known.json" "$@"; }
+mkb13 after; out=$(BI status --esp-dir "$E" 2>&1); has "b13: built into the tool, it is known with no file on the ESP" "$out" "Stage 2 (boot-ctxr):   aura-b13-loader-other-trees(1)"
+# the tool built-in entries: the b13 and b15 loaders (3,932,160 bytes each), the pin loader and the aurora9 tail
+ok "the built-in loaders and U-Boot tails are b13, b15, the pin loader and aurora9" "$(cd "$B/tools" && python3 -I -c 'import sys; sys.path.insert(0, "."); import k114s_repair as r
+print(" ".join("%s:%d:%s" % (n, z, d[:8]) for n, z, d in r.KNOWN_LOADERS), " ".join("%s:%s" % (n, d[:8]) for n, d in r.KNOWN_TRAILERS), r.KNOWN_LOADERS[1][2], r.KNOWN_TRAILERS[0][1])')" \
+  "pin:4063232:beceb683 aura-b13:3932160:4742dd6a aura-b15:3932160:788277b6 aurora9:6ee8bd9f 4742dd6a11884e25c7817616a6a14ace98f82cf292904c58220545e77babe994 6ee8bd9f81e5d409973b6f5cab69d67aa2ff292e0f570e3d97dd69e722b667af"
+ok "no built-in loader name collides with the manifest \"installed\" (promoted_payload tests for it)" "$(cd "$B/tools" && python3 -I -c 'import sys; sys.path.insert(0, "."); import k114s_repair as r; print(sorted(n for n, _, _ in r.KNOWN_LOADERS).count("installed"))')" 0
 # the tool's own constants, and the real files when the build area is here
 ok "the tool's r3-gpu hashes are the promoted GPU Stage 2 and tree (docs/r3a-promotion.md P1), and it names the D9 file" "$(cd "$B/tools" && python3 -I -c 'import sys; sys.path.insert(0, "."); import k114s_repair as r
-print(r.PROMOTED_STAGE2["r3-gpu"][2][:8], r.PROMOTED_STAGE2["r3-gpu"][3][:8], r.PIN_LOADER[0], r.PIN_LOADER[1][:8], sorted(k[:8] for k in r.LOCAL_STAGE2))')" \
-  "9825a103 2c870ba9 4063232 beceb683 ['5164bb1e', '90b35137', '9825a103']"
+print(r.PROMOTED_STAGE2["r3-gpu"][2][:8], r.PROMOTED_STAGE2["r3-gpu"][3][:8], r.KNOWN_LOADERS[0][1], r.KNOWN_LOADERS[0][2][:8], r.KNOWN_LOADERS[0][0], sorted(k[:8] for k in r.LOCAL_STAGE2))')" \
+  "9825a103 2c870ba9 4063232 beceb683 pin ['5164bb1e', '90b35137', '9825a103']"
 BR=${K114S_BUILD_ROOT:-$HOME/k114s-build}/integrate; PIN=$BR/release-display-trials/aura-pin/m1n1.bin; D5S2=$BR/release-display-d5/stage2/boot-ctxr-disp-bl.bin
 if [ -s "$PIN" ]; then ok "the pin loader's length and hash are those of the built loader file" "$(wc -c < "$PIN" | tr -d ' ') $(sha256sum "$PIN" | cut -c1-64)" \
-  "$(cd "$B/tools" && python3 -I -c 'import sys; sys.path.insert(0, "."); import k114s_repair as r; print(r.PIN_LOADER[0], r.PIN_LOADER[1])')"
+  "$(cd "$B/tools" && python3 -I -c 'import sys; sys.path.insert(0, "."); import k114s_repair as r; print(r.KNOWN_LOADERS[0][1], r.KNOWN_LOADERS[0][2])')"
 else echo "SKIP the pin loader file is not in this build area"; fi
 if [ -s "$D5S2" ] && [ -s "$PIN" ]; then
   ok "the real D9 Stage 2 splits at the pin loader's length, one tree, and its tail is the one the manifest's installed loader files carry" "$(cd "$B/tools" && python3 -I -c 'import sys; sys.path.insert(0, "."); import k114s_repair as r

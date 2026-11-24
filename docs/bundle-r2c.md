@@ -101,6 +101,51 @@ EFI partition has about 20 MB free, and an update can rebuild an 80 MB boot imag
 the finish step a guard stops package changes until the partition has 100 MB free. The Omarchy
 channel switch is stopped as well. Making room on the partition is a separate later step.
 
+## Which Stage 2 the tool knows
+
+`status` and `stage2` start from what `m1n1/boot-ctxr.bin` is now (`stage2` refuses to replace an `unknown` one; `rollback stage2` restores the backup
+whatever the live file is). A Stage 2 is
+`<Aura loader> <device tree(s)> <gzip U-Boot>`. `split_known` in `macos/tools/k114s_repair.py` cuts it at each
+known loader's length and accepts it only when the cut-off prefix is exactly that loader (sha256) and the tail is
+exactly a known U-Boot (sha256). The tree is not checked: `status` prints `<loader>-loader-other-trees(N)` for N trees,
+and `stage2` replaces the whole file. A loader or tail that is not listed gives `unknown`, `stage2` stops, and nothing
+is guessed from a length or a name. The lists are:
+
+| Source | Loaders | U-Boot tails |
+|---|---|---|
+| `manifest.json` of the bundle (`installed`, `bundle`) | the r2c-era `m1n1-aurora`, 3,997,696 bytes | its `uboot_trailer_sha256` |
+| `KNOWN_LOADERS`, `KNOWN_TRAILERS` in the tool | `pin` (4,063,232, `beceb683...`), `aura-b13` (3,932,160, `4742dd6a...`, configured since 2026-11-23), `aura-b15` (3,932,160, `788277b6...`, the self-built one of `docs/r3d-stage2.md` on branch `r3d/stage2-tree`) | `aurora9` (`6ee8bd9f...`) |
+| `k114s-repair/known-loaders.json` on the ESP | whatever the Linux side listed | likewise |
+
+A Stage 2 is known when its loader is in any of the three loader lists and its tail in any of the three tail lists. The
+ESP file only adds entries (`{"loaders": [{"name", "bytes", "sha256"}], "trailers": [{"name", "sha256"}]}`); a missing file
+adds none, a damaged one is ignored (`status` says so on its `known-loaders.json:` line), and an entry that is not a name,
+a byte count and a lower-case sha256 is dropped. The built-in lists are the fallback that works with no file, and a
+promoted Stage 2 with a new loader or U-Boot needs one change here: a line in the table above, from `tools/k114s-repair-tool-install`.
+
+### The copy on the ESP
+
+The Mac does not get the tool from this repository. It gets `k114s-repair/promotion/k114s_repair.py` from the ESP, which the
+owner copies over `tools/k114s_repair.py` in the repair bundle folder (`docs/r3a-promotion.md` P4b,
+`docs/r3-display-d5-d9.md` M9). That copy is put there by root on the Linux machine, from a checkout of this repository, and
+**nothing updates it by itself**: not `repo-sync`, not the pacman hooks, not `k114s-release`. The runbook steps
+(P0e, D9p) wrote it by hand, so it is as old as the last of those steps; on 2026-11-23 it was older than the repository's
+tool. The step that does it:
+
+```sh
+sudo python3 -B -I tools/k114s-repair-tool-install --check    # reads everything, says what it would write
+sudo python3 -B -I tools/k114s-repair-tool-install            # writes the tool and the list
+```
+
+Run it from a worktree of this repository (`-B` keeps root from leaving `__pycache__` there),
+after every change to `macos/tools/k114s_repair.py` and after every Stage 2 promotion (`k114s-release stage2`). It checks that the
+configured Stage 2 starts with the loader file it was built from (`/usr/lib/asahi-boot/m1n1-ctxr.bin`, else `m1n1.bin`; or
+`--loader FILE`), carries one K114s device tree and ends in a gzip U-Boot, then writes two files on the ESP, each through a
+temporary file, a sync, a rename and a read back: the tool (the one it replaces is kept as `k114s_repair.py.prev`) and
+`known-loaders.json` (entries already in it stay; a loader or tail the tool already has built in is not listed twice). It writes
+nothing else and about 100 KB at most. Then, on the Mac, copy the file again and run `sudo ./k114s-repair status`: the
+`Stage 2 (boot-ctxr)` line must not say `unknown`. Test: `tests/macos/test-repair-tool-install.sh`.
+
 ## Not included
 
 OLED brightness and the display coprocessor, GPU acceleration, speakers, microphones, camera,
