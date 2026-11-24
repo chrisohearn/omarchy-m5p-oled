@@ -111,3 +111,24 @@ There are two one-boot tests, in this order, each with its own record. If the se
   Stage 2 configured since 2026-11-23 (`d1254de6`, Aura b13 at 3,932,160 bytes, with the aurora9 U-Boot trailer) is
   already unknown to it. Test A keeps that loader, so it changes nothing here. Test B would configure another unknown
   prefix, so it is not promoted until the repair tool knows the configured loader and trailer (#234).
+
+## 4. Test A result, and the encoder (2026-11-24)
+
+Test A (`d9aab35c`, tree `26c3407f`) booted once through `aura-try` at 04:29Z (agent-run, record
+`owner-session-s2a/trial.20261124T042950.OFCJ`). Results:
+- **Passed:**
+  - the r3d checks: the speaker gate and both cards, P9, 0 Oops/WARNING lines, 120 Hz 10-bit, the GPU, the light
+    sensor, NVRAM read-only, the SEP, the microphone, network, Bluetooth, the battery and bit-exact decode;
+  - the Apple MTP keyboard and multi-touch;
+  - the MCC: "system level cache allocation enabled on 16 planes", and none of its failure lines;
+  - the engines: the Neural Engine bound to `ane_t6021`, ProRes to `apple-prores`, and both JPEG engines to
+    `apple-jpeg`.
+- **Failed:** the video encoder. `apple-ave 2283100000.video-encoder: error -ENODEV: unsupported firmware (text CRC
+  1e27a926)`. Because the encoder stays unbound, its five VENC0 power states stay `sync_state() pending`, which holds
+  them on. Test A was not promoted.
+
+`dts/t6050-k114s-r3d.dts` now leaves the encoder, its two DARTs and its six VENC0 power states disabled. `FAB0_SOC`
+stays on for the JPEG engines. The tree is `a99702584869461c7c86487456801be8aa23230811c0fe7781842d663b4b269d`
+(153,855 bytes; the four lints pass; `tree-check` gives jack only, no amplifier and no speaker channel). Test A3 is
+the b13 loader plus this tree, `1e791de612f1f992bb3f7db388a63f319fd1a479121baa284f9463bfcf1ca782`. The encoder can
+come back once the AVE driver accepts the K114s 27.2 encoder firmware.

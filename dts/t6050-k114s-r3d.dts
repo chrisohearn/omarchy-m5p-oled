@@ -17,3 +17,44 @@
  * camera node stays disabled until a loader hands the camera over; the K114s also needs its activity light (#231). */
 #include "t6050-media.dtsi"
 #include "t6050-isp.dtsi"
+
+/*
+ * The video encoder stays off on the K114s for now: the r3d apple-ave driver refuses this Mac's encoder firmware
+ * ("unsupported firmware (text CRC 1e27a926)", Stage 2 test A, 2026-11-24), and an unbound encoder holds its five
+ * VENC0 power states on ("sync_state() pending"). FAB0_SOC stays on for the JPEG engines.
+ */
+&ave0 {
+	status = "disabled";
+};
+
+&ave0_dart {
+	status = "disabled";
+};
+
+&ave0_dart1 {
+	status = "disabled";
+};
+
+&ps_venc0_sys {
+	status = "disabled";
+};
+
+&ps_venc0_dma {
+	status = "disabled";
+};
+
+&ps_venc0_pipe4 {
+	status = "disabled";
+};
+
+&ps_venc0_pipe5 {
+	status = "disabled";
+};
+
+&ps_venc0_me0 {
+	status = "disabled";
+};
+
+&ps_venc0_me1 {
+	status = "disabled";
+};
