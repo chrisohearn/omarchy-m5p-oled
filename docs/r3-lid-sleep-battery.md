@@ -12,7 +12,7 @@ All dates here are UTC. Evidence labels: agent-run (a command run on this Mac 20
 | --- | --- | --- | --- | --- |
 | Ordinary boot (after install) | suspend-to-idle (`SuspendState=freeze`) | lock | ignore | refused |
 | Trial boot (Stage 2 trial or one-shot kernel trial) | lock | lock | ignore | refused |
-| Not installed (today) | lock | lock | ignore | refused |
+| Not installed (before 2026-11-24, or after `undo`) | lock | lock | ignore | refused |
 
 A trial boot never sleeps: the reason the four targets were masked. Hibernate and hybrid sleep stay off (no swap image, deep
 sleep is compiled out): their targets stay masked in `/etc`, and the `/run` drop-in repeats `AllowHibernation=no`,
