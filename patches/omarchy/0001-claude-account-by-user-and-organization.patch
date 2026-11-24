@@ -16,12 +16,14 @@ two organizations (a personal plan and a Team) cannot add the second one ("That'
 Applied to /usr/bin by linux/omarchy-patches-apply: exactly, or as a three-way merge against
 0001-claude-account-by-user-and-organization.base/, the files it was written for.
 Retire this file once Omarchy ships the fix (see docs/omarchy-patches.md).
+Refreshed 2026-11-24 for omarchy-dev 4.0.0.r8296.g6169f05: Omarchy's account_login now also returns the account's
+email; the refreshed hunk keeps that and returns the user-and-organization identity as before.
 
 diff --git a/bin/omarchy-agent-account-state b/bin/omarchy-agent-account-state
-index ce3d27a13..b9afef497 100755
+index 29c5e6d..988c991 100755
 --- a/bin/omarchy-agent-account-state
 +++ b/bin/omarchy-agent-account-state
-@@ -176,6 +176,7 @@ def identity(provider: str, home: Path) -> dict[str, str]:
+@@ -175,6 +175,7 @@ def identity(provider: str, home: Path) -> dict[str, str]:
      login = (read_json(home / ".credentials.json") or {}).get("claudeAiOauth") or {}
      return {
        "accountId": str(account.get("accountUuid") or ""),
@@ -29,7 +31,7 @@ index ce3d27a13..b9afef497 100755
        "email": str(account.get("emailAddress") or ""),
        "org": str(account.get("organizationName") or ""),
        "plan": plan_label(str(login.get("rateLimitTier") or ""), str(login.get("subscriptionType") or "")),
-@@ -214,6 +215,19 @@ def grok_identity(home: Path) -> dict[str, str]:
+@@ -213,6 +214,19 @@ def grok_identity(home: Path) -> dict[str, str]:
    }
  
  
@@ -49,7 +51,7 @@ index ce3d27a13..b9afef497 100755
  # ---------------------------------------------------------------- registry
  
  
-@@ -418,7 +432,7 @@ def register(provider: str, label: str, pending: Path) -> dict[str, Any]:
+@@ -415,7 +429,7 @@ def register(provider: str, label: str, pending: Path) -> dict[str, Any]:
      for account in registry["accounts"]:
        account.update(identity(provider, login_home(provider, registry, account)))
      for account in registry["accounts"]:
@@ -58,7 +60,7 @@ index ce3d27a13..b9afef497 100755
          shutil.rmtree(pending, ignore_errors=True)
          if found["email"]:
            raise AccountError(tr("omarchy-i18n agents.sameAccountEmail", "That's %1 (%2). Try again, and sign in as the other account in the private window.", account["label"], found["email"]))
-@@ -491,7 +505,7 @@ def recover_home(provider: str, home: Path) -> dict[str, Any] | None:
+@@ -488,7 +502,7 @@ def recover_home(provider: str, home: Path) -> dict[str, Any] | None:
      entry = receipt.get("entry")
      if not isinstance(entry, dict) or entry.get("home") != str(home) or entry.get("id") != home.name:
        return None
@@ -67,7 +69,7 @@ index ce3d27a13..b9afef497 100755
        # A retry may already have registered this login under another home.
        shutil.rmtree(home)
        return None
-@@ -808,6 +822,21 @@ def settle(provider: str, registry: dict[str, Any]) -> None:
+@@ -827,6 +841,21 @@ def settle(provider: str, registry: dict[str, Any]) -> None:
  
  # A Claude account signed in again in a scratch home, installed where its login
  # lives under the same locks as a move, and only if it's the same account.
@@ -89,7 +91,7 @@ index ce3d27a13..b9afef497 100755
  def relogin(provider: str, target: str, pending: Path) -> dict[str, Any]:
    pending = pending.resolve()
    if provider not in SEATED or pending.parent != (accounts_root() / provider / ".pending").resolve():
-@@ -821,8 +850,20 @@ def relogin(provider: str, target: str, pending: Path) -> dict[str, Any]:
+@@ -840,8 +869,20 @@ def relogin(provider: str, target: str, pending: Path) -> dict[str, Any]:
        account = find(registry, target)
        if not account:
          raise AccountError(f"No {PROVIDERS[provider]['name']} account named {target}")
@@ -112,7 +114,7 @@ index ce3d27a13..b9afef497 100755
        if home != primary_home(provider):
          prepare_store(provider, account)
 diff --git a/bin/omarchy-agent-account-transfer b/bin/omarchy-agent-account-transfer
-index faeb84d2f..cc6418e80 100755
+index 28f62cd..a6af046 100755
 --- a/bin/omarchy-agent-account-transfer
 +++ b/bin/omarchy-agent-account-transfer
 @@ -58,7 +58,11 @@ if installed and (bundle.get("accounts") or {}).get("namePolicy") == "source":
@@ -188,10 +190,10 @@ index faeb84d2f..cc6418e80 100755
 +          entry["orgId"] = found["orgId"]
 +        entries.append(entry)
      if entries:
-       payload["providers"][provider] = {"active": registry["active"] if any(a["id"] == registry["active"] for a in entries) else entries[0]["id"], "switch": registry["switch"], "threshold": registry["threshold"], "accounts": entries}
-   if not payload["providers"]:
-@@ -136,17 +186,21 @@ def validate(payload: Any) -> None:
-     if not isinstance(registry.get("active"), str) or registry.get("switch") not in accounts.SWITCH_MODES or type(registry.get("threshold")) is not int or not 50 <= registry["threshold"] <= 100:
+       # "switch" is for an Omarchy from before automatic switching was removed,
+       # which refuses a transfer without it.
+@@ -138,17 +188,21 @@ def validate(payload: Any) -> None:
+     if not isinstance(registry.get("active"), str) or type(registry.get("threshold")) is not int or not 50 <= registry["threshold"] <= 100:
        raise accounts.AccountError("Invalid account transfer preferences")
      ids = set()
 -    identities = set()
@@ -215,7 +217,7 @@ index faeb84d2f..cc6418e80 100755
        ids.add(entry["id"])
        files = entry.get("files")
        if not isinstance(files, dict) or not files or not set(files) <= FILES[provider] or not all(isinstance(v, dict) for v in files.values()):
-@@ -282,7 +336,12 @@ def import_provider(provider: str, incoming: dict[str, Any], replace: bool) -> l
+@@ -284,7 +338,12 @@ def import_provider(provider: str, incoming: dict[str, Any], replace: bool) -> l
            cleanup_transfers(file_path(provider, login_home(provider, registry, a), name).parent)
        was_empty = not any(accounts.identity(provider, login_home(provider, registry, a))["accountId"] and login_files(provider, login_home(provider, registry, a)) for a in registry["accounts"])
        for entry in incoming["accounts"]:
@@ -229,7 +231,7 @@ index faeb84d2f..cc6418e80 100755
          if existing and login_files(provider, login_home(provider, registry, existing)) and not replace:
            copied.append((entry, existing))
            results.append(("kept", existing))
-@@ -330,8 +389,8 @@ def import_provider(provider: str, incoming: dict[str, Any], replace: bool) -> l
+@@ -332,8 +391,8 @@ def import_provider(provider: str, incoming: dict[str, Any], replace: bool) -> l
              current.update(data)
              data = current
            write_json(path, data)
@@ -250,7 +252,7 @@ index faeb84d2f..cc6418e80 100755
        command = "/usr/bin/python3 -I -c " + shlex.quote(RECEIVER_BOOTSTRAP)
        if "--replace" in args:
 diff --git a/bin/omarchy-agent-usage-claude b/bin/omarchy-agent-usage-claude
-index 785083039..c655d1bb6 100755
+index 4bedb97..0a75ff0 100755
 --- a/bin/omarchy-agent-usage-claude
 +++ b/bin/omarchy-agent-usage-claude
 @@ -682,9 +682,11 @@ def collect_limits(access_token: str, expires_at_ms: int, refresh_expires_at_ms:
@@ -266,13 +268,15 @@ index 785083039..c655d1bb6 100755
 +  return str(account.get("accountUuid") or ""), str(account.get("organizationUuid") or "")
  
  
- # Switching moves logins between homes holding this lock, so where each login
-@@ -711,14 +713,18 @@ def account_login(account: dict[str, Any]) -> dict[str, Any]:
-   access_token, expires_at_ms, refresh_expires_at_ms, plan = oauth_login(home)
-   # Who the home is signed in as now, not when it was added: a `claude auth
-   # login` run in it by hand makes it a different subscription.
--  return {"token": (access_token, expires_at_ms, refresh_expires_at_ms), "plan": plan, "identity": current_account_id(home)}
-+  return {"token": (access_token, expires_at_ms, refresh_expires_at_ms), "plan": plan, "identity": current_identity(home)}
+ def current_account_email(home: Path) -> str:
+@@ -719,16 +721,20 @@ def account_login(account: dict[str, Any]) -> dict[str, Any]:
+   return {
+     "token": (access_token, expires_at_ms, refresh_expires_at_ms),
+     "plan": plan,
+-    "identity": current_account_id(home),
++    "identity": current_identity(home),
+     "email": current_account_email(home),
+   }
  
  
  def account_limits(account: dict[str, Any], login: dict[str, Any], force: bool) -> dict[str, Any]:
@@ -289,7 +293,7 @@ index 785083039..c655d1bb6 100755
    # The primary home is keyed the same way once it says who it's signed in
    # as, so signing it in to another subscription never inherits the last
    # one's numbers; until then it keeps the single-account cache.
-@@ -761,7 +767,7 @@ def main() -> int:
+@@ -773,7 +779,7 @@ def main() -> int:
      # Keyed by who the home is signed in as, as a registered primary is, so
      # signing in to another subscription never shows the last one's numbers
      # and registering the home later keeps its cache.
