@@ -65,7 +65,7 @@ function) and #2782 (the SMC WKTP full-wake state). The last group changes `main
 | 0026 | soc: apple: aop: Send the 14-inch M5 Max sensor its 193-byte calibration | kept (r3e 0022) | |
 | 0027 | spi: apple-qspi: admit verified NVRAM writes on the J716s | dropped | `595384bd317`: #2817 merged: NVRAM writes now follow the DT nvram partition and a known flash part (apple_qspi_find_part), with no per-board rows; the J716s row is obsolete |
 | 0028 | spi: apple-qspi: log the flash ID and status when a write is refused | dropped | `595384bd317`: #2817 merged: its "NVRAM denied: reason=..." log covers a refused write, with the flash ID in the part check |
-| 0029 | spi: apple-qspi: admit the K114s NVRAM, fail-closed on its flash ID | dropped | `595384bd317`: #2817 merged: the K114s has no DT nvram partition and 0xc88317 is not in the part table, so every write is refused before WREN (read-only, as r3d) |
+| 0029 | spi: apple-qspi: admit the K114s NVRAM, fail-closed on its flash ID | dropped | `595384bd317`: #2817 merged. The K114s flash ID 0xc88317 is not in the part table, and `read_only` defaults to Y, so every write is refused before WREN (read-only, as r3d) |
 | 0030 | mfd: macsmc: count a port's dark wake on every board with a sleep policy | kept (r3e 0023) | |
 | 0031 | wifi: apple: centauri: t6050: harden keep-alive sleep fallback and PME gating | kept (r3e 0024) | |
 | 0032 | wifi: apple: centauri: t6050: try full TLV 280 event mask on wake with legacy fallback | kept (r3e 0025) | |
@@ -146,10 +146,13 @@ function) and #2782 (the SMC WKTP full-wake state). The last group changes `main
 - **r3d 0017 (the K114s s2idle qualification): dropped.** #2488 removed the per-board list. `t6050_hw` sets `adopt_link`,
   so the K114s takes the adopted-link s2idle path with no patch. The PKGBUILD guard checks that.
 - **r3d 0027-0029 (NVRAM): dropped; the K114s stays read-only.** #2817 admits a write only where the device tree
-  describes an `nvram` partition on the flash and the flash's JEDEC ID is in `apple_qspi_find_part()`'s table. The K114s
-  has no `nvram` partition in `t6050-k114s.dts`, `t6050-k114-k116.dtsi` or the built dtb, and `0xc88317` is not in the
-  table. Every write is refused, and the refusal is logged ("NVRAM denied: reason=..."). So the K114s NVRAM row of r3d is
-  replaced by a structural refusal: no row to admit it. The write-enabling rows of r3d (J716s, K114s) are gone.
+  describes an `nvram` partition on the flash and the flash's JEDEC ID is in `apple_qspi_find_part()`'s table. The
+  kernel's own `t6050-k114s.dts` and `t6050-k114-k116.dtsi` describe no `nvram` partition. But the Stage 2 tree the Mac
+  actually boots (ours, `a0897a5a`) does: `flash@0/partitions/partition@700000`, labelled `nvram`, 0xc0000 bytes, not
+  `read-only`. That layout passes the driver's window check. Writes are still refused, for two reasons: the
+  `read_only` module parameter defaults to Y (nothing on this Mac sets it), and `0xc88317` is not in the part table
+  (W25Q64, MX 2B27, W25Q16, GD25UF16E). The refusal is logged ("NVRAM denied: reason=..."). So r3d's assumed-ID K114s
+  row is replaced by the part check: no row admits the K114s. The write-enabling rows of r3d (J716s, K114s) are gone.
   **Decision for the owner:** if a K114s NVRAM write is ever wanted, it needs a DT partition and a table row from a read
   flash ID; r3d's assumed-ID row is not carried.
 - **r3d 0063 (macsmc saved context): re-cut,** see above.

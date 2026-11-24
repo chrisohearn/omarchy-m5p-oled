@@ -149,6 +149,7 @@ package() {
       grep -q 'apple_qspi_find_part' "$_src/drivers/spi/spi-apple-qspi.c" &&
       ! grep -q '0xc8, 0x83, 0x17' "$_src/drivers/spi/spi-apple-qspi-policy.h" &&
       ! grep -q 'apple,k114s' "$_src/drivers/spi/spi-apple-qspi.c" &&
+      grep -q 'static bool read_only = true;' "$_src/drivers/spi/spi-apple-qspi.c" &&
       ! grep -rq 'label = "nvram"' "$_src"/arch/arm64/boot/dts/apple/t6050-k114s.dts "$_src"/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi &&
       grep -q 'apple,k114-macaudio' "$_src/sound/soc/apple/macaudio.c" &&
       grep -q 'name: "27.2 (26B8125), G17S",' "$_src/drivers/gpu/drm/asahi/hw/t6050.rs" ||
