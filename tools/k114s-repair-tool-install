@@ -1,0 +1,139 @@
+#!/usr/bin/python3 -I
+"""K114s (omarchy-m5p-oled): put the macOS repair tool and the Stage 2 list it needs on the ESP. Run as root, on Linux.
+
+    sudo python3 -I tools/k114s-repair-tool-install [--check] [--esp DIR] [--loader FILE]
+
+Two files on the ESP, both written whole (a temporary file, a sync, a rename, a read back); nothing else is touched:
+
+  k114s-repair/promotion/k114s_repair.py   this repository's macos/tools/k114s_repair.py. The copy on the ESP is the one the
+        owner copies to the Mac (docs/r3a-promotion.md P4b, docs/r3-display-d5-d9.md M9). Nothing updates it by itself: this
+        script is the step that does, after every change to the tool. The copy it replaces is kept as k114s_repair.py.prev.
+  k114s-repair/known-loaders.json          the Aura loader and the U-Boot tail of the configured Stage 2 (m1n1/boot-ctxr.bin),
+        added to the entries already in the file, so the tool on the Mac can read a Stage 2 that its built-in lists do not
+        carry yet (docs/bundle-r2c.md, "Which Stage 2 the tool knows"). Entries are only ever added.
+
+The loader is the file the configured Stage 2 was built from (default: usr/lib/asahi-boot/m1n1-ctxr.bin, else m1n1.bin, the
+two the Stage 2 hook reads). The Stage 2 must start with it, carry one K114s device tree and end in a gzip U-Boot; otherwise
+nothing is written. --check does all the reading and says what it would write. Run it again after every Stage 2 promotion
+(k114s-release stage2) and after every change to macos/tools/k114s_repair.py.
+"""
+import argparse
+import hashlib
+import json
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(REPO, "macos", "tools"))
+import k114s_esp_tool as tool  # noqa: E402
+import k114s_repair as repair  # noqa: E402
+
+TOOL_SRC = os.path.join(REPO, "macos", "tools", "k114s_repair.py")
+TOOL_DST = repair.PROMOTION_DIR + "/k114s_repair.py"
+STAGE2 = repair.STAGE2
+NEEDS = 2 << 20   # free bytes the ESP must keep after both files and the kept copy
+
+
+def die(text):
+    print("k114s-repair-tool-install: %s; nothing written" % text, file=sys.stderr)
+    sys.exit(1)
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def read(path):
+    with open(path, "rb") as stream:
+        return stream.read()
+
+
+def write_whole(path, data):
+    temporary = os.path.join(os.path.dirname(path), "." + os.path.basename(path) + ".k114s-new")
+    try:
+        with open(temporary, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if read(temporary) != data:
+            raise OSError("did not read back")
+        os.replace(temporary, path)
+    finally:
+        if os.path.lexists(temporary):
+            os.remove(temporary)
+    if read(path) != data:
+        raise OSError("%s does not read back after the rename" % path)
+
+
+def entries(esp, loader_path):
+    """The known-loaders.json content after this run, from the configured Stage 2 and the loader it was built from."""
+    loader = read(loader_path)
+    try:
+        prefix, trees, trailer = tool.stage2_split(read(os.path.join(esp, STAGE2)), len(loader))
+    except SystemExit as error:
+        die("the Stage 2 is not <loader> <device tree> <gzip U-Boot> at the length of %s (%s); give the loader file it was built from with --loader" % (loader_path, error))
+    if prefix != loader:
+        die("the Stage 2 does not start with %s; give the loader file it was built from with --loader" % loader_path)
+    if len(trees) != 1 or tool.fdt_root_compatible(trees[0])[0] != "apple,k114s":
+        die("the Stage 2 is not one K114s device tree between the loader and U-Boot")
+    path = os.path.join(esp, repair.KNOWN_JSON)
+    try:
+        known = json.loads(read(path)) if os.path.exists(path) else {}
+        loaders, trailers = list(known.get("loaders", [])), list(known.get("trailers", []))
+    except (ValueError, AttributeError, TypeError):
+        die("%s is damaged: look at it, then remove it and run this again" % path)
+    have_l = {e.get("sha256") for e in loaders} | {d for _, _, d in repair.KNOWN_LOADERS}
+    have_t = {e.get("sha256") for e in trailers} | {d for _, d in repair.KNOWN_TRAILERS}
+    if sha(loader) not in have_l:
+        loaders.append({"name": "aura-" + sha(loader)[:8], "bytes": len(loader), "sha256": sha(loader)})
+    if sha(trailer) not in have_t:
+        trailers.append({"name": "uboot-" + sha(trailer)[:8], "sha256": sha(trailer)})
+    return (json.dumps({"loaders": loaders, "trailers": trailers}, indent=1) + "\n").encode(), len(loaders), len(trailers)
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(description="install the macOS repair tool and its Stage 2 list on the ESP")
+    ap.add_argument("--esp", default="/boot/efi", help="the mounted ESP (default /boot/efi)")
+    ap.add_argument("--loader", help="the loader file the configured Stage 2 was built from")
+    ap.add_argument("--check", action="store_true", help="read everything, write nothing")
+    args = ap.parse_args(argv)
+    esp = args.esp
+    # the default ESP must be a mount point: a failed /boot/efi mount leaves a stale tree under it on the root filesystem
+    if args.esp == "/boot/efi" and not os.path.ismount(esp):
+        die("%s is not a mount point; mount the ESP first (or pass --esp for a copy)" % esp)
+    if not os.path.isfile(os.path.join(esp, STAGE2)):
+        die("%s has no %s; is the ESP mounted?" % (esp, STAGE2))
+    loader = args.loader or next((p for p in ("/usr/lib/asahi-boot/m1n1-ctxr.bin", "/usr/lib/asahi-boot/m1n1.bin") if os.path.isfile(p)), None)
+    if not loader:
+        die("no loader file: pass --loader")
+    try:
+        compile(read(TOOL_SRC), TOOL_SRC, "exec")
+    except SyntaxError as error:
+        die("%s does not parse (%s)" % (TOOL_SRC, error))
+    new_tool = read(TOOL_SRC)
+    new_json, nl, nt = entries(esp, loader)
+    tool_path, json_path = os.path.join(esp, TOOL_DST), os.path.join(esp, repair.KNOWN_JSON)
+    old_tool = read(tool_path) if os.path.exists(tool_path) else None
+    old_json = read(json_path) if os.path.exists(json_path) else None
+    stat = os.statvfs(esp)
+    if stat.f_bavail * stat.f_frsize < 2 * len(new_tool) + len(new_json) + NEEDS:
+        die("the ESP has too little free space for the two files and the kept copy")
+    print("repair tool:  %s  sha256 %s  (%s)" % (TOOL_DST, sha(new_tool), "up to date" if old_tool == new_tool else "will be written"))
+    print("stage 2 list: %s  %d loaders, %d U-Boot tails  (%s)" % (repair.KNOWN_JSON, nl, nt, "up to date" if old_json == new_json else "will be written"))
+    if args.check:
+        return 0
+    os.makedirs(os.path.dirname(tool_path), exist_ok=True)
+    if old_tool is not None and old_tool != new_tool:
+        write_whole(tool_path + ".prev", old_tool)
+    if old_tool != new_tool:
+        write_whole(tool_path, new_tool)
+    if old_json != new_json:
+        write_whole(json_path, new_json)
+    os.sync()
+    print("done. On the Mac, copy %s over tools/k114s_repair.py in the repair bundle folder, then run  sudo ./k114s-repair status" % TOOL_DST)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
