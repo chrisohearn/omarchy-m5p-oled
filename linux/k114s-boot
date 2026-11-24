@@ -1,0 +1,50 @@
+#!/bin/bash
+# K114s (omarchy-m5p-oled): which kernel is Main and which is Backup, and what the next boot does. Read only.
+#
+#   k114s-boot status        (the default command; needs root to read the ESP, and re-runs itself with sudo -n)
+#
+# The Limine menu keeps the package names (linux-k114s, linux-k114s-r3b): the macOS repair tool and the boot checks
+# find entries by them, and the built-in keyboard does not work in the menu on this Mac. So the roles are shown here:
+#   Main    the entry default_entry names: what every ordinary boot starts
+#   Backup  the other kernel entry: the way back (a one-shot from Linux, or the macOS repair tool)
+#   Test    the entry a pending Limine one-shot names: the next boot starts it once, then Main again
+set -euo pipefail
+ESP=${K114S_ESP:-/boot/efi}; CONF=$ESP/limine.conf; EFIVARS=${K114S_EFIVARS:-/sys/firmware/efi/efivars}
+VAR=$EFIVARS/LoaderEntryOneShot-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f; UVAR=$ESP/ubootefi.var
+cmd=${1:-status}
+[ "$cmd" = status ] || { echo "usage: k114s-boot [status]" >&2; exit 2; }
+if [ ! -r "$CONF" ] && [ "$(id -u)" != 0 ] && [ -z "${K114S_ESP:-}" ]; then exec sudo -n "$0" "$@"; fi
+[ -r "$CONF" ] || { echo "k114s-boot: cannot read $CONF" >&2; exit 1; }
+entry_id() { printf '%s' "$1" | sed 's#/#.#g; s#[^A-Za-z0-9+_.@-]#-#g'; }
+# PATH<TAB>KERNEL-VERSION for every entry that boots a kernel (has a "Kernel version:" comment)
+entries=$(awk '
+  function flush() { if (p != "" && v != "") print p "\t" v; }
+  { line = $0; sub(/^[ \t]+/, "", line) }
+  line ~ /^\/+/ { flush(); match(line, /^\/+/); d = RLENGTH; name = substr(line, d + 1); sub(/^\+/, "", name); sub(/^[ \t]+/, "", name)
+                  nm[d] = name; p = nm[1]; for (i = 2; i <= d; i++) p = p "/" nm[i]; v = ""; next }
+  line ~ /^comment:[ \t]*Kernel version:/ { v = line; sub(/^comment:[ \t]*Kernel version:[ \t]*/, "", v); sub(/[ \t]+$/, "", v) }
+  END { flush() }' "$CONF")
+def=$(grep -i -m1 '^default_entry:' "$CONF" | sed 's/^[^:]*:[ \t]*//; s/[ \t]*$//')
+# the pending one-shot, if any: efivarfs (UTF-16LE after a 4-byte attribute word), else U-Boot's variable file
+shot=
+if [ -r "$VAR" ]; then shot=$(tail -c +5 "$VAR" | tr -d '\0'); fi
+if [ -z "$shot" ] && [ -r "$UVAR" ] && grep -aq 'L.o.a.d.e.r.E.n.t.r.y.O.n.e.S.h.o.t' "$UVAR"; then shot='(set in U-Boot'"'"'s variable file)'; fi
+run=$(uname -r)
+echo "K114s boot"
+while IFS=$'\t' read -r p v; do
+  [ -n "$p" ] || continue
+  role=Backup; [ "$p" = "$def" ] && role=Main
+  [ -n "$shot" ] && [ "$shot" = "$(entry_id "$p")" ] && role="Test"
+  now=; [ "$v" = "$run" ] && now="   <- running now"
+  printf '  %-7s %-28s %s%s\n' "$role" "$p" "$v" "$now"
+done <<<"$entries"
+case $def in ''|*[!0-9]*) ;; *) echo "  note: default_entry is an index ($def), not a path: Main is not shown" ;; esac
+grep -q "^$(printf '%s' "$def" | sed 's/[][\.*^$]/\\&/g')"$'\t' <<<"$entries" || echo "  WARNING: default_entry '$def' names no kernel entry"
+if [ -n "$shot" ]; then echo "  Next boot: the Test entry once ($shot), then Main again"; else echo "  Next boot: Main (no test boot pending)"; fi
+if [ -r "$ESP/aura-try" ]; then
+  a=$(sed -n 1p "$ESP/aura-try"); f=$(sed -n 2p "$ESP/aura-try")
+  case $a in armed*) echo "  Stage 2: test file $f armed for the next boot, then the configured one";;
+             *) echo "  Stage 2: the configured m1n1/boot-ctxr.bin ($(sha256sum "$ESP/m1n1/boot-ctxr.bin" | cut -c1-8))";; esac
+fi
+[ -e /proc/device-tree/chosen/aurora,trial ] && echo "  This boot is a Stage 2 test: $(tr -d '\0' < /proc/device-tree/chosen/aurora,trial)"
+exit 0
