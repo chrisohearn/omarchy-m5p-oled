@@ -11,11 +11,20 @@ that r3d's shared `t6050-k114-k116.dtsi` now takes from the board file:
 - `T6050_K_N1_FIRMWARE`: `"apple/centauri/k114s-ftab.bin"`;
 - `T6050_K_BOARD_ID`: `0x14`.
 
-The values are those of r3d's own `t6050-k114s.dts`. Without them the build stops.
+The values are those of r3d's own `t6050-k114s.dts`. Without them the build stops. The wrapper also carries the
+enables that r3d's board file makes at board level:
+- `T6050_ANE`, defined before `t6050-peripherals.dtsi` is included: the Neural Engine (#2293);
+- `t6050-media.dtsi`: the video encoder, ProRes and both JPEG engines (#2278);
+- `t6050-isp.dtsi`: the shared camera tree (#2275).
+
+In the built tree, `neural-processor@508000000`, `video-encoder@2283100000`, `prores@48d000000` and the two `jpeg` nodes
+are `okay`. The camera's `isp@580000000` and its DARTs stay `disabled` until a loader hands the camera over; the K114s
+also needs its activity light described first (#231). USB-C (`t6050-k114-k116-usb.dtsi`) and the GPU stay this
+repository's own fragments, and the USB-C lint passes.
 
 Build with `build/build-r3a-dtb.sh <r3d kernel tree> t6050-k114s-r3d <out>`, with the private PMP tunables in
-`K114S_PMP_TUNABLES` (sha256 `df27244e4900…`). The result is `a3e272802b797cc701a03b5fb8b781de4831b328193d2341eccf3dfc253296d4`,
-151,568 bytes (agent-run). The build reproduces byte for byte from this repository.
+`K114S_PMP_TUNABLES` (sha256 `df27244e4900…`). The result is `26c3407f8793e3e11adcc0642f5bb2d35c3882dd50772d557b7c817631929d70`,
+153,819 bytes (agent-run). Without the three engine and camera enables it was `a3e27280…`, which the first review caught (P1).
 
 The node diff (`tests/dtb-node-diff.py`) is against the configured blob `8258c8a8…`: 2 nodes are added and none removed
 (agent-run).
@@ -34,7 +43,7 @@ The node diff (`tests/dtb-node-diff.py`) is against the configured blob `8258c8a
 
 | Check | Result | Label |
 | --- | --- | --- |
-| `lint-dtb.py`, `lint-sound-dtb.py`, `lint-display-gpu-dtb.py`, `lint-usb-dtb.py` | pass (also on `8258c8a8`) | agent-run |
+| `lint-dtb.py`, `lint-sound-dtb.py`, `lint-display-gpu-dtb.py`, `lint-usb-dtb.py` | pass on `26c3407f` (also on `8258c8a8`) | agent-run |
 | `linux/audio/tree-check --root` on an unflattened replica | "the Stage A tree: jack link only, no amplifier, no speaker channel" | agent-run |
 | `t6050-aop.dtsi` (it would enable the AOP's speaker DMA) | not in the include list | agent-run |
 
@@ -65,8 +74,8 @@ There are two one-boot tests, in this order, each with its own record. If the se
 
 | Test | Stage 2 | sha256 |
 | --- | --- | --- |
-| A | b13 (installed) + tree `a3e27280` | `f1cef979d60a840d9241be29f06c3d826af090213ff851843451bbdfe8637b0f` |
-| B | b15 + tree `a3e27280` | `48d461ac6e78ebc256701fbc3c7bc784a4a8091f020fe27c75f8b698953344a1` |
+| A | b13 (installed) + tree `26c3407f` | `d9aab35c6d7a25755b8d39ceb5f80ce3fbae02ecbb595b06b2024fa75b36459d` |
+| B | b15 + tree `26c3407f` | `1ac3c9315cad838889dc0886b986a6f002878b759b0924c3c4fada657ab8cfb7` |
 
 - **How it boots:** each test goes through `aura-try`, which arms the trial file once. The configured Stage 2 stays the
   default, so a hang is followed by `d1254de6` at the next power-on. The trial watchdog does not arm on this Mac, so a
@@ -76,3 +85,8 @@ There are two one-boot tests, in this order, each with its own record. If the se
   decode). Also: the MCC driver bound with no error, the keyboard and trackpad, and the USB-C ports enumerating.
 - **Promotion:** a test that passes is promoted. Both pinned trees and, for B, the loader become the tested ones.
   `update-boot-ctxr` must then write the tested file again.
+- **Test B waits for the macOS repair tool.** `macos/tools/k114s_repair.py` recognises a Stage 2 only by the loader
+  prefixes it knows: the r2c bundle's installed loader (3,997,696 bytes) and the pin loader (4,063,232 bytes). The
+  Stage 2 configured since 2026-11-23 (`d1254de6`, Aura b13 at 3,932,160 bytes, with the aurora9 U-Boot trailer) is
+  already unknown to it. Test A keeps that loader, so it changes nothing here. Test B would configure another unknown
+  prefix, so it is not promoted until the repair tool knows the configured loader and trailer (#234).

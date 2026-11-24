@@ -3,9 +3,17 @@
  * The K114s Stage 2 tree on the r3d kernel's includes (docs/r3d-kernel.md): the configured r3c tree, unchanged,
  * plus the two board values the r3d include t6050-k114-k116.dtsi now takes from its board file (r3d's own
  * t6050-k114s.dts sets the same): the N1 firmware table name and the board id. The shared trees r3d carries add
- * the T6050 memory-cache controller node (apple,t6050-mcc), the framebuffer's display link and DART reg-names.
+ * the T6050 memory-cache controller node (apple,t6050-mcc), the framebuffer's display link and DART reg-names; and, as
+ * r3d's own t6050-k114s.dts does, the Neural Engine, the media engines and the camera.
  */
 #define T6050_K_N1_FIRMWARE	"apple/centauri/k114s-ftab.bin"
 #define T6050_K_BOARD_ID	0x14
+/* r3d's board file also enables the Neural Engine here, before t6050-peripherals.dtsi is included (#2293) */
+#define T6050_ANE
 
 #include "t6050-k114s-r3c.dts"
+
+/* and adds, at board level, the media engines (#2278: encoder, ProRes, JPEG) and the shared camera tree (#2275). The
+ * camera still probes ENODEV until the K114s activity light is described (#231). */
+#include "t6050-media.dtsi"
+#include "t6050-isp.dtsi"
