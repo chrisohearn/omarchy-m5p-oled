@@ -5,46 +5,72 @@
 #
 # The Limine menu keeps the package names (linux-k114s, linux-k114s-r3b): the macOS repair tool and the boot checks
 # find entries by them, and the built-in keyboard does not work in the menu on this Mac. So the roles are shown here:
-#   Main    the entry default_entry names: what every ordinary boot starts
+#   Main    the entry default_entry names (a path, or an index counted as Limine counts it): every ordinary boot
 #   Backup  the other kernel entry: the way back (a one-shot from Linux, or the macOS repair tool)
 #   Test    the entry a pending Limine one-shot names: the next boot starts it once, then Main again
-set -euo pipefail
+set -uo pipefail
 ESP=${K114S_ESP:-/boot/efi}; CONF=$ESP/limine.conf; EFIVARS=${K114S_EFIVARS:-/sys/firmware/efi/efivars}
-VAR=$EFIVARS/LoaderEntryOneShot-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f; UVAR=$ESP/ubootefi.var
+BLI=4a67b082-0a4c-41cf-b6c7-440b29bb8c4f; UVAR=$ESP/ubootefi.var
 cmd=${1:-status}
 [ "$cmd" = status ] || { echo "usage: k114s-boot [status]" >&2; exit 2; }
 if [ ! -r "$CONF" ] && [ "$(id -u)" != 0 ] && [ -z "${K114S_ESP:-}" ]; then exec sudo -n "$0" "$@"; fi
 [ -r "$CONF" ] || { echo "k114s-boot: cannot read $CONF" >&2; exit 1; }
 entry_id() { printf '%s' "$1" | sed 's#/#.#g; s#[^A-Za-z0-9+_.@-]#-#g'; }
-# PATH<TAB>KERNEL-VERSION for every entry that boots a kernel (has a "Kernel version:" comment)
+efivar() { [ -r "$EFIVARS/$1-$BLI" ] && tail -c +5 "$EFIVARS/$1-$BLI" | iconv -f UTF-16LE -t UTF-8 2>/dev/null | tr -d '\0'; }
+opt() { grep -i -m1 "^$1:" "$CONF" | sed 's/^[^:]*:[ \t]*//; s/[ \t]*$//'; }
+
+# INDEX<TAB>PATH<TAB>KERNEL-VERSION for every entry line in menu order (index as Limine counts expanded entries);
+# KERNEL-VERSION is empty for entries that boot no kernel (directories, other loaders)
 entries=$(awk '
-  function flush() { if (p != "" && v != "") print p "\t" v; }
+  function flush() { if (n) print n "\t" p "\t" v; }
   { line = $0; sub(/^[ \t]+/, "", line) }
   line ~ /^\/+/ { flush(); match(line, /^\/+/); d = RLENGTH; name = substr(line, d + 1); sub(/^\+/, "", name); sub(/^[ \t]+/, "", name)
-                  nm[d] = name; p = nm[1]; for (i = 2; i <= d; i++) p = p "/" nm[i]; v = ""; next }
-  line ~ /^comment:[ \t]*Kernel version:/ { v = line; sub(/^comment:[ \t]*Kernel version:[ \t]*/, "", v); sub(/[ \t]+$/, "", v) }
+                  nm[d] = name; p = nm[1]; for (i = 2; i <= d; i++) p = p "/" nm[i]; v = ""; n++; next }
+  n && line ~ /^comment:[ \t]*Kernel version:/ { v = line; sub(/^comment:[ \t]*Kernel version:[ \t]*/, "", v); sub(/[ \t]+$/, "", v) }
   END { flush() }' "$CONF")
-def=$(grep -i -m1 '^default_entry:' "$CONF" | sed 's/^[^:]*:[ \t]*//; s/[ \t]*$//')
-# the pending one-shot, if any: efivarfs (UTF-16LE after a 4-byte attribute word), else U-Boot's variable file
-shot=
-if [ -r "$VAR" ]; then shot=$(tail -c +5 "$VAR" | tr -d '\0'); fi
-if [ -z "$shot" ] && [ -r "$UVAR" ] && grep -aq 'L.o.a.d.e.r.E.n.t.r.y.O.n.e.S.h.o.t' "$UVAR"; then shot='(set in U-Boot'"'"'s variable file)'; fi
+def=$(opt default_entry)
+defpath=$def
+case $def in
+  '') ;;
+  *[!0-9]*) ;;
+  *) defpath=$(awk -F'\t' -v i="$def" '$1 == i { print $2 }' <<<"$entries") ;;
+esac
+
+# the pending one-shot: efivarfs, else U-Boot's variable file (UTF-16 strings: the name, then its value)
+shot=$(efivar LoaderEntryOneShot)
+if [ -z "$shot" ] && [ -r "$UVAR" ]; then
+  shot=$(strings -a -e l "$UVAR" 2>/dev/null | grep -A1 -xF LoaderEntryOneShot | sed -n 2p)
+fi
+sel=$(efivar LoaderEntrySelected)
 run=$(uname -r)
+
 echo "K114s boot"
-while IFS=$'\t' read -r p v; do
-  [ -n "$p" ] || continue
-  role=Backup; [ "$p" = "$def" ] && role=Main
-  [ -n "$shot" ] && [ "$shot" = "$(entry_id "$p")" ] && role="Test"
-  now=; [ "$v" = "$run" ] && now="   <- running now"
+while IFS=$'\t' read -r i p v; do
+  [ -n "$p" ] && [ -n "$v" ] || continue
+  role=Backup; [ "$p" = "$defpath" ] && role=Main
+  [ -n "$shot" ] && [ "$shot" = "$(entry_id "$p")" ] && role=Test
+  now=
+  if [ -n "$sel" ]; then [ "$sel" = "$(entry_id "$p")" ] && now="   <- running now"
+  elif [ "$v" = "$run" ]; then now="   <- running now (by kernel version)"; fi
   printf '  %-7s %-28s %s%s\n' "$role" "$p" "$v" "$now"
 done <<<"$entries"
-case $def in ''|*[!0-9]*) ;; *) echo "  note: default_entry is an index ($def), not a path: Main is not shown" ;; esac
-grep -q "^$(printf '%s' "$def" | sed 's/[][\.*^$]/\\&/g')"$'\t' <<<"$entries" || echo "  WARNING: default_entry '$def' names no kernel entry"
-if [ -n "$shot" ]; then echo "  Next boot: the Test entry once ($shot), then Main again"; else echo "  Next boot: Main (no test boot pending)"; fi
-if [ -r "$ESP/aura-try" ]; then
-  a=$(sed -n 1p "$ESP/aura-try"); f=$(sed -n 2p "$ESP/aura-try")
-  case $a in armed*) echo "  Stage 2: test file $f armed for the next boot, then the configured one";;
-             *) echo "  Stage 2: the configured m1n1/boot-ctxr.bin ($(sha256sum "$ESP/m1n1/boot-ctxr.bin" | cut -c1-8))";; esac
+
+if [ -z "$def" ]; then echo "  WARNING: limine.conf has no default_entry: Limine boots its first entry"
+elif [ "$defpath" != "$def" ]; then echo "  note: default_entry is index $def, which is $defpath"
 fi
+if [ -n "$def" ] && ! awk -F'\t' -v p="$defpath" '$2 == p && $3 != "" { f = 1 } END { exit !f }' <<<"$entries"; then
+  echo "  WARNING: default_entry '$def' names no kernel entry"
+fi
+case $(opt remember_last_entry | tr 'A-Z' 'a-z') in
+  yes|true|1) echo "  note: remember_last_entry is on: Limine may start the entry it booted last, not Main" ;;
+esac
+if [ -n "$shot" ]; then echo "  Next boot: the Test entry once ($shot), then Main again"; else echo "  Next boot: Main (no test boot pending)"; fi
+
+if [ -r "$ESP/m1n1/boot-ctxr.bin" ]; then cs=$(sha256sum "$ESP/m1n1/boot-ctxr.bin" | cut -c1-8); else cs=missing; fi
+a=; [ -r "$ESP/aura-try" ] && a=$(sed -n 1p "$ESP/aura-try")
+case $a in
+  armed*) echo "  Stage 2: test file $(sed -n 2p "$ESP/aura-try") armed for the next boot, then the configured m1n1/boot-ctxr.bin ($cs)" ;;
+  *) echo "  Stage 2: the configured m1n1/boot-ctxr.bin ($cs)" ;;
+esac
 [ -e /proc/device-tree/chosen/aurora,trial ] && echo "  This boot is a Stage 2 test: $(tr -d '\0' < /proc/device-tree/chosen/aurora,trial)"
 exit 0

@@ -22,6 +22,12 @@ Why the menu keeps the package names (owner's choice, 2026-11-24):
 - `limine-snapper-sync` reserves names like "Backup".
 - So renaming the entries would have cost a change to the repair tool and every check, for labels that are rarely seen.
 
-Install: `sudo install -m755 linux/k114s-boot /usr/local/bin/k114s-boot` (also in `k114s-tooling-install`'s list).
-Test: `tests/linux/test-k114s-boot.sh` (fake ESPs: roles, a pending one-shot, a default that names nothing, an armed
-`aura-try`).
+Install: `sudo install -m755 linux/k114s-boot /usr/local/bin/k114s-boot`, on the command path.
+It also handles:
+- an index `default_entry`, counted as Limine counts it;
+- a missing `default_entry`;
+- `remember_last_entry`;
+- a one-shot held only in U-Boot's variable file;
+- the running entry, read from `LoaderEntrySelected`, with the kernel version as the fallback.
+
+Test: `tests/linux/test-k114s-boot.sh` (fake ESPs, 16 cases).

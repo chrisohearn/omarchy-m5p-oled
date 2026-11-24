@@ -34,7 +34,7 @@ if [[ -z $USER_HOME && -n ${SUDO_USER:-} ]]; then USER_HOME=$(getent passwd "$SU
 say() { echo "k114s-tooling-install: $*"; }
 die() { echo "k114s-tooling-install: $*" >&2; exit 1; }
 
-TOOLS=(k114s-lib.sh k114s-boot k114s-guard k114s-holds k114s-repackage k114s-recovery-set k114s-release-check k114s-release
+TOOLS=(k114s-lib.sh k114s-guard k114s-holds k114s-repackage k114s-recovery-set k114s-release-check k114s-release
   k114s-boot-success k114s-modules-cleanup k114s-fdt k114s-binscan k114s-booted-esp k114s-edge-check)
 DATA=(release-criteria.conf kernel-config.required rivals.list protected.list noextract.list extras.list
   esp-audit-ignore.list holds.default)
