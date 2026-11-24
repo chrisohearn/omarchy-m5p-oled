@@ -144,9 +144,8 @@ files (0003, 0004) have no counterpart in an omacom/omarchy tree, so that run sk
 
 0001 and 0002 are not specific to the K114s. A second machine of the owner's (x86_64, Omarchy
 stable 4.5.0, package `omarchy`) runs those two, installed on 2026-11-15 from a copy of
-this repository with the source narrowed to them. The Stable panel's nested account rows
-also need the provider passed in by the companion patch under `patches/omarchy-stable/`.
-Edge already passes the provider on each account row.
+this repository with the source narrowed to them. The same 0002 patch carries the provider
+through the nested account rows on Stable and older Edge layouts.
 
 **The 0001 refreshed on 2026-11-18 targets the Edge build (r8044) and does not fit `v4.5.0`.**
 Installing it there would take the working 0001 out and skip the new one. Until that machine's
@@ -159,7 +158,7 @@ W=$(mktemp -d) && mkdir "$W/src" &&
   git cat-file -e 050dd93 &&   # a shallow clone may lack it: git fetch --unshallow first
   git show 050dd93:patches/omarchy/0001-claude-account-by-user-and-organization.patch \
     > "$W/src/0001-claude-account-by-user-and-organization.patch" &&   # the stable-build 0001
-  cp patches/omarchy/0002-*.patch patches/omarchy-stable/0002-*.patch "$W/src/" &&
+  cp patches/omarchy/0002-*.patch "$W/src/" &&
   cp -r patches/omarchy/0002-*.base "$W/src/" &&
   sudo env K114S_OMARCHY_PATCHES_SRC="$W/src" bash linux/omarchy-patches-install &&
   omarchy-restart-shell
@@ -167,5 +166,5 @@ W=$(mktemp -d) && mkdir "$W/src" &&
 
 Both applied to `v4.5.0` without fuzz on 2026-11-15, and `tests/linux/test-omarchy-patches.sh`
 passed with only those two in the source against an export of that tag (74 checks). The hook
-keeps the installed copies through Omarchy updates. When Stable moves to the per-account
-layout used by Edge, leave the companion patch out of the source set on the next refresh.
+keeps the installed copies through Omarchy updates. A change to 0002 here reaches that machine
+when the install is run there again.

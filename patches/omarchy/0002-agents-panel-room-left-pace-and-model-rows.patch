@@ -12,6 +12,33 @@ fallbacks, so no translation file is touched.
 
 Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shell).
 
+--- a/share/omarchy/shell/plugins/agents/Main.qml
++++ b/share/omarchy/shell/plugins/agents/Main.qml
+@@ -724,7 +724,23 @@
+     }
+   }
+
+-  function displayProvider(record) {
++  // Older nested account rows keep only their limits. Carry the provider
++  // through that projection so those rows can apply the weekly cap too.
++  function displayAccounts(record) {
++    var accounts = Array.isArray(record.accounts) ? record.accounts : []
++    var providerId = String(record.id)
++    if (providerId !== "claude" && providerId !== "codex") return accounts
++    return accounts.map(function(account) {
++      if (!account || !Array.isArray(account.limits)) return account
++      var limits = account.limits.map(function(limit) {
++        return limit && typeof limit === "object" ? Object.assign({}, limit, { providerId: providerId }) : limit
++      })
++      return Object.assign({}, account, { limits: limits })
++    })
++  }
++
++  function displayProvider(source) {
++    var record = Object.assign({}, source, { accounts: displayAccounts(source) })
+     var stats = syncedStatsFor(String(record.id))
+     var synced = !!stats
+     var deviceCount = synced ? Number(stats.deviceCount || aggregateData.deviceCount || 0) : 0
 --- a/share/omarchy/shell/plugins/agents/Panel.qml
 +++ b/share/omarchy/shell/plugins/agents/Panel.qml
 @@ -943,11 +943,12 @@
@@ -54,7 +81,20 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
    function limitWindows(p) {
      if (!p) return []
      var out = []
-@@ -1099,30 +1113,54 @@
+@@ -1085,7 +1099,11 @@
+     for (var i = 0; i < list.length; i++) {
+       var entry = list[i] || {}
+       var percent = Number(entry.percent)
+-      if (percent >= 0) out.push(limitWindow(entry.label, percent, entry.resetsAt, entry.title))
++      if (percent >= 0) {
++        var window = limitWindow(entry.label, percent, entry.resetsAt, entry.title)
++        window.providerId = entry.providerId
++        out.push(window)
++      }
+     }
+     return out
+   }
+@@ -1099,30 +1117,56 @@
      return match ? { model: match[1], window: match[2] } : null
    }
 
@@ -63,8 +103,8 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
 +  // K114s local change: a model-scoped window gets a row of its own, right
 +  // after the window whose clock it runs on, so its room left and pace show
 +  // without hovering. One with nothing to follow goes last.
-+  function displayWindows(provider, account) {
-+    var windows = limitWindows(account || provider)
++  function displayWindows(provider) {
++    var windows = limitWindows(provider)
      var out = []
 -    var byTitle = {}
 +    var placed = []
@@ -101,10 +141,12 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
 
 +  // Once the all-models week is spent, the raw session allowance cannot be used.
 +  function applyWeeklyCap(provider, windows) {
-+    if (!provider || (provider.providerId !== "claude" && provider.providerId !== "codex")) return
++    if (!provider) return
 +    var session = windows.find(window => window.title === "Session")
 +    var weekly = windows.find(window => window.title === "Weekly" && window.percent >= 1)
 +    if (!session || !weekly) return
++    var providerId = provider.providerId || session.providerId
++    if (providerId !== "claude" && providerId !== "codex") return
 +
 +    var sessionReset = resetMsFor(session)
 +    var weeklyReset = resetMsFor(weekly)
@@ -121,7 +163,7 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
    // The window that decides how much room is left — the fullest one, since
    // that is what stops the next prompt.
    function bindingWindow(p) {
-@@ -1140,6 +1178,30 @@
+@@ -1140,6 +1184,30 @@
      return isFinite(ms) ? ms - root.nowMs : -1
    }
 
@@ -152,7 +194,7 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
    function formatDuration(ms) {
      if (!(ms > 0)) return Commons.I18n.t("agents.durationNow")
      var minutes = Math.floor(ms / 60000)
-@@ -3188,8 +3250,9 @@
+@@ -3188,8 +3256,9 @@
      id: noteMark
      property var record: null
      readonly property string message: root.usageNote(record)
@@ -163,7 +205,7 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
      textFormat: Text.PlainText
      color: root.dim
      font.family: root.fontFamily
-@@ -3216,6 +3279,7 @@
+@@ -3216,6 +3285,7 @@
      property real fetchedAt: 0
      readonly property var scoped: window && window.scoped ? window.scoped : []
      readonly property bool alarming: window && window.percent >= 0.9
@@ -171,7 +213,7 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
      readonly property real resetMs: root.resetMsFor(window)
      implicitHeight: Math.max(compactTitle.implicitHeight, compactValue.implicitHeight)
 
-@@ -3227,10 +3291,14 @@
+@@ -3227,10 +3297,14 @@
          var lines = []
          if (compact.window) {
            var windowName = root.windowDisplayTitle(compact.window.title)
@@ -189,7 +231,7 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
          }
          if (compact.stale)
            lines.push(compact.fetchedAt > 0 && root.nowMs - compact.fetchedAt > 60000
-@@ -3247,8 +3315,12 @@
+@@ -3247,8 +3321,12 @@
        textFormat: Text.PlainText
        width: parent.width * 0.3
        anchors.verticalCenter: parent.verticalCenter
@@ -204,7 +246,7 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
        font.family: root.fontFamily
        font.pixelSize: Style.font.bodySmall
        elide: Text.ElideRight
-@@ -3259,7 +3331,8 @@
+@@ -3259,7 +3337,8 @@
        anchors.right: compactValue.left
        anchors.rightMargin: Style.space(20)
        anchors.verticalCenter: parent.verticalCenter
@@ -214,7 +256,7 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
        alarming: compact.alarming
        markers: compact.scoped
      }
-@@ -3289,7 +3362,8 @@
+@@ -3289,7 +3368,8 @@
      }
    }
 
@@ -224,7 +266,7 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
    component Meter: Item {
      id: meter
      property real value: -1
-@@ -3299,6 +3373,10 @@
+@@ -3299,6 +3379,10 @@
      // Other allowances on the same clock, drawn as ticks across the track.
      property var markers: []
 
@@ -235,7 +277,7 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
      implicitHeight: thickness
 
      Rectangle {
-@@ -3337,5 +3415,17 @@
+@@ -3337,5 +3421,17 @@
          color: meter.alarming ? root.urgent : root.foreground
        }
      }
