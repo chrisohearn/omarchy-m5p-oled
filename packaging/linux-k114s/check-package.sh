@@ -45,6 +45,7 @@ case $rel in
   *-k114s-r3c-ARCH) want=linux-k114s ;;   # r3c takes the r3a slot (docs/r3c-kernel.md)
   *-k114s-r3d-ARCH) want=linux-k114s ;;   # r3d replaces r3c in that slot (docs/r3d-kernel.md)
   *-k114s-r3e-ARCH) want=linux-k114s-r3b ;;   # r3e takes the r3b slot, the Backup beside r3d (docs/r3e-kernel.md)
+  *-k114s-r3e1-ARCH) want=linux-k114s ;;   # r3e1 takes the linux-k114s slot, the Backup beside r3e (docs/r3e-kernel.md)
   *) want= ;;
 esac
 name=$(info pkgname); base=$(info pkgbase)

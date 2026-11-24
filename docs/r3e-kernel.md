@@ -180,6 +180,20 @@ r3d does, so `0075` changes nothing until a camera tree sets the property. Built
 `apple-isp.ko` carries the property (agent-run). The series applied to a clean `main` gives the built tree
 `e0a0aa34` (agent-run).
 
+## 2b. r3e1: the camera indicator small and under the notch (0076)
+
+The owner saw the camera indicator (a 48x48 green square with a black border, top right) and asked for it "much smaller
+and near the camera" (2026-11-24). `0076` makes it, on `apple,k114s` only, a solid 32x32 square (DCP rejects blended
+surfaces smaller than 32x32) centred horizontally just below the 96-row notch that holds the camera (y = 104).
+The 48x48 buffer is kept, and only its top-left 32x32 is scanned out. Every other board keeps the corner square.
+`dcp-indicator-test.c` passes as a plain program.
+
+r3e1 is `patches/linux/r3e1.series` (r3e plus `0076`), built with release `7.3.0-17.v272-18-k114s-r3e1-ARCH` and packaged
+as `linux-k114s 7.3.0.r3e1-1`: the `linux-k114s` slot, the Backup since r3e became Main, replacing r3d there. r3e stays the
+way back while r3e1 is tried once through a Limine one-shot, and is promoted if every check passes. The series applied to a
+clean `main` gives the built tree `448a618e`. Built 302 s: `Image` sha256 `c4cf8fe1…`; `validate-config.py` passes (385 requirements, 0 not met), and `check-package.sh`
+passes against `linux-aurora` and `linux-k114s-r3b` (agent-run).
+
 ## 3. Open pull requests r3d carried
 
 | PR | r3d patches | State on 2026-11-24 | In r3e |
