@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 19 Nov 2026 05:27:21 -0700
+Subject: soc: apple: sleep: check a profile's CPU inventory, not its board's
+ name
+
+A profile that names a machine is refused at probe on any other board,
+whatever its CPUs. The node's compatible already chose the profile, and
+what the entry depends on is the inventory: the boot CPU's MPIDR and
+the CPU count. Check those alone.
+
+The K116s (16-inch M5 Pro) binds apple,t6050-sleep with the J714s's
+18-core layout and sleeps with that profile.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ drivers/soc/apple/sleep.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/soc/apple/sleep.c b/drivers/soc/apple/sleep.c
+index 375988d9697..f7362392cba 100644
+--- a/drivers/soc/apple/sleep.c
++++ b/drivers/soc/apple/sleep.c
+@@ -1917,10 +1917,10 @@ static int apple_sleep_validate_cpu_topology(struct apple_sleep *s)
+ 		    soc->cpu_cores_per_cluster > 32)
+ 		return dev_err_probe(s->dev, -EINVAL, "invalid CPU-start geometry\n");
+ 
+-	if (soc->machine && (!of_machine_is_compatible(soc->machine) ||
+-	    cpu_logical_map(0) != soc->boot_mpidr ||
+-	    num_possible_cpus() != soc->cpu_count))
+-		return dev_err_probe(s->dev, -EINVAL, "unsupported board/CPU inventory\n");
++	/* The node's compatible chose the profile: its machine is where it was measured */
++	if (soc->machine && (cpu_logical_map(0) != soc->boot_mpidr ||
++			     num_possible_cpus() != soc->cpu_count))
++		return dev_err_probe(s->dev, -EINVAL, "unsupported CPU inventory\n");
+ 
+ 	index = of_property_match_string(np, "reg-names", "cpu-start");
+ 	if (index < 0)

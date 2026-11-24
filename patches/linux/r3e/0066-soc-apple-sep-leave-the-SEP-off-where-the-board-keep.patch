@@ -1,0 +1,129 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <address-in-upstream-commit@localhost>
+Date: Fri, 20 Nov 2026 14:37:31 +1100
+Subject: soc: apple: sep: leave the SEP off where the board keeps its mailbox
+ disabled
+
+With the profile picked by SoC alone, select() now also returns a profile
+on boards whose device tree describes no usable enclave, and the warm
+attach then enables the SEP node and its DART at module load. Most device
+trees leave both disabled for that path, so their status cannot say
+whether a board has an enclave.
+
+The SEP mailbox's status does: the SEP cannot be reached without it, and
+the device tree enables it (in the board file, or in the SoC .dtsi for
+every board of that SoC) where the SEP is described for the machine.
+enable_sep_and_dart() now leaves the SEP and its DART disabled when the
+mailbox is disabled.
+
+From the compiled DTBs of this tree: J773s (T6040), J575c (T6041), and
+J714c, J716s, J775c, J775d, J873s, K114c, K114s and K116c (T6050) keep the
+SEP mailbox disabled, so nothing is enabled or bound there. Every board
+whose mailbox is enabled attaches as before.
+
+The selection KUnit test also covers J773g, J815, K114s, J316s and J413,
+and checks that SoCs without a profile (T6002, T6031, T8152) are refused.
+
+Signed-off-by: Ryan Murray <address-in-upstream-commit@localhost>
+
+[re-cut onto the K114s r3d tree]
+---
+ drivers/soc/apple/dt.rs      | 21 +++++++++++++++++++++
+ drivers/soc/apple/profile.rs | 19 ++++++++++++++++++-
+ 2 files changed, 39 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/soc/apple/dt.rs b/drivers/soc/apple/dt.rs
+index d6f83b55862..02f68e36ea0 100644
+--- a/drivers/soc/apple/dt.rs
++++ b/drivers/soc/apple/dt.rs
+@@ -11,6 +11,7 @@
+ 
+ const SEP_COMPATIBLE: &CStr = c"apple,sep";
+ const IOMMUS_PROP: &CStr = c"iommus";
++const MBOXES_PROP: &CStr = c"mboxes";
+ 
+ const STATUS_PROP: &CStr = c"status";
+ const STATUS_OKAY: &CStr = c"okay";
+@@ -185,6 +186,16 @@ pub(crate) fn sep_node() -> Option<DtNode> {
+     Some(uuid.b)
+ }
+ 
++/// Enables the SEP and its DART for a warm attach, on boards whose device
++/// tree describes a usable enclave.
++///
++/// Most device trees leave the SEP node and its DART `disabled` for this
++/// function to enable, so their status cannot say whether a board has a
++/// usable enclave. The SEP mailbox's status does: the SEP cannot be reached
++/// without it, and the device tree enables it (in the board file, or in the
++/// SoC .dtsi for every board of that SoC) where the SEP is described for the
++/// machine. A board that keeps the mailbox disabled is left untouched and the
++/// module probes nothing.
+ pub(crate) fn enable_sep_and_dart(window: &crate::profile::DartWindow) -> Result<()> {
+     let sep = sep_node().ok_or_else(|| {
+         pr_err!(
+@@ -194,6 +205,16 @@ pub(crate) fn enable_sep_and_dart(window: &crate::profile::DartWindow) -> Result
+         ENODEV
+     })?;
+ 
++    if !sep
++        .parse_phandle(MBOXES_PROP, 0)
++        .is_some_and(|mbox| mbox.is_available())
++    {
++        pr_info!(
++            "apple_sep: the device tree leaves the SEP mailbox disabled on this board; the SEP stays disabled\n"
++        );
++        return Ok(());
++    }
++
+     let dart = sep.parse_phandle(IOMMUS_PROP, 0).ok_or_else(|| {
+         pr_err!(
+             "apple_sep: SEP node has no '{}' phandle; cannot find its DART\n",
+diff --git a/drivers/soc/apple/profile.rs b/drivers/soc/apple/profile.rs
+index 0fb9db539dc..2a5e2fac101 100644
+--- a/drivers/soc/apple/profile.rs
++++ b/drivers/soc/apple/profile.rs
+@@ -703,7 +703,10 @@ fn select(
+     // a sensor node the board's device tree describes is used as it is, and
+     // a board without a sensor (a Mac mini, Studio or iMac) has nothing on
+     // that bus, so the sensor probe finds no part and the SEP runs without
+-    // biometrics, as on the M1 and M2 Mac minis.
++    // biometrics, as on the M1 and M2 Mac minis. Whether a board has an
++    // enclave to attach to is the board device tree's call:
++    // `dt::enable_sep_and_dart` leaves the SEP disabled where the board keeps
++    // the SEP mailbox disabled.
+     if has(b"apple,t8122") {
+         return Ok(&T8122);
+     }
+@@ -816,6 +819,8 @@ fn selection_follows_the_soc() {
+         assert_eq!(picked(&[b"apple,j713", b"apple,t8132"]), Some(T8132.name));
+         assert_eq!(picked(&[b"apple,j715", b"apple,t8132"]), Some(T8132.name));
+         assert_eq!(picked(&[b"apple,j604", b"apple,t8132"]), Some(T8132.name));
++        assert_eq!(picked(&[b"apple,j773g", b"apple,t8132"]), Some(T8132.name));
++        assert_eq!(picked(&[b"apple,j613", b"apple,t8132"]), Some(T8132.name));
+         assert_eq!(picked(&[b"apple,t8132"]), Some(T8132.name));
+         assert_eq!(picked(&[b"apple,j713", b"apple,t8122"]), Some(T8122.name));
+         assert_eq!(picked(&[b"apple,j613", b"apple,t8122"]), Some(T8122.name));
+@@ -835,11 +840,23 @@ fn selection_follows_the_soc() {
+         assert_eq!(picked(&[b"apple,k114s", b"apple,t6050"]), Some(T6050.name));
+         assert_eq!(picked(&[b"apple,j716c", b"apple,t6041"]), Some(T6041.name));
+         assert_eq!(picked(&[b"apple,j813", b"apple,t8142"]), Some(T8142.name));
++        assert_eq!(picked(&[b"apple,j815", b"apple,t8142"]), Some(T8142.name));
+         assert_eq!(picked(&[b"apple,j704", b"apple,t8142"]), Some(T8142.name));
++        assert_eq!(picked(&[b"apple,j316s", b"apple,t6000"]), Some(T6000.name));
++        assert_eq!(picked(&[b"apple,j413", b"apple,t8112"]), Some(T8112.name));
+         assert_eq!(picked(&[b"apple,j713"]), None);
+         assert_eq!(picked(&[b"apple,t6002"]), None);
+     }
+ 
++    /// SoCs without a profile are still refused, whatever the board.
++    #[test]
++    fn unprofiled_socs_are_refused() {
++        assert_eq!(picked(&[b"apple,j375d", b"apple,t6002"]), None);
++        assert_eq!(picked(&[b"apple,j514c", b"apple,t6031"]), None);
++        assert_eq!(picked(&[b"apple,j804", b"apple,t8152"]), None);
++        assert_eq!(picked(&[]), None);
++    }
++
+     /// Touch ID has one path for every Mac. The retry limits, the lock
+     /// states, the password re-arm and the lift-gated capture read nothing
+     /// from the profile; only the transport underneath (bus, nonce session,

@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 19 Nov 2026 05:28:31 -0700
+Subject: usb: dwc3: apple: T6050's sleep lines where the sleep is described
+
+The dwc3 glue took T6050's sleep lines on the J714s and the J716c by
+name. Take them wherever the device tree describes T6050's sleep.
+
+The port controllers' side of this is in already: their sleep rules are
+asked for by the controllers' own properties.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ drivers/usb/dwc3/dwc3-apple.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/usb/dwc3/dwc3-apple.c b/drivers/usb/dwc3/dwc3-apple.c
+index c5740ee25d5..5757cf33832 100644
+--- a/drivers/usb/dwc3/dwc3-apple.c
++++ b/drivers/usb/dwc3/dwc3-apple.c
+@@ -1109,12 +1109,12 @@ static void dwc3_apple_check_hub_later(struct dwc3_apple *appledwc)
+ 
+ /*
+  * Waiting for a Type-C PHY that is not started after sleep is specific to the T6050 boards
+- * whose port controllers take the sleep's power states (J714s, J716c). The notifier work
+- * and its admission rules apply to every board.
++ * whose port controllers take the sleep's power states: those whose device tree describes
++ * the sleep. The notifier work and its admission rules apply to every board.
+  */
+ static bool dwc3_apple_sleep_board(void)
+ {
+-	return of_machine_is_compatible("apple,j714s") || of_machine_is_compatible("apple,j716c");
++	return apple_t6050_sleep_described();
+ }
+ 
+ /*

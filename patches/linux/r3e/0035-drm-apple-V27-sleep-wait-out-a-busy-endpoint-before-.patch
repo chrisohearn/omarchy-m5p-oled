@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Wed, 18 Nov 2026 06:39:40 -0700
+Subject: drm/apple: V27 sleep: wait out a busy endpoint before closing it
+
+An endpoint that is still taking a message answers -EBUSY to the close
+for a moment, and the sleep was refused; undoing it then crashed the
+internal DCP. Seen on endpoint 0x31 of a K116s DCPEXT, where a service
+is announced late ("close-31 -16"), more often with a verbose console.
+Poll afk_v27_sleep_check() for up to 300 ms first, as the other steps
+do.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ drivers/gpu/drm/apple/dcp-v27-sleep.inc | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/apple/dcp-v27-sleep.inc b/drivers/gpu/drm/apple/dcp-v27-sleep.inc
+index acd8358d7f8..526c0c2f272 100644
+--- a/drivers/gpu/drm/apple/dcp-v27-sleep.inc
++++ b/drivers/gpu/drm/apple/dcp-v27-sleep.inc
+@@ -1665,7 +1665,18 @@ static int dcp_v27_sleep_prepare(struct apple_dcp *dcp)
+ 	if (ret)
+ 		goto uncertain;
+ 	for (i = ARRAY_SIZE(v27_sleep_endpoints); i-- > 0;) {
+-		ret = afk_v27_sleep_control(dcp->sleep_v27_ep[v27_sleep_endpoints[i] - 0x20], false);
++		struct apple_dcp_afkep *ep = dcp->sleep_v27_ep[v27_sleep_endpoints[i] - 0x20];
++		int check;
++
++		/*
++		 * An endpoint still taking a message (a service announced late, seen on 0x31 of
++		 * a K116s DCPEXT) answers -EBUSY for a moment: wait it out as the other steps do,
++		 * rather than refuse the sleep.
++		 */
++		if (ep)
++			read_poll_timeout(afk_v27_sleep_check, check, check != -EBUSY, 1000,
++					  300 * USEC_PER_MSEC, false, ep);
++		ret = afk_v27_sleep_control(ep, false);
+ 		if (ret) {
+ 			char name[12];
+ 

@@ -35,12 +35,12 @@
 # -k114s-r3b-t1-ARCH release keep its boot names and module directory separate from r3b.
 #
 # This file does not compile anything. It packages a finished build:
-#   K114S_CAND  the candidate, r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d   (default r3a, the one the runbook docs/r3-integration.md names;
+#   K114S_CAND  the candidate, r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d, r3e   (default r3a, the one the runbook docs/r3-integration.md names;
 #               r3b: docs/r3b-kernel.md, K114S_CAND=r3b makepkg ...; r3b-b1: D5a, K114S_CAND=r3b-b1 makepkg ...;
 #               r3b-c1: docs/r3-hdr.md, K114S_CAND=r3b-c1 makepkg ...; r3b-c2: docs/r3b-kernel.md,
 #               K114S_CAND=r3b-c2 makepkg ...; r3b-c3: docs/r3-vrr.md, K114S_CAND=r3b-c3 makepkg ...;
 #               r3b-c4: docs/r3-touchid.md, K114S_CAND=r3b-c4 makepkg ...; r3c: docs/r3c-kernel.md, K114S_CAND=r3c makepkg ...;
-#               r3d: docs/r3d-kernel.md, K114S_CAND=r3d makepkg ...)
+#               r3d: docs/r3d-kernel.md, K114S_CAND=r3d makepkg ...; r3e: docs/r3e-kernel.md, K114S_CAND=r3e makepkg ...)
 #   K114S_SRC   the kernel source tree      (default $K114S_BUILD_ROOT/src/<candidate>)
 #   K114S_OUT   its output directory        (default $K114S_BUILD_ROOT/build/<candidate>)
 # with the toolchain of $K114S_BUILD_ROOT (default ~/k114s-build; env.sh and bin/kmake there).
@@ -63,7 +63,11 @@ case $_cand in
   r3c) pkgname=linux-k114s; _kcand=r3c; _ver=r3c; _rel=1 ;;
   # r3d (docs/r3d-kernel.md) replaces r3c in the same slot: 7.3.0.r3c-1 -> 7.3.0.r3d-1 (vercmp: newer)
   r3d) pkgname=linux-k114s; _kcand=r3d; _ver=r3d; _rel=1 ;;
-  *) echo "K114S_CAND must be r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c or r3d" >&2; exit 1 ;;
+  # r3e (docs/r3e-kernel.md) takes the r3b slot, the Backup since r3d became Main (it holds r3c-upstream,
+  # 7.3.0.r3c.upstream-1 -> 7.3.0.r3e-1, vercmp: newer). r3d stays in the linux-k114s slot as the way back while r3e
+  # is tried by a one-shot; promotion points default_entry at Omarchy/linux-k114s-r3b
+  r3e) pkgname=linux-k114s-r3b; _kcand=r3e; _ver=r3e; _rel=1 ;;
+  *) echo "K114S_CAND must be r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d or r3e" >&2; exit 1 ;;
 esac
 pkgbase=$pkgname
 pkgver=7.3.0.$_ver
@@ -128,6 +132,30 @@ package() {
       grep -q 'apple,k114-macaudio' "$_src/sound/soc/apple/macaudio.c" &&
       grep -q 'name: "27.2 (26B8125), G17S",' "$_src/drivers/gpu/drm/asahi/hw/t6050.rs" ||
       { echo "$_src is not the r3d series (patches/linux/r3d.series)" >&2; return 1; }
+  fi
+  # r3e (patches/linux/r3e.series, docs/r3e-kernel.md) must carry what r3d had, on aurora-silicon/linux main. Where main now
+  # carries a guarded item itself, the guard checks main's form: the adopted-link s2idle test is #2488's predicate (the
+  # K114s qualifies through t6050_hw.adopt_link) and the NVRAM write path is #2817's (a DT nvram partition and a known
+  # flash part, so the K114s, which has neither, stays read-only)
+  if [[ $_cand == r3e ]]; then
+    grep -q 'dcp_bl_set_minimum' "$_src/drivers/gpu/drm/apple/dcp_backlight.h" &&
+      grep -q 'fw27_panel_edr_max_nits = 500;' "$_src/drivers/gpu/drm/apple/dcp.c" &&
+      grep -q 'dcp_panel_color_target' "$_src/drivers/gpu/drm/apple/dcp-display-metadata.c" &&
+      grep -q 'panel EDR off: cap %u nits set and the SDR maximum is unknown' "$_src/drivers/gpu/drm/apple/dcp.c" &&
+      grep -A3 '^static int macsmc_battery_get_date' "$_src/drivers/power/supply/macsmc-power.c" | grep -q 'return -ENODATA;' &&
+      grep -q 'ALS_SENSOR_BLOB_LEN: usize = 193;' "$_src/drivers/soc/apple/aop.rs" &&
+      grep -q 'apple_pcie_adopted_links_ready' "$_src/drivers/pci/controller/pcie-apple.c" &&
+      sed -n '/^static const struct hw_info t6050_hw = {/,/^};/p' "$_src/drivers/pci/controller/pcie-apple.c" | grep -q 'adopt_link[[:space:]]*= true' &&
+      grep -q 'apple_qspi_find_part' "$_src/drivers/spi/spi-apple-qspi.c" &&
+      ! grep -q '0xc8, 0x83, 0x17' "$_src/drivers/spi/spi-apple-qspi-policy.h" &&
+      ! grep -q 'apple,k114s' "$_src/drivers/spi/spi-apple-qspi.c" &&
+      grep -q 'static bool read_only = true;' "$_src/drivers/spi/spi-apple-qspi.c" &&
+      ! grep -rq 'label = "nvram"' "$_src"/arch/arm64/boot/dts/apple/t6050-k114s.dts "$_src"/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi &&
+      grep -q 'apple,k114-macaudio' "$_src/sound/soc/apple/macaudio.c" &&
+      grep -q 'name: "27.2 (26B8125), G17S",' "$_src/drivers/gpu/drm/asahi/hw/t6050.rs" ||
+      { echo "$_src is not the r3e series (patches/linux/r3e.series)" >&2; return 1; }
+    [[ $(grep -c 'name: "27.2 (26B8125), G17S",' "$_src/drivers/gpu/drm/asahi/hw/t6050.rs") == 1 ]] ||
+      { echo "$_src has the 26B8125 G17S firmware entry more than once" >&2; return 1; }
   fi
   # r3b-c2 must carry sleep-lid/0007: an unreadable manufacture date is -ENODATA, not -EOPNOTSUPP (aurora-silicon/linux#1615)
   if [[ $_cand == r3b-c[2-4] ]]; then

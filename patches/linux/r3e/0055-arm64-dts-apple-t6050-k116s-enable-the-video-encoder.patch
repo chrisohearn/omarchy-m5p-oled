@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Wed, 18 Nov 2026 06:40:14 -0700
+Subject: arm64: dts: apple: t6050-k116s: enable the video encoder's power
+ states
+
+iBoot leaves VENC0_SYS on (PS word 0xf0003ff). Its node is disabled on
+the K116s, so nothing ever turns it off, and FAB0_SOC stays up behind
+it. The J714s enables these power states for its encoder.
+
+With VENC0_SYS on, the SoC does not enter the firmware-driven sleep:
+the whole entry runs, and the machine resets about 5 s after the commit
+word. macOS has VENC0_SYS off at its commit on this board (register
+state read with macOS as an aura guest, the commit withheld).
+
+Enable ps_fab1_piogw (firmware-owned), ps_fab0_soc (always-on) and the
+ps_venc0_* states as on the J714s. Unused, genpd turns them off at
+boot. No encoder is described yet.
+
+Tested on a K116s: venc0-sys and its children read off after boot, and
+the J714s commit sequence then sleeps.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+[re-cut onto the K114s r3d tree]
+---
+ arch/arm64/boot/dts/apple/t6050-k116s.dts | 39 +++++++++++++++++++++++
+ 1 file changed, 39 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-k116s.dts b/arch/arm64/boot/dts/apple/t6050-k116s.dts
+index 4143dd9b19e..69fdab4eccb 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k116s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k116s.dts
+@@ -940,3 +940,42 @@ pmu_rtc: rtc {
+ 		wakeup-source;
+ 	};
+ };
++
++/*
++ * The video encoder's power states, as on the J714s. iBoot leaves VENC0_SYS on, and the SoC does
++ * not enter the firmware-driven sleep with it on. Enabled and unused, genpd turns it off at
++ * boot. No encoder is described yet.
++ */
++&ps_fab1_piogw {
++	apple,firmware-owned;
++	status = "okay";
++};
++
++&ps_fab0_soc {
++	apple,always-on;
++	status = "okay";
++};
++
++&ps_venc0_sys {
++	status = "okay";
++};
++
++&ps_venc0_dma {
++	status = "okay";
++};
++
++&ps_venc0_pipe4 {
++	status = "okay";
++};
++
++&ps_venc0_pipe5 {
++	status = "okay";
++};
++
++&ps_venc0_me0 {
++	status = "okay";
++};
++
++&ps_venc0_me1 {
++	status = "okay";
++};
