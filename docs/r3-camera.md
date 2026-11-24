@@ -1,8 +1,12 @@
 # Camera (Apple ISP) for the K114s (#33)
 
-**Status (2026-11-24).** The owner asked for the camera for meetings and chose (T3 decision grill, "Run it, on-screen
-dot") to run it without a verified activity light: the K114s ADT describes no light pin, and the light has not been
-traced from macOS. Built, not booted yet:
+**Status (2026-11-24): working, promoted.** On the owner's choice ("Run it, on-screen dot"), the camera runs without a
+verified activity light. The display's on-screen indicator shows while it streams, and after r3e1 that indicator is a
+small 32x32 green square centred under the notch. The camera Stage 2 trial passed every gate: the K114s loader row
+`0xba`, the no-light probe, the indicator bound, a 1920x1080 frame with picture content, and no new kernel warnings or
+errors. It was promoted, so the configured Stage 2 is `3e46007a` (b15 + the K114s camera row `06b38fd0` + the camera
+tree `b7efcc0d`). The owner saw the square. An ordinary boot on it passed. The IMX958 setfile is still missing, so the
+picture is untuned until it is copied from macOS.
 
 | Part | What | Result |
 | --- | --- | --- |

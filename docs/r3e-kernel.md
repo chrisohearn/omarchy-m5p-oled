@@ -1,6 +1,6 @@
 # r3e: the K114s kernel on aurora-silicon/linux `main` `c3369f48`
 
-Status 2026-11-24: **built and checked in the emulator; not installed, not booted.** r3e is the r3d series rebased onto
+Status 2026-11-24: **r3e1 (r3e + 0076, the small camera indicator) is Main (the default), and r3e is Backup.** The r3e trial passed and was promoted, then r3e1's trial (`R3E1-CHECK: PASS`, with a 5 s camera stream binding the indicator) passed and was promoted. The text below records the build.
 the new upstream `main`. aurora-silicon/linux removed its `integration/aurora` branch; pull requests now target `main`,
 which contains the r3d base `0bbe021a28bd` (399 commits earlier than `c3369f48`). The speakers stay off. Deep sleep
 stays compiled out (`CONFIG_APPLE_SOC_SLEEP` off), as in r3d. Evidence labels as in [r3d-kernel.md](r3d-kernel.md):
