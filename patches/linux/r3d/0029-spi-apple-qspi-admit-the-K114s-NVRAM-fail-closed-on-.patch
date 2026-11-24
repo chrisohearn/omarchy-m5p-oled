@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: chrisohearn <address-in-upstream-commit@localhost>
+Date: Tue, 17 Nov 2026 09:54:26 -0700
+Subject: [PATCH 29/93] spi: apple-qspi: admit the K114s NVRAM, fail-closed on
+ its flash ID
+
+The K114s (MacBook Pro 14-inch OLED, M5 Pro, Mac17,13) has the J716s's
+QSPI controller at 0x505118000 and, in its macOS 27.2 (26B8125) ADT, the
+same NVRAM at /arm-io/qspi/spinor/anvram: 0x700000, 0xc0000 bytes, twelve
+64 KiB banks. Add its row beside the J716s's so root can opt in to the
+same bounded and verified writes.
+
+The flash ID is the J716s's GigaDevice part (0xc88317) by assumption; it
+has not been read on a K114s. If the part differs, the existing JEDEC
+check refuses every write before WREN, so a first boot can only read and
+report the real ID. No block-protect bit is tolerated (bp_ok 0).
+
+tools/asahi/qspi-nvram-tests.py passes unchanged with the row added.
+Not yet run on the hardware.
+---
+ drivers/spi/spi-apple-qspi.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/drivers/spi/spi-apple-qspi.c b/drivers/spi/spi-apple-qspi.c
+index a0f0b05cf3b..4e1995fe9de 100644
+--- a/drivers/spi/spi-apple-qspi.c
++++ b/drivers/spi/spi-apple-qspi.c
+@@ -160,6 +160,16 @@ static const struct apple_qspi_board apple_qspi_boards[] = {
+ 	 */
+ 	{ "apple,t6050-qspi", "apple,j716s", 0x505118000ULL,
+ 	  0x700000, 0xc0000, APPLE_QSPI_JEDEC_GD_8M, 0 },
++	/*
++	 * K114s (T6050, MacBook Pro 14-inch OLED, M5 Pro): the ADT gives the
++	 * same controller aperture and the same NVRAM, 12 banks of 64 KiB at
++	 * 0x700000 (/arm-io/qspi/spinor/anvram). The flash ID is assumed to be
++	 * the J716s's GigaDevice part and is not yet confirmed on a K114s: a
++	 * different ID refuses every write before WREN, so the first boot can
++	 * only read. No block-protect bit is tolerated.
++	 */
++	{ "apple,t6050-qspi", "apple,k114s", 0x505118000ULL,
++	  0x700000, 0xc0000, APPLE_QSPI_JEDEC_GD_8M, 0 },
+ };
+ 
+ static DEFINE_MUTEX(apple_qspi_policy_lock);

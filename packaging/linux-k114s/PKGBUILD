@@ -35,11 +35,12 @@
 # -k114s-r3b-t1-ARCH release keep its boot names and module directory separate from r3b.
 #
 # This file does not compile anything. It packages a finished build:
-#   K114S_CAND  the candidate, r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c   (default r3a, the one the runbook docs/r3-integration.md names;
+#   K114S_CAND  the candidate, r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d   (default r3a, the one the runbook docs/r3-integration.md names;
 #               r3b: docs/r3b-kernel.md, K114S_CAND=r3b makepkg ...; r3b-b1: D5a, K114S_CAND=r3b-b1 makepkg ...;
 #               r3b-c1: docs/r3-hdr.md, K114S_CAND=r3b-c1 makepkg ...; r3b-c2: docs/r3b-kernel.md,
 #               K114S_CAND=r3b-c2 makepkg ...; r3b-c3: docs/r3-vrr.md, K114S_CAND=r3b-c3 makepkg ...;
-#               r3b-c4: docs/r3-touchid.md, K114S_CAND=r3b-c4 makepkg ...; r3c: docs/r3c-kernel.md, K114S_CAND=r3c makepkg ...)
+#               r3b-c4: docs/r3-touchid.md, K114S_CAND=r3b-c4 makepkg ...; r3c: docs/r3c-kernel.md, K114S_CAND=r3c makepkg ...;
+#               r3d: docs/r3d-kernel.md, K114S_CAND=r3d makepkg ...)
 #   K114S_SRC   the kernel source tree      (default $K114S_BUILD_ROOT/src/<candidate>)
 #   K114S_OUT   its output directory        (default $K114S_BUILD_ROOT/build/<candidate>)
 # with the toolchain of $K114S_BUILD_ROOT (default ~/k114s-build; env.sh and bin/kmake there).
@@ -60,7 +61,9 @@ case $_cand in
   # r3c takes the r3a slot (docs/r3c-kernel.md): linux-k114s 7.3.0.r3a-2 -> 7.3.0.r3c-1 (vercmp: newer), so the ESP keeps
   # two kernel images (r3c and the proven r3b) and the macOS repair tool still finds omarchy_linux-k114s.efi
   r3c) pkgname=linux-k114s; _kcand=r3c; _ver=r3c; _rel=1 ;;
-  *) echo "K114S_CAND must be r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1 or r3c" >&2; exit 1 ;;
+  # r3d (docs/r3d-kernel.md) replaces r3c in the same slot: 7.3.0.r3c-1 -> 7.3.0.r3d-1 (vercmp: newer)
+  r3d) pkgname=linux-k114s; _kcand=r3d; _ver=r3d; _rel=1 ;;
+  *) echo "K114S_CAND must be r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c or r3d" >&2; exit 1 ;;
 esac
 pkgbase=$pkgname
 pkgver=7.3.0.$_ver
@@ -109,6 +112,22 @@ package() {
       grep -q '"apple,t6050-qspi", "apple,k114s"' "$_src/drivers/spi/spi-apple-qspi.c" &&
       grep -q 'of_machine_is_compatible("apple,k114s")' "$_src/drivers/pci/controller/pcie-apple.c" ||
       { echo "$_src is not the r3c series (patches/linux/r3c.series)" >&2; return 1; }
+  fi
+  # r3d (patches/linux/r3d.series) must carry what r3c had, on the new base, plus the speaker-off K114 card, the 27.2
+  # GPU firmware entry and the adopted-link s2idle rework (#2488) that replaces r3c 0001's board line
+  if [[ $_cand == r3d ]]; then
+    grep -q 'dcp_bl_set_minimum' "$_src/drivers/gpu/drm/apple/dcp_backlight.h" &&
+      grep -q 'fw27_panel_edr_max_nits = 500;' "$_src/drivers/gpu/drm/apple/dcp.c" &&
+      grep -q 'dcp_panel_color_target' "$_src/drivers/gpu/drm/apple/dcp-display-metadata.c" &&
+      grep -q 'panel EDR off: cap %u nits set and the SDR maximum is unknown' "$_src/drivers/gpu/drm/apple/dcp.c" &&
+      grep -A3 '^static int macsmc_battery_get_date' "$_src/drivers/power/supply/macsmc-power.c" | grep -q 'return -ENODATA;' &&
+      grep -q 'apple,k114s' "$_src/drivers/soc/apple/profile.rs" &&
+      grep -q 'ALS_SENSOR_BLOB_LEN: usize = 193;' "$_src/drivers/soc/apple/aop.rs" &&
+      grep -q '"apple,t6050-qspi", "apple,k114s"' "$_src/drivers/spi/spi-apple-qspi.c" &&
+      grep -q 'pm_suspend_no_platform()' "$_src/drivers/pci/controller/pcie-apple.c" &&
+      grep -q 'apple,k114-macaudio' "$_src/sound/soc/apple/macaudio.c" &&
+      grep -rq 'V26B123_M5' "$_src/drivers/gpu/drm/asahi/hw/t6050.rs" ||
+      { echo "$_src is not the r3d series (patches/linux/r3d.series)" >&2; return 1; }
   fi
   # r3b-c2 must carry sleep-lid/0007: an unreadable manufacture date is -ENODATA, not -EOPNOTSUPP (aurora-silicon/linux#1615)
   if [[ $_cand == r3b-c[2-4] ]]; then

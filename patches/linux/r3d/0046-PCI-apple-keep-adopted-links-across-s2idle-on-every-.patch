@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Satya Benson <satya@benson.earth>
+Date: Mon, 23 Nov 2026 20:07:33 -0500
+Subject: [PATCH 46/93] PCI: apple: keep adopted links across s2idle on every
+ adopted host
+
+pcie-apple restricted suspend-to-idle with boot-loader-trained
+("adopted") links to an explicit list of four board compatibles
+(J716c, K114c, K116s, J714s). That allowlist recorded which boards had
+been exercised, not a hardware distinction.
+
+Remove the board compatible allowlist from
+apple_pcie_check_adopted_s2idle(). The function is only reached for
+hosts whose links the boot loader trains (hw->adopt_link), and the
+existing hardware checks remain as the guard before and after sleep:
+the root complex is running and ready, every port link is up and not
+busy with no link-down interrupt pending, and every device below a
+boot-trained port answers in D0. Deeper sleep remains rejected.
+
+Signed-off-by: Satya Benson <satya@benson.earth>
+
+[re-cut onto the K114s r3d tree]
+---
+ drivers/pci/controller/pcie-apple.c | 17 ++++++-----------
+ 1 file changed, 6 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/pci/controller/pcie-apple.c b/drivers/pci/controller/pcie-apple.c
+index ed4a211fc4a..9b6f1940aa4 100644
+--- a/drivers/pci/controller/pcie-apple.c
++++ b/drivers/pci/controller/pcie-apple.c
+@@ -6870,18 +6870,13 @@ static int apple_pcie_check_adopted_s2idle(struct apple_pcie *pcie)
+ 	int error = 0;
+ 
+ 	/*
+-	 * Qualified on the J716c, the K114c, the K116s, the J714s and the K114s:
+-	 * the same T6050 host with the N1 adopted on port 0. The K116s and the
+-	 * J714s (16- and 14-inch M5 Pro) also have a kernel-trained SD reader
+-	 * port. The K114s is the K114c's M5 Pro sibling and takes the same
+-	 * checks; it has not been through a suspend on the hardware yet. Other
+-	 * adopted platforms and deeper sleep remain unqualified.
++	 * Every host whose links the boot loader trained (hw->adopt_link) keeps
++	 * them across suspend-to-idle: the root complex, every port's link and
++	 * the devices below must still be up and in D0, which the checks below
++	 * read from the hardware, before and after the sleep. Deeper sleep
++	 * remains unqualified.
+ 	 */
+-	if (!(of_machine_is_compatible("apple,j716c") ||
+-	      of_machine_is_compatible("apple,k114c") ||
+-	      of_machine_is_compatible("apple,k116s") ||
+-	      of_machine_is_compatible("apple,j714s") ||
+-	      of_machine_is_compatible("apple,k114s")) || !pm_suspend_no_platform())
++	if (!pm_suspend_no_platform())
+ 		return -EBUSY;
+ 
+ 	if (!(readl(pcie->base + CORE_RC_CTL) & CORE_RC_CTL_RUN) ||

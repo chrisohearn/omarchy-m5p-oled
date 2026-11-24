@@ -1,0 +1,1194 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Erik Bourget <address-in-upstream-commit@localhost>
+Date: Fri, 20 Nov 2026 02:10:16 -0500
+Subject: [PATCH 43/93] soc: apple: mcc: wait for display controllers to retire
+ boot scanout
+
+A display controller can keep scanning out the framebuffer the
+bootloader left on screen after it binds, and also while its node stays
+disabled because the bootloader kept the boot framebuffer as the
+display. For a boot DMA supplier that an enabled simple-framebuffer
+names as its display, enable cache allocation only once the display
+driver reports that a displayed swap of its own has retired that
+scanout. Other suppliers still only need to be bound. A supplier
+phandle that does not resolve, or a detached consumer or supplier
+node, leaves allocation off.
+
+The display driver reserves the record before it can retire the
+scanout, so the one-shot retirement cannot be lost to an allocation
+failure. Retirement survives either driver's unbind and reprobe;
+records and waiters are dropped when a node they name is detached, and
+none is added or retried for a detached node.
+
+OF flags a node detached before it calls the reconfig notifiers, so
+probe cannot hold a detach off, but the notifier always runs after the
+flag is set. Probe therefore checks its nodes and enables allocation
+under the lock the detach notifier takes, and registers the enabled
+controller there. Either probe sees the flag and fails, or the notifier
+finds the controller and turns allocation off, unless the detached node
+is a supplier whose boot scanout already retired, and cancels the
+enable a wake from deep sleep would do. Suspend, resume and shutdown
+take the same lock. A failed enable's write-back (up to 100 ms per
+plane) is done under that lock and delays a detach by as much. A
+deferred controller is retried outside the display driver's receive
+path.
+
+Signed-off-by: Erik Bourget <address-in-upstream-commit@localhost>
+---
+ .../bindings/soc/apple/apple,t8140-mcc.yaml   |   5 +-
+ drivers/soc/apple/Kconfig                     |   4 +
+ drivers/soc/apple/Makefile                    |   2 +
+ drivers/soc/apple/mcc-boot-dma.c              | 304 ++++++++++++
+ drivers/soc/apple/mcc.c                       | 180 ++++++-
+ include/linux/soc/apple/mcc.h                 |  37 ++
+ tools/asahi/mcc-boot-dma-tests.py             | 446 ++++++++++++++++++
+ tools/asahi/run-host-tests.py                 |   4 +
+ 8 files changed, 967 insertions(+), 15 deletions(-)
+ create mode 100644 drivers/soc/apple/mcc-boot-dma.c
+ create mode 100644 include/linux/soc/apple/mcc.h
+ create mode 100644 tools/asahi/mcc-boot-dma-tests.py
+
+diff --git a/Documentation/devicetree/bindings/soc/apple/apple,t8140-mcc.yaml b/Documentation/devicetree/bindings/soc/apple/apple,t8140-mcc.yaml
+index 08f2f7431b6..c976dcca6d9 100644
+--- a/Documentation/devicetree/bindings/soc/apple/apple,t8140-mcc.yaml
++++ b/Documentation/devicetree/bindings/soc/apple/apple,t8140-mcc.yaml
+@@ -111,7 +111,10 @@ allOf:
+             maxItems: 1
+           description:
+             Devices that take over DMA the bootloader left running. Cache allocation
+-            is enabled only once each of them is bound to its driver.
++            is enabled only once each of them is bound to its driver. A supplier
++            that an enabled simple-framebuffer names as its display is scanning out
++            that boot framebuffer, enabled or not, and is waited for until a
++            displayed swap of its own has replaced it.
+ 
+       required:
+         - compatible
+diff --git a/drivers/soc/apple/Kconfig b/drivers/soc/apple/Kconfig
+index 9e5bcc23ef4..3dd45db4e7d 100644
+--- a/drivers/soc/apple/Kconfig
++++ b/drivers/soc/apple/Kconfig
+@@ -46,8 +46,12 @@ config APPLE_MAILBOX
+ 
+ 	  Say Y here if you have an Apple SoC.
+ 
++config APPLE_MCC_BOOT_DMA
++	bool
++
+ config APPLE_MCC
+ 	tristate "Apple T8140, T6040 and T6050 system level cache"
++	select APPLE_MCC_BOOT_DMA
+ 	depends on ARCH_APPLE || COMPILE_TEST
+ 	depends on OF
+ 	default ARCH_APPLE
+diff --git a/drivers/soc/apple/Makefile b/drivers/soc/apple/Makefile
+index 6ce2050c293..e6f91ef774c 100644
+--- a/drivers/soc/apple/Makefile
++++ b/drivers/soc/apple/Makefile
+@@ -1,5 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+ 
++obj-$(CONFIG_APPLE_MCC_BOOT_DMA) += mcc-boot-dma.o
++
+ obj-$(CONFIG_APPLE_J613_DISPLAY_SYNC) += j613-display.o
+ 
+ obj-$(CONFIG_APPLE_DBGVIEW) += apple-dbgview.o
+diff --git a/drivers/soc/apple/mcc-boot-dma.c b/drivers/soc/apple/mcc-boot-dma.c
+new file mode 100644
+index 00000000000..0dc30332746
+--- /dev/null
++++ b/drivers/soc/apple/mcc-boot-dma.c
+@@ -0,0 +1,304 @@
++// SPDX-License-Identifier: GPL-2.0-only OR MIT
++/*
++ * A display controller can keep scanning out the boot loader's framebuffer
++ * after it binds, or with its node disabled. Its driver reserves a record
++ * while it tracks that boot scanout and marks it once a displayed swap of
++ * its own has retired it.
++ */
++#include <linux/bug.h>
++#include <linux/device.h>
++#include <linux/errno.h>
++#include <linux/export.h>
++#include <linux/init.h>
++#include <linux/list.h>
++#include <linux/mutex.h>
++#include <linux/notifier.h>
++#include <linux/of.h>
++#include <linux/of_platform.h>
++#include <linux/platform_device.h>
++#include <linux/slab.h>
++#include <linux/soc/apple/mcc.h>
++#include <linux/workqueue.h>
++
++struct apple_mcc_scanout {
++	struct list_head link;
++	struct device_node *supplier;
++	bool retired;
++};
++
++struct apple_mcc_scanout_waiter {
++	struct list_head link;
++	struct device_node *consumer;
++	struct device_node *supplier;
++};
++
++/*
++ * Retirement survives either driver's unbind and reprobe; records and
++ * waiters go when a node they name is detached.
++ */
++static DEFINE_MUTEX(boot_scanout_lock);
++static LIST_HEAD(boot_scanouts);
++static LIST_HEAD(waiting_consumers);
++static LIST_HEAD(retry_consumers);
++static LIST_HEAD(enabled_consumers);
++
++/* A node detached already: the notifier has dropped, or will drop, its entries. */
++static bool node_detached(struct device_node *np)
++{
++	return of_node_check_flag(np, OF_DETACHED);
++}
++
++static struct apple_mcc_scanout *find_scanout_locked(struct device_node *supplier)
++{
++	struct apple_mcc_scanout *scanout;
++
++	list_for_each_entry(scanout, &boot_scanouts, link) {
++		if (scanout->supplier == supplier)
++			return scanout;
++	}
++	return NULL;
++}
++
++int apple_mcc_boot_scanout_reserve(struct device_node *supplier)
++{
++	struct apple_mcc_scanout *scanout;
++	int ret = 0;
++
++	mutex_lock(&boot_scanout_lock);
++	if (node_detached(supplier)) {
++		ret = -ENODEV;
++		goto out_unlock;
++	}
++	/* A scanout retired before the supplier was rebound stays retired. */
++	if (find_scanout_locked(supplier))
++		goto out_unlock;
++	scanout = kzalloc_obj(*scanout);
++	if (!scanout) {
++		ret = -ENOMEM;
++		goto out_unlock;
++	}
++	scanout->supplier = of_node_get(supplier);
++	list_add_tail(&scanout->link, &boot_scanouts);
++
++out_unlock:
++	mutex_unlock(&boot_scanout_lock);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(apple_mcc_boot_scanout_reserve);
++
++/*
++ * Held across a cache controller's final check of its nodes and its
++ * allocation enable, and by the detach notifier. OF flags a node detached
++ * before it calls the notifier, so probe cannot hold a detach off; but the
++ * notifier always runs after the flag is set. Either probe sees the flag,
++ * or it enabled allocation and registered first, and the notifier then
++ * turns allocation off (apple_mcc_boot_dma_lost()).
++ */
++void apple_mcc_boot_dma_lock(void)
++{
++	mutex_lock(&boot_scanout_lock);
++}
++EXPORT_SYMBOL_GPL(apple_mcc_boot_dma_lock);
++
++void apple_mcc_boot_dma_unlock(void)
++{
++	mutex_unlock(&boot_scanout_lock);
++}
++EXPORT_SYMBOL_GPL(apple_mcc_boot_dma_unlock);
++
++/* Under apple_mcc_boot_dma_lock(), once allocation is enabled. */
++void apple_mcc_boot_dma_register_locked(struct apple_mcc_boot_dma_consumer *consumer)
++{
++	list_add_tail(&consumer->link, &enabled_consumers);
++}
++EXPORT_SYMBOL_GPL(apple_mcc_boot_dma_register_locked);
++
++/* Before the consumer turns allocation off and goes. */
++void apple_mcc_boot_dma_unregister(struct apple_mcc_boot_dma_consumer *consumer)
++{
++	mutex_lock(&boot_scanout_lock);
++	list_del_init(&consumer->link);
++	mutex_unlock(&boot_scanout_lock);
++}
++EXPORT_SYMBOL_GPL(apple_mcc_boot_dma_unregister);
++
++/*
++ * Whether detaching @np leaves @consumer's boot DMA unconfirmed: its own
++ * node, or a boot DMA supplier whose boot scanout has not retired. The
++ * detached node no longer resolves, so match its phandle.
++ */
++static bool consumer_loses_boot_dma_locked(struct apple_mcc_boot_dma_consumer *consumer,
++					   struct device_node *np)
++{
++	struct device_node *node = consumer->dev->of_node;
++	struct apple_mcc_scanout *scanout;
++	u32 phandle;
++	int i, n;
++
++	if (node == np)
++		return true;
++	if (!np->phandle)
++		return false;
++	n = of_property_count_u32_elems(node, "apple,boot-dma-devices");
++	for (i = 0; i < n; i++) {
++		if (of_property_read_u32_index(node, "apple,boot-dma-devices", i, &phandle) ||
++		    phandle != np->phandle)
++			continue;
++		scanout = find_scanout_locked(np);
++		return !scanout || !scanout->retired;
++	}
++	return false;
++}
++
++static void waiter_free(struct apple_mcc_scanout_waiter *waiter)
++{
++	of_node_put(waiter->consumer);
++	of_node_put(waiter->supplier);
++	kfree(waiter);
++}
++
++int apple_mcc_boot_scanout_ready(struct device *dev, struct device_node *supplier)
++{
++	struct apple_mcc_scanout_waiter *waiter;
++	struct apple_mcc_scanout *scanout;
++	struct device_node *consumer = dev->of_node;
++	int ret = -EPROBE_DEFER;
++
++	mutex_lock(&boot_scanout_lock);
++	if (node_detached(consumer) || node_detached(supplier)) {
++		ret = -ENODEV;
++		goto out_unlock;
++	}
++	scanout = find_scanout_locked(supplier);
++	if (scanout && scanout->retired) {
++		ret = 0;
++		goto out_unlock;
++	}
++
++	list_for_each_entry(waiter, &waiting_consumers, link) {
++		if (waiter->consumer == consumer && waiter->supplier == supplier)
++			goto out_unlock;
++	}
++	waiter = kzalloc_obj(*waiter);
++	if (!waiter) {
++		ret = -ENOMEM;
++		goto out_unlock;
++	}
++	waiter->consumer = of_node_get(consumer);
++	waiter->supplier = of_node_get(supplier);
++	list_add_tail(&waiter->link, &waiting_consumers);
++
++out_unlock:
++	mutex_unlock(&boot_scanout_lock);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(apple_mcc_boot_scanout_ready);
++
++static void apple_mcc_retry(struct work_struct *work)
++{
++	struct apple_mcc_scanout_waiter *waiter, *tmp;
++	LIST_HEAD(pending);
++
++	mutex_lock(&boot_scanout_lock);
++	list_splice_tail_init(&retry_consumers, &pending);
++	mutex_unlock(&boot_scanout_lock);
++
++	list_for_each_entry_safe(waiter, tmp, &pending, link) {
++		struct platform_device *pdev = NULL;
++
++		list_del(&waiter->link);
++		mutex_lock(&boot_scanout_lock);
++		if (!node_detached(waiter->consumer) && !node_detached(waiter->supplier))
++			pdev = of_find_device_by_node(waiter->consumer);
++		mutex_unlock(&boot_scanout_lock);
++		if (pdev) {
++			device_initial_probe(&pdev->dev);
++			put_device(&pdev->dev);
++		}
++		waiter_free(waiter);
++	}
++}
++
++static DECLARE_WORK(retry_work, apple_mcc_retry);
++
++void apple_mcc_boot_scanout_retired(struct device_node *supplier)
++{
++	struct apple_mcc_scanout_waiter *waiter, *tmp;
++	struct apple_mcc_scanout *scanout;
++	bool schedule = false;
++
++	mutex_lock(&boot_scanout_lock);
++	/* Reserved by apple_mcc_boot_scanout_reserve(): marking it cannot fail. */
++	scanout = find_scanout_locked(supplier);
++	if (scanout)
++		scanout->retired = true;
++	else
++		WARN_ON_ONCE(!node_detached(supplier));
++
++	list_for_each_entry_safe(waiter, tmp, &waiting_consumers, link) {
++		if (waiter->supplier == supplier) {
++			list_move_tail(&waiter->link, &retry_consumers);
++			schedule = true;
++		}
++	}
++	mutex_unlock(&boot_scanout_lock);
++
++	if (schedule)
++		schedule_work(&retry_work);
++}
++EXPORT_SYMBOL_GPL(apple_mcc_boot_scanout_retired);
++
++static void drop_waiters_locked(struct list_head *list, struct device_node *np)
++{
++	struct apple_mcc_scanout_waiter *waiter, *tmp;
++
++	list_for_each_entry_safe(waiter, tmp, list, link) {
++		if (waiter->consumer == np || waiter->supplier == np) {
++			list_del(&waiter->link);
++			waiter_free(waiter);
++		}
++	}
++}
++
++static int apple_mcc_of_notify(struct notifier_block *nb, unsigned long action, void *arg)
++{
++	struct apple_mcc_boot_dma_consumer *consumer, *next;
++	struct of_reconfig_data *rd = arg;
++	struct apple_mcc_scanout *scanout, *tmp;
++
++	if (action != OF_RECONFIG_DETACH_NODE)
++		return NOTIFY_DONE;
++
++	mutex_lock(&boot_scanout_lock);
++	/* Before the records go: a retired supplier may detach. */
++	list_for_each_entry_safe(consumer, next, &enabled_consumers, link) {
++		if (consumer_loses_boot_dma_locked(consumer, rd->dn)) {
++			list_del_init(&consumer->link);
++			consumer->lost(consumer);
++		}
++	}
++	list_for_each_entry_safe(scanout, tmp, &boot_scanouts, link) {
++		if (scanout->supplier == rd->dn) {
++			list_del(&scanout->link);
++			of_node_put(scanout->supplier);
++			kfree(scanout);
++		}
++	}
++	drop_waiters_locked(&waiting_consumers, rd->dn);
++	drop_waiters_locked(&retry_consumers, rd->dn);
++	mutex_unlock(&boot_scanout_lock);
++	return NOTIFY_OK;
++}
++
++static struct notifier_block apple_mcc_of_nb = {
++	.notifier_call = apple_mcc_of_notify,
++};
++
++static int __init apple_mcc_boot_dma_init(void)
++{
++	/* Without CONFIG_OF_DYNAMIC no node is ever detached. */
++	if (IS_ENABLED(CONFIG_OF_DYNAMIC))
++		return of_reconfig_notifier_register(&apple_mcc_of_nb);
++	return 0;
++}
++core_initcall(apple_mcc_boot_dma_init);
+diff --git a/drivers/soc/apple/mcc.c b/drivers/soc/apple/mcc.c
+index dcc36d303f6..8bcdfc740ee 100644
+--- a/drivers/soc/apple/mcc.c
++++ b/drivers/soc/apple/mcc.c
+@@ -18,6 +18,7 @@
+ #include <linux/of_platform.h>
+ #include <linux/platform_device.h>
+ #include <linux/pm.h>
++#include <linux/soc/apple/mcc.h>
+ #include <linux/suspend.h>
+ 
+ #if IS_ENABLED(CONFIG_APPLE_MCC_KUNIT_TEST)
+@@ -51,6 +52,7 @@ struct apple_mcc {
+ 	u32 ways;
+ 	/* Turned off for a deep sleep, to be turned back on after it. */
+ 	bool sleep_disabled;
++	struct apple_mcc_boot_dma_consumer boot_dma;
+ };
+ 
+ static void apple_mcc_writel(struct apple_mcc *mcc, unsigned int plane,
+@@ -136,14 +138,72 @@ static int apple_mcc_enable_t8132(struct apple_mcc *mcc)
+ 	return 0;
+ }
+ 
++/* An enabled boot framebuffer that names @supplier as its display hardware. */
++static bool apple_mcc_scans_boot_framebuffer(struct device_node *supplier)
++{
++	struct device_node *fb, *display;
++
++	for_each_compatible_node(fb, NULL, "simple-framebuffer") {
++		if (!of_device_is_available(fb))
++			continue;
++		display = of_parse_phandle(fb, "display", 0);
++		of_node_put(display);
++		if (display && display == supplier) {
++			of_node_put(fb);
++			return true;
++		}
++	}
++	return false;
++}
++
+ static int apple_mcc_wait_boot_dma(struct device *dev)
+ {
+ 	struct of_phandle_iterator it;
+ 	int ret;
+ 
++	/* A detached node's suppliers can no longer be confirmed. */
++	if (of_node_check_flag(dev->of_node, OF_DETACHED))
++		return -ENODEV;
++
+ 	of_for_each_phandle(&it, ret, dev->of_node, "apple,boot-dma-devices", NULL, 0) {
+-		struct platform_device *pdev = of_find_device_by_node(it.node);
+-		bool bound = pdev && device_is_bound(&pdev->dev);
++		struct platform_device *pdev;
++		bool bound;
++
++		/*
++		 * An empty entry names no device. A phandle that resolves to
++		 * no node is a device tree error that a retry cannot fix, and
++		 * leaves its boot DMA unconfirmed: keep allocation off.
++		 */
++		if (!it.node) {
++			if (!it.phandle)
++				continue;
++			return dev_err_probe(dev, -EINVAL,
++					     "boot DMA supplier phandle %#x does not resolve\n",
++					     it.phandle);
++		}
++		if (of_node_check_flag(it.node, OF_DETACHED)) {
++			of_node_put(it.node);
++			return -ENODEV;
++		}
++
++		/*
++		 * A display controller scanning out the boot framebuffer keeps
++		 * that DMA running whether or not its node is enabled or bound,
++		 * until its driver reports a displayed swap of its own.
++		 */
++		if (apple_mcc_scans_boot_framebuffer(it.node)) {
++			ret = apple_mcc_boot_scanout_ready(dev, it.node);
++			if (ret) {
++				ret = dev_err_probe(dev, ret,
++						    "waiting for %pOF to retire boot scanout\n",
++						    it.node);
++				of_node_put(it.node);
++				return ret;
++			}
++		}
++
++		pdev = of_find_device_by_node(it.node);
++		bound = pdev && device_is_bound(&pdev->dev);
+ 
+ 		if (pdev)
+ 			put_device(&pdev->dev);
+@@ -159,6 +219,29 @@ static int apple_mcc_wait_boot_dma(struct device *dev)
+ 	return ret == -ENOENT ? 0 : ret;
+ }
+ 
++/* Under apple_mcc_boot_dma_lock(): the last check before allocation is enabled. */
++static bool apple_mcc_boot_dma_detached(struct device *dev)
++{
++	struct of_phandle_iterator it;
++	int ret;
++
++	if (of_node_check_flag(dev->of_node, OF_DETACHED))
++		return true;
++	of_for_each_phandle(&it, ret, dev->of_node, "apple,boot-dma-devices", NULL, 0) {
++		/* The first walk resolved it: a node that went is detached. */
++		if (!it.node) {
++			if (it.phandle)
++				return true;
++			continue;
++		}
++		if (of_node_check_flag(it.node, OF_DETACHED)) {
++			of_node_put(it.node);
++			return true;
++		}
++	}
++	return false;
++}
++
+ static bool apple_mcc_plane_ready(struct apple_mcc *mcc, unsigned int plane)
+ {
+ 	void __iomem *regs = mcc->planes[plane];
+@@ -254,6 +337,32 @@ static void apple_mcc_quiesce(struct apple_mcc *mcc)
+ 	mcc->enabled = false;
+ }
+ 
++/* Turn allocation off for good: removal, or a boot DMA node detached. */
++static void apple_mcc_turn_off(struct apple_mcc *mcc)
++{
++	/* Without this driver nothing writes T8132's cache back before a deep sleep. */
++	if (mcc->retained) {
++		apple_mcc_disable_t8132(mcc);
++		mcc->enabled = false;
++		return;
++	}
++	apple_mcc_quiesce(mcc);
++}
++
++/*
++ * The detach notifier, under the boot DMA lock. Only the disable and its
++ * write-back: marked not enabled, nothing later writes this cache back.
++ */
++static void apple_mcc_boot_dma_lost(struct apple_mcc_boot_dma_consumer *consumer)
++{
++	struct apple_mcc *mcc = container_of(consumer, struct apple_mcc, boot_dma);
++
++	dev_warn(mcc->dev, "boot DMA node detached: system level cache allocation off\n");
++	apple_mcc_turn_off(mcc);
++	/* Nor does a wake turn it back on. */
++	mcc->sleep_disabled = false;
++}
++
+ static int apple_mcc_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+@@ -265,6 +374,9 @@ static int apple_mcc_probe(struct platform_device *pdev)
+ 		return -ENOMEM;
+ 
+ 	mcc->dev = dev;
++	INIT_LIST_HEAD(&mcc->boot_dma.link);
++	mcc->boot_dma.dev = dev;
++	mcc->boot_dma.lost = apple_mcc_boot_dma_lost;
+ 	mcc->retained = of_device_is_compatible(dev->of_node, "apple,t8132-mcc");
+ 	mcc->ways_off = of_device_is_compatible(dev->of_node, "apple,t8142-mcc");
+ 	while (platform_get_resource(pdev, IORESOURCE_MEM, mcc->nr_planes)) {
+@@ -288,14 +400,30 @@ static int apple_mcc_probe(struct platform_device *pdev)
+ 
+ 	platform_set_drvdata(pdev, mcc);
+ 
++	/*
++	 * A node detached after this check is flagged before, and notified
++	 * after, the enable below: the notifier finds this controller
++	 * registered and turns allocation off again. The lock is held across
++	 * the enable, including a failed enable's write-back of the planes it
++	 * reached (up to MCC_FLUSH_TIMEOUT_US each), which delays a detach.
++	 */
++	apple_mcc_boot_dma_lock();
++	if (apple_mcc_boot_dma_detached(dev)) {
++		apple_mcc_boot_dma_unlock();
++		return -ENODEV;
++	}
+ 	/* Allocation is only a performance setting: leave a cache that is not ready alone. */
+ 	ret = mcc->retained ? apple_mcc_enable_t8132(mcc) : apple_mcc_enable(mcc);
++	if (!ret) {
++		mcc->enabled = true;
++		apple_mcc_boot_dma_register_locked(&mcc->boot_dma);
++	}
++	apple_mcc_boot_dma_unlock();
+ 	if (ret == -EBUSY)
+ 		return 0;
+ 	if (ret)
+ 		return ret;
+ 
+-	mcc->enabled = true;
+ 	if (mcc->ways_off)
+ 		mcc->ways = FIELD_GET(MCC_CACHE_WAYS_ENABLED,
+ 				      readl(mcc->planes[0] + MCC_CACHE_WAYS));
+@@ -307,28 +435,27 @@ static void apple_mcc_remove(struct platform_device *pdev)
+ {
+ 	struct apple_mcc *mcc = platform_get_drvdata(pdev);
+ 
+-	/* Without this driver nothing writes T8132's cache back before a deep sleep. */
+-	if (mcc->retained) {
+-		apple_mcc_disable_t8132(mcc);
+-		mcc->enabled = false;
+-		return;
+-	}
+-	apple_mcc_quiesce(mcc);
++	/* After this, the detach notifier no longer reaches this controller. */
++	apple_mcc_boot_dma_unregister(&mcc->boot_dma);
++	apple_mcc_turn_off(mcc);
+ }
+ 
+ static void apple_mcc_shutdown(struct platform_device *pdev)
+ {
+ 	struct apple_mcc *mcc = platform_get_drvdata(pdev);
+ 
+-	if (mcc)
+-		apple_mcc_quiesce(mcc);
++	if (!mcc)
++		return;
++	apple_mcc_boot_dma_lock();
++	apple_mcc_quiesce(mcc);
++	apple_mcc_boot_dma_unlock();
+ }
+ 
+ /*
+  * A deep sleep takes the cache's power with the rest of the SoC: stop allocating and write it
+  * back first, as at shutdown, and allocate again after. Suspend-to-idle keeps it.
+  */
+-static int apple_mcc_suspend_noirq(struct device *dev)
++static int apple_mcc_suspend_locked(struct device *dev)
+ {
+ 	struct apple_mcc *mcc = dev_get_drvdata(dev);
+ 	int ret;
+@@ -360,7 +487,7 @@ static int apple_mcc_suspend_noirq(struct device *dev)
+ 	return 0;
+ }
+ 
+-static int apple_mcc_resume_noirq(struct device *dev)
++static int apple_mcc_resume_locked(struct device *dev)
+ {
+ 	struct apple_mcc *mcc = dev_get_drvdata(dev);
+ 	int ret;
+@@ -381,6 +508,31 @@ static int apple_mcc_resume_noirq(struct device *dev)
+ 	return 0;
+ }
+ 
++/*
++ * Serialized with the OF detach notifier, which may turn allocation off
++ * and cancel the enable after the wake. Noirq callbacks may sleep, and
++ * nothing taken under the lock takes it again.
++ */
++static int apple_mcc_suspend_noirq(struct device *dev)
++{
++	int ret;
++
++	apple_mcc_boot_dma_lock();
++	ret = apple_mcc_suspend_locked(dev);
++	apple_mcc_boot_dma_unlock();
++	return ret;
++}
++
++static int apple_mcc_resume_noirq(struct device *dev)
++{
++	int ret;
++
++	apple_mcc_boot_dma_lock();
++	ret = apple_mcc_resume_locked(dev);
++	apple_mcc_boot_dma_unlock();
++	return ret;
++}
++
+ static const struct dev_pm_ops apple_mcc_pm_ops = {
+ 	NOIRQ_SYSTEM_SLEEP_PM_OPS(apple_mcc_suspend_noirq, apple_mcc_resume_noirq)
+ };
+diff --git a/include/linux/soc/apple/mcc.h b/include/linux/soc/apple/mcc.h
+new file mode 100644
+index 00000000000..76e92ea270a
+--- /dev/null
++++ b/include/linux/soc/apple/mcc.h
+@@ -0,0 +1,37 @@
++/* SPDX-License-Identifier: GPL-2.0-only OR MIT */
++#ifndef _LINUX_SOC_APPLE_MCC_H_
++#define _LINUX_SOC_APPLE_MCC_H_
++
++#include <linux/kconfig.h>
++#include <linux/list.h>
++#include <linux/types.h>
++
++struct device;
++struct device_node;
++
++/* A cache controller with allocation enabled, for the OF detach notifier. */
++struct apple_mcc_boot_dma_consumer {
++	struct list_head link;
++	struct device *dev;
++	/* Under the boot DMA lock: turn allocation off. */
++	void (*lost)(struct apple_mcc_boot_dma_consumer *consumer);
++};
++
++#if IS_ENABLED(CONFIG_APPLE_MCC_BOOT_DMA)
++int apple_mcc_boot_scanout_reserve(struct device_node *supplier);
++void apple_mcc_boot_scanout_retired(struct device_node *supplier);
++int apple_mcc_boot_scanout_ready(struct device *dev, struct device_node *supplier);
++void apple_mcc_boot_dma_lock(void);
++void apple_mcc_boot_dma_unlock(void);
++void apple_mcc_boot_dma_register_locked(struct apple_mcc_boot_dma_consumer *consumer);
++void apple_mcc_boot_dma_unregister(struct apple_mcc_boot_dma_consumer *consumer);
++#else
++static inline int apple_mcc_boot_scanout_reserve(struct device_node *supplier)
++{
++	return 0;
++}
++
++static inline void apple_mcc_boot_scanout_retired(struct device_node *supplier) { }
++#endif
++
++#endif
+diff --git a/tools/asahi/mcc-boot-dma-tests.py b/tools/asahi/mcc-boot-dma-tests.py
+new file mode 100644
+index 00000000000..d0400c29465
+--- /dev/null
++++ b/tools/asahi/mcc-boot-dma-tests.py
+@@ -0,0 +1,446 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-only OR MIT
++"""Run apple-mcc's boot DMA supplier walk against mock device tree nodes."""
++from pathlib import Path
++import subprocess
++import sys
++import tempfile
++
++ROOT = Path(__file__).resolve().parents[2]
++SRC = (ROOT / 'drivers/soc/apple/mcc.c').read_text()
++
++
++def function(name):
++    a = SRC.rfind('\n', 0, SRC.index(name + '(struct')) + 1
++    b = SRC.index('\n}\n', a) + 3
++    return SRC[a:b]
++
++
++CODE = (function('apple_mcc_scans_boot_framebuffer') + function('apple_mcc_wait_boot_dma') +
++        function('apple_mcc_boot_dma_detached'))
++UNRESOLVED = 'if (!it.node) {'
++DETACHED = 'if (of_node_check_flag(it.node, OF_DETACHED)) {'
++assert CODE.count(UNRESOLVED) == 2 and CODE.count(DETACHED) == 2
++if '--accept-unresolved' in sys.argv:
++    CODE = CODE.replace(UNRESOLVED, 'if (0) {', 1)
++if '--final-skips-unresolved' in sys.argv:
++    a = CODE.index('apple_mcc_boot_dma_detached(')
++    CODE = CODE[:a] + CODE[a:].replace('return true;\n\t\t\tcontinue;', 'continue;\n\t\t\tcontinue;', 1)
++if '--ignore-detached-supplier' in sys.argv:
++    CODE = CODE.replace(DETACHED, 'if (0) {', 1)
++
++PRE = r'''
++#include <assert.h>
++#include <errno.h>
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++typedef uint32_t u32;
++#define EPROBE_DEFER 517
++#define OF_DETACHED 3
++struct device_node {
++	const char *name; u32 phandle; bool detached, detach_on_lookup, available, fb, bound, retired;
++	struct device_node *display; u32 boot[4]; int nboot, refs;
++};
++struct device { struct device_node *of_node; };
++struct platform_device { struct device dev; struct device_node *np; };
++static struct device_node *nodes[8];
++static int nnodes, readies;
++static struct device_node *get(struct device_node *n) { if (n) n->refs++; return n; }
++static void of_node_put(struct device_node *n) { if (n) { assert(n->refs > 0); n->refs--; } }
++static bool of_node_check_flag(struct device_node *n, int f) { assert(n && f == OF_DETACHED); return n->detached; }
++static bool of_device_is_available(struct device_node *n) { return n->available; }
++static struct device_node *of_parse_phandle(struct device_node *n, const char *p, int i)
++{ return get(n->display); }
++static struct device_node *next_fb(struct device_node *from)
++{
++	int i = 0;
++
++	if (from) {
++		while (nodes[i] != from)
++			i++;
++		of_node_put(from);
++		i++;
++	}
++	for (; i < nnodes; i++)
++		if (nodes[i]->fb)
++			return get(nodes[i]);
++	return NULL;
++}
++#define for_each_compatible_node(dn, type, compat) \
++	for (dn = next_fb(NULL); dn; dn = next_fb(dn))
++struct of_phandle_iterator { struct device_node *node, *parent; u32 phandle; int i; };
++static struct device_node *by_phandle(u32 ph)
++{
++	/* A detached node has left the tree and its phandle cache. */
++	for (int i = 0; i < nnodes; i++)
++		if (nodes[i]->phandle == ph && !nodes[i]->detached) {
++			/* Detached between lookup and use. */
++			if (nodes[i]->detach_on_lookup)
++				nodes[i]->detached = true;
++			return get(nodes[i]);
++		}
++	return NULL;
++}
++static bool it_next(struct of_phandle_iterator *it, int *err)
++{
++	of_node_put(it->node);
++	it->node = NULL;
++	if (it->i >= it->parent->nboot) {
++		*err = -ENOENT;
++		return false;
++	}
++	it->phandle = it->parent->boot[it->i++];
++	it->node = it->phandle ? by_phandle(it->phandle) : NULL;
++	return true;
++}
++#define of_for_each_phandle(it, err, np, name, cells, count) \
++	for ((it)->node = NULL, (it)->parent = (np), (it)->i = 0; it_next((it), &(err));)
++static struct platform_device pdevs[8];
++static struct platform_device *of_find_device_by_node(struct device_node *n)
++{
++	for (int i = 0; i < nnodes; i++)
++		if (nodes[i] == n) {
++			pdevs[i].np = get(n);
++			return &pdevs[i];
++		}
++	return NULL;
++}
++static bool device_is_bound(struct device *d) { return container_of_pdev(d)->np->bound; }
++'''.replace('container_of_pdev(d)', '((struct platform_device *)((char *)(d) - offsetof(struct platform_device, dev)))') + r'''
++static void put_device(struct device *d)
++{ of_node_put(((struct platform_device *)((char *)d - offsetof(struct platform_device, dev)))->np); }
++#define dev_err_probe(dev, err, ...) (err)
++static int apple_mcc_boot_scanout_ready(struct device *dev, struct device_node *supplier)
++{
++	assert(supplier && !supplier->detached);
++	readies++;
++	return supplier->retired ? 0 : -EPROBE_DEFER;
++}
++'''
++
++MAIN = r'''
++static struct device_node mcc, dcp, disp, fb;
++static struct device dev = { .of_node = &mcc };
++
++static void reset(void)
++{
++	mcc = (struct device_node){ .name = "mcc", .phandle = 1, .available = true };
++	dcp = (struct device_node){ .name = "dcp", .phandle = 2 };
++	disp = (struct device_node){ .name = "disp", .phandle = 3, .available = true, .bound = true };
++	fb = (struct device_node){ .name = "fb", .phandle = 4, .available = true, .fb = true };
++	nodes[0] = &mcc; nodes[1] = &dcp; nodes[2] = &disp; nodes[3] = &fb; nnodes = 4;
++	readies = 0;
++}
++
++static int walk(void)
++{
++	int ret = apple_mcc_wait_boot_dma(&dev);
++
++	for (int i = 0; i < nnodes; i++)
++		assert(nodes[i]->refs == 0);
++	return ret;
++}
++
++int main(void)
++{
++	/* Legacy supplier, bound: allocation allowed, no scanout wait. */
++	reset(); mcc.boot[0] = 3; mcc.nboot = 1;
++	assert(walk() == 0 && !readies);
++	disp.bound = false;
++	assert(walk() == -EPROBE_DEFER);
++
++	/* Empty entry: no device. */
++	reset(); mcc.nboot = 1;
++	assert(walk() == 0);
++
++	/* Unresolved phandle, and an enabled framebuffer naming no display. */
++	reset(); mcc.boot[0] = 99; mcc.nboot = 1;
++	assert(walk() == -EINVAL && !readies);
++	/* Unresolved, then a legacy supplier: still refused. */
++	reset(); mcc.boot[0] = 99; mcc.boot[1] = 3; mcc.nboot = 2;
++	assert(walk() == -EINVAL);
++
++	/* A disabled DCP scanning the boot framebuffer keeps allocation off. */
++	reset(); mcc.boot[0] = 2; mcc.nboot = 1; fb.display = &dcp;
++	assert(walk() == -EPROBE_DEFER && readies == 1);
++	/* A bound DCP scanning the boot framebuffer waits until scanout retires. */
++	dcp.available = true; dcp.bound = true;
++	assert(walk() == -EPROBE_DEFER && readies == 2);
++	dcp.retired = true;
++	assert(walk() == 0 && readies == 3);
++	/* An unbound DCP still defers to bind even after scanout retired. */
++	dcp.bound = false;
++	assert(walk() == -EPROBE_DEFER && readies == 4);
++	/* Disabled framebuffer: no scanout wait, and a disabled supplier still defers to bind. */
++	reset(); mcc.boot[0] = 2; mcc.nboot = 1; fb.display = &dcp; fb.available = false;
++	assert(walk() == -EPROBE_DEFER && !readies);
++	dcp.available = true; dcp.bound = true;
++	assert(walk() == 0 && !readies);
++
++	/* Detached consumer or supplier: cannot confirm. */
++	reset(); mcc.boot[0] = 2; mcc.nboot = 1; fb.display = &dcp; dcp.retired = true;
++	mcc.detached = true;
++	assert(walk() == -ENODEV);
++	/* A detached supplier no longer resolves; one detached after its lookup. */
++	mcc.detached = false; dcp.detached = true;
++	assert(walk() == -EINVAL && !readies);
++	dcp.detached = false; dcp.detach_on_lookup = true;
++	assert(walk() == -ENODEV && !readies);
++
++	/* The final check under the lock, before allocation is enabled. */
++	reset(); mcc.boot[0] = 3; mcc.boot[1] = 2; mcc.nboot = 2;
++	assert(!apple_mcc_boot_dma_detached(&dev));
++	dcp.detached = true;
++	assert(apple_mcc_boot_dma_detached(&dev));
++	dcp.detached = false; mcc.detached = true;
++	assert(apple_mcc_boot_dma_detached(&dev));
++	/* A supplier that disappears between the two walks. */
++	reset(); mcc.boot[0] = 3; mcc.boot[1] = 2; mcc.boot[2] = 0; mcc.nboot = 3;
++	fb.display = &dcp; dcp.retired = true; dcp.available = true; dcp.bound = true;
++	assert(walk() == 0);
++	dcp.detached = true;
++	assert(apple_mcc_boot_dma_detached(&dev));
++	dcp.detached = false;
++	assert(!apple_mcc_boot_dma_detached(&dev));
++	for (int i = 0; i < nnodes; i++)
++		assert(nodes[i]->refs == 0);
++	return 0;
++}
++'''
++
++# The detach notifier in mcc-boot-dma.c, against an enabled controller.
++BOOT = (ROOT / 'drivers/soc/apple/mcc-boot-dma.c').read_text()
++HDR = (ROOT / 'include/linux/soc/apple/mcc.h').read_text()
++LOSES = 'return !scanout || !scanout->retired;'
++assert BOOT.count(LOSES) == 1
++if '--detach-retired-only' in sys.argv:
++    BOOT = BOOT.replace(LOSES, 'return !scanout;')
++strip = lambda text: '\n'.join(l for l in text.splitlines() if not l.startswith('#include'))
++HDR = strip(HDR).replace('#if IS_ENABLED(CONFIG_APPLE_MCC_BOOT_DMA)', '#if 1')
++
++NPRE = r"""
++#include <assert.h>
++#include <errno.h>
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdlib.h>
++typedef uint32_t u32;
++#define EPROBE_DEFER 517
++#define OF_DETACHED 3
++#define __init
++#define core_initcall(f)
++#define EXPORT_SYMBOL_GPL(f)
++#define IS_ENABLED(x) 1
++#define WARN_ON_ONCE(c) assert(!(c))
++#define container_of(p, t, m) ((t *)((char *)(p) - offsetof(t, m)))
++struct list_head { struct list_head *next, *prev; };
++#define LIST_HEAD(n) struct list_head n = { &(n), &(n) }
++static void INIT_LIST_HEAD(struct list_head *h) { h->next = h->prev = h; }
++static bool list_empty(struct list_head *h) { return h->next == h; }
++static void list_add_tail(struct list_head *n, struct list_head *h)
++{ n->next = h; n->prev = h->prev; h->prev->next = n; h->prev = n; }
++static void list_del(struct list_head *n) { n->prev->next = n->next; n->next->prev = n->prev; }
++static void list_del_init(struct list_head *n) { list_del(n); INIT_LIST_HEAD(n); }
++static void list_move_tail(struct list_head *n, struct list_head *h) { list_del(n); list_add_tail(n, h); }
++static void list_splice_tail_init(struct list_head *n, struct list_head *h)
++{ while (!list_empty(n)) list_move_tail(n->next, h); }
++#define list_entry(p, t, m) container_of(p, t, m)
++#define list_for_each_entry(p, h, m) \
++	for (p = list_entry((h)->next, typeof(*p), m); &p->m != (h); p = list_entry(p->m.next, typeof(*p), m))
++#define list_for_each_entry_safe(p, n, h, m) \
++	for (p = list_entry((h)->next, typeof(*p), m), n = list_entry(p->m.next, typeof(*p), m); \
++	     &p->m != (h); p = n, n = list_entry(n->m.next, typeof(*n), m))
++static int locked;
++struct mutex { int unused; };
++#define DEFINE_MUTEX(n) struct mutex n
++static void mutex_lock(struct mutex *m) { assert(!locked); locked = 1; }
++static void mutex_unlock(struct mutex *m) { assert(locked); locked = 0; }
++#define kzalloc_obj(x) calloc(1, sizeof(x))
++#define kfree free
++struct device_node { u32 phandle; bool detached; u32 boot[4]; int nboot; int refs; };
++struct device { struct device_node *of_node; };
++struct platform_device { struct device dev; };
++static struct device_node *of_node_get(struct device_node *n) { if (n) n->refs++; return n; }
++static void of_node_put(struct device_node *n) { if (n) { assert(n->refs > 0); n->refs--; } }
++static bool of_node_check_flag(struct device_node *n, int f) { return n->detached; }
++static int of_property_count_u32_elems(struct device_node *n, const char *p) { return n->nboot; }
++static int of_property_read_u32_index(struct device_node *n, const char *p, int i, u32 *v)
++{ *v = n->boot[i]; return 0; }
++static struct platform_device *of_find_device_by_node(struct device_node *n) { return NULL; }
++static void device_initial_probe(struct device *d) { }
++static void put_device(struct device *d) { }
++struct work_struct { int unused; };
++#define DECLARE_WORK(n, f) struct work_struct n
++static void schedule_work(struct work_struct *w) { }
++struct notifier_block { int (*notifier_call)(struct notifier_block *, unsigned long, void *); };
++#define NOTIFY_DONE 0
++#define NOTIFY_OK 1
++#define OF_RECONFIG_DETACH_NODE 2
++struct of_reconfig_data { struct device_node *dn; };
++static int of_reconfig_notifier_register(struct notifier_block *nb) { return 0; }
++"""
++
++NMAIN = r"""
++static int lost_calls;
++static void lost(struct apple_mcc_boot_dma_consumer *c)
++{
++	assert(locked);
++	lost_calls++;
++}
++
++static struct device_node mcc = { .phandle = 1, .boot = { 3, 2 }, .nboot = 2 };
++static struct device_node dcp = { .phandle = 2 }, disp = { .phandle = 3 }, other = { .phandle = 9 };
++static struct device dev = { .of_node = &mcc };
++static struct apple_mcc_boot_dma_consumer c = { .dev = &dev, .lost = lost };
++
++static void enable(void)
++{
++	apple_mcc_boot_dma_lock();
++	apple_mcc_boot_dma_register_locked(&c);
++	apple_mcc_boot_dma_unlock();
++}
++
++static int detach(struct device_node *n)
++{
++	struct of_reconfig_data rd = { .dn = n };
++	int before = lost_calls;
++
++	n->detached = true;
++	apple_mcc_of_notify(NULL, OF_RECONFIG_DETACH_NODE, &rd);
++	n->detached = false;
++	return lost_calls - before;
++}
++
++int main(void)
++{
++	INIT_LIST_HEAD(&c.link);
++	enable();
++	/* An unrelated node. */
++	assert(detach(&other) == 0 && !list_empty(&c.link));
++	/* Enabled, then a supplier still scanning out detaches: allocation off. */
++	assert(apple_mcc_boot_scanout_reserve(&dcp) == 0);
++	assert(detach(&dcp) == 1 && list_empty(&c.link));
++	/* Not registered any more: a second detach reaches nothing. */
++	assert(detach(&mcc) == 0);
++	/* A supplier whose boot scanout retired may detach. */
++	enable();
++	assert(apple_mcc_boot_scanout_reserve(&dcp) == 0);
++	apple_mcc_boot_scanout_retired(&dcp);
++	assert(detach(&dcp) == 0 && !list_empty(&c.link));
++	/* A supplier with no scanout record (bound only), and the controller's own node. */
++	assert(detach(&disp) == 1);
++	enable();
++	assert(detach(&mcc) == 1);
++	/* Removal unregisters first. */
++	enable();
++	apple_mcc_boot_dma_unregister(&c);
++	assert(detach(&dcp) == 0 && detach(&mcc) == 0);
++	assert(dcp.refs == 0 && mcc.refs == 0);
++	return 0;
++}
++"""
++
++# A deep sleep with a detach in between, through mcc.c's PM callbacks and the real notifier.
++a = SRC.index('struct apple_mcc {')
++MSTRUCT = SRC[a:SRC.index('\n};\n', a) + 4]
++PMCODE = ''.join(function(n) for n in ('apple_mcc_turn_off', 'apple_mcc_boot_dma_lost',
++                                       'apple_mcc_suspend_locked', 'apple_mcc_resume_locked',
++                                       'apple_mcc_suspend_noirq', 'apple_mcc_resume_noirq'))
++CLEAR = '\tmcc->sleep_disabled = false;\n}'
++assert PMCODE.count(CLEAR) == 1
++if '--resume-after-detach' in sys.argv:
++    PMCODE = PMCODE.replace(CLEAR, '}')
++MPRE = r"""
++#define __iomem
++#define MCC_MAX_PLANES 64
++#define MCC_CACHE_WAYS 0x2800
++#define FIELD_GET(m, v) (v)
++#define dev_warn(...) ((void)0)
++#define dev_info(...) ((void)0)
++static u32 readl(void *p) { return 0; }
++static bool alloc_on;
++static bool pm_suspend_via_firmware(void) { return true; }
++""" + MSTRUCT + r"""
++static void *drvdata;
++static void *dev_get_drvdata(struct device *d) { return drvdata; }
++static void apple_mcc_quiesce(struct apple_mcc *mcc)
++{
++	assert(locked);
++	if (!mcc->enabled || mcc->retained)
++		return;
++	alloc_on = false;
++	mcc->enabled = false;
++}
++static int apple_mcc_disable_t8132(struct apple_mcc *mcc) { alloc_on = false; return 0; }
++static int apple_mcc_enable(struct apple_mcc *mcc) { assert(locked); alloc_on = true; return 0; }
++static int apple_mcc_enable_t8132(struct apple_mcc *mcc) { alloc_on = true; return 0; }
++static int apple_mcc_set_ways(struct apple_mcc *mcc, u32 ways) { return 0; }
++"""
++PMAIN = r"""
++static struct device_node pmcc = { .phandle = 1, .boot = { 2 }, .nboot = 1 };
++static struct device_node pdcp = { .phandle = 2 };
++static struct device pdev = { .of_node = &pmcc };
++static struct apple_mcc m;
++
++static void probe(void)
++{
++	m = (struct apple_mcc){ .dev = &pdev, .enabled = true };
++	INIT_LIST_HEAD(&m.boot_dma.link);
++	m.boot_dma.dev = &pdev;
++	m.boot_dma.lost = apple_mcc_boot_dma_lost;
++	drvdata = &m;
++	alloc_on = true;
++	apple_mcc_boot_dma_lock();
++	apple_mcc_boot_dma_register_locked(&m.boot_dma);
++	apple_mcc_boot_dma_unlock();
++}
++
++static void detach(struct device_node *n)
++{
++	struct of_reconfig_data rd = { .dn = n };
++
++	n->detached = true;
++	apple_mcc_of_notify(NULL, OF_RECONFIG_DETACH_NODE, &rd);
++	n->detached = false;
++}
++
++int main(void)
++{
++	/* Suspend, a supplier still scanning out detaches, resume: allocation stays off. */
++	assert(apple_mcc_boot_scanout_reserve(&pdcp) == 0);
++	probe();
++	assert(apple_mcc_suspend_noirq(&pdev) == 0 && !alloc_on && m.sleep_disabled);
++	detach(&pdcp);
++	assert(!m.sleep_disabled && list_empty(&m.boot_dma.link));
++	assert(apple_mcc_resume_noirq(&pdev) == 0 && !alloc_on && !m.enabled);
++	assert(!locked);
++
++	/* The same with a retired supplier (the detach dropped its record): the wake turns allocation back on. */
++	assert(apple_mcc_boot_scanout_reserve(&pdcp) == 0);
++	apple_mcc_boot_scanout_retired(&pdcp);
++	probe();
++	assert(apple_mcc_suspend_noirq(&pdev) == 0 && !alloc_on);
++	detach(&pdcp);
++	assert(m.sleep_disabled && !list_empty(&m.boot_dma.link));
++	assert(apple_mcc_resume_noirq(&pdev) == 0 && alloc_on && m.enabled);
++	assert(!locked);
++	return 0;
++}
++"""
++
++with tempfile.TemporaryDirectory() as t:
++    for name, text in (('mcc', PRE + CODE + MAIN), ('notify', NPRE + HDR + strip(BOOT) + NMAIN),
++                       ('pm', NPRE + HDR + strip(BOOT) + MPRE + PMCODE + PMAIN)):
++        src = Path(t) / (name + '.c')
++        src.write_text(text)
++        subprocess.run(['cc', '-std=gnu11', '-Wall', '-Werror', '-Wno-unused-function',
++                        '-Wno-unused-variable', '-fsanitize=address,undefined', str(src),
++                        '-o', str(src.with_suffix(''))], check=True)
++        if subprocess.run([str(src.with_suffix(''))]).returncode:
++            sys.exit(1)
++print('PASS boot DMA walk: legacy bound/unbound, empty entry, unresolved phandle, '
++      'disabled scanning DCP, disabled framebuffer, detached consumer/supplier, final detach check, supplier gone between walks; '
++      'enabled then supplier/own node detached, retired supplier, removal; '
++      'suspend-detach-resume stays off, retired supplier resumes')
+diff --git a/tools/asahi/run-host-tests.py b/tools/asahi/run-host-tests.py
+index 326dccb7b85..91f03071773 100755
+--- a/tools/asahi/run-host-tests.py
++++ b/tools/asahi/run-host-tests.py
+@@ -66,6 +66,10 @@ ASAHI_TESTS = {
+     'display-sleep-merge-tests.py': [(out(), PASS)],
+     'dcpext26-slot-unregister-tests.py': [(out(), PASS)],
+     'dcpext26-budget-tests.py': [([], PASS)],
++    'mcc-boot-dma-tests.py': [([], PASS), (['--accept-unresolved'], KILL), (['--ignore-detached-supplier'], KILL),
++                              (['--final-skips-unresolved'], KILL),
++                              (['--detach-retired-only'], KILL),
++                              (['--resume-after-detach'], KILL)],
+     'dcpext26-queue-tests.py': [([], PASS), (['--drop-v27-close'], KILL)],
+     'dcpext26-retrain-tests.py': [([], PASS), (['--negative-control'], KILL)],
+     'dcpext26-lifecycle-tests.py': [([], PASS)],

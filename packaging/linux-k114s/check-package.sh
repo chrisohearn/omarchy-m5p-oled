@@ -43,10 +43,11 @@ case $rel in
   *-k114s-r3b-ARCH) want=linux-k114s-r3b ;;
   *-k114s-r3a-ARCH) want=linux-k114s ;;
   *-k114s-r3c-ARCH) want=linux-k114s ;;   # r3c takes the r3a slot (docs/r3c-kernel.md)
+  *-k114s-r3d-ARCH) want=linux-k114s ;;   # r3d replaces r3c in that slot (docs/r3d-kernel.md)
   *) want= ;;
 esac
 name=$(info pkgname); base=$(info pkgbase)
-[ -n "$want" ] && [ "$name" = "$want" ] && ok "package name $name fits release $rel" || no "package name '$name' for release $rel (want '${want:-a k114s r3a, r3b, r3b-t1 or r3c release}')"
+[ -n "$want" ] && [ "$name" = "$want" ] && ok "package name $name fits release $rel" || no "package name '$name' for release $rel (want '${want:-a k114s r3a, r3b, r3b-t1, r3c or r3d release}')"
 [ "$base" = "$name" ] && ok "pkgbase $base equals the package name" || no "pkgbase '$base' is not the package name '$name'"
 [ "$(cat "$m/pkgbase" 2>/dev/null)" = "$name" ] && ok "module directory pkgbase file is $name" || no "module directory pkgbase file is '$(cat "$m/pkgbase" 2>/dev/null)', not '$name'"
 [ -f "$w/usr/share/$name/config-$rel" ] && [ "$(ls "$w/usr/share")" = "$name" ] && ok "config at usr/share/$name/config-$rel" || no "config not (only) at usr/share/$name/config-$rel"
@@ -75,13 +76,13 @@ strings -a "$m/vmlinuz" | grep -q "Linux version $rel " && ok "vmlinuz banner na
 ver=$(info pkgver); drm=$(find "$m" -name appledrm.ko | head -1)
 if [ -n "$drm" ] && strings -a "$drm" | grep -q 'brightness requests below %u nits are raised to %u nits'; then floor=yes; else floor=no; fi
 case $ver in
-  *.b[0-9]*|*.c[0-9]*|*.r3c*) [ $floor = yes ] && ok "version $ver: appledrm carries the brightness floor (brightness 0006)" || no "version $ver: appledrm lacks the brightness floor (brightness 0006)" ;;
+  *.b[0-9]*|*.c[0-9]*|*.r3c*|*.r3d*) [ $floor = yes ] && ok "version $ver: appledrm carries the brightness floor (brightness 0006)" || no "version $ver: appledrm lacks the brightness floor (brightness 0006)" ;;
   *) echo "info version $ver: appledrm brightness floor $floor" ;;
 esac
 # The HDR build (version ...r3b.c<N>, docs/r3-hdr.md) must carry the Display P3 default and the EDR cap at 500 nits;
 # r3c (docs/r3c-kernel.md) carries the same series.
 case $ver in
-  *.c[0-9]*|*.r3c*)
+  *.c[0-9]*|*.r3c*|*.r3d*)
     if [ -n "$drm" ] && strings -a "$drm" | grep -q 'EDID primaries default to Display P3'; then ok "version $ver: appledrm carries the Display P3 default (hdr 0001)"
     else no "version $ver: appledrm lacks the Display P3 default (hdr 0001)"; fi
     if [ -n "$drm" ] && modinfo -F parm "$drm" | grep -q '^fw27_panel_edr_max_nits:.*(default: 500)'; then ok "version $ver: appledrm caps panel EDR at 500 nits by default (hdr 0002, 0003)"
@@ -89,7 +90,7 @@ case $ver in
 esac
 # From r3b.c3 (docs/r3-hdr.md, hdr 0004) appledrm offers no EDR when a cap is set and the SDR maximum is unknown; r3c too.
 case $ver in
-  *.c[3-9]*|*.r3c*)
+  *.c[3-9]*|*.r3c*|*.r3d*)
     if [ -n "$drm" ] && strings -a "$drm" | grep -q 'panel EDR off: cap %u nits set and the SDR maximum is unknown'; then ok "version $ver: appledrm turns EDR off for a cap with an unknown SDR maximum (hdr 0004)"
     else no "version $ver: appledrm lacks the unknown-SDR EDR guard (hdr 0004)"; fi ;;
 esac
@@ -106,11 +107,17 @@ case $ver in
     sep=$(find "$m" -name apple-sep.ko | head -1)
     if [ -n "$sep" ] && strings -a "$sep" | grep -q 'apple,k114s'; then ok "version $ver: apple-sep admits apple,k114s (sep 0001)"
     else no "version $ver: apple-sep does not admit apple,k114s (sep 0001)"; fi ;;
+  # r3d carries aurora-silicon/linux #2631: the T6050 profile is chosen by the SoC compatible, so every apple,t6050
+  # board (the K114s too) gets it and the module no longer names the K114s
+  *.r3d*)
+    sep=$(find "$m" -name apple-sep.ko | head -1)
+    if [ -n "$sep" ] && grep -a -q 'apple,t6050' "$sep"; then ok "version $ver: apple-sep picks the T6050 profile by SoC (#2631)"
+    else no "version $ver: apple-sep has no T6050 SoC selection (#2631)"; fi ;;
 esac
 # r3c (docs/r3c-kernel.md) also admits the K114s NVRAM row in spi-apple-qspi (r3c 0007) and sends the light sensor's
 # 193-byte calibration (r3c 0004, aop.ko).
 case $ver in
-  *.r3c*)
+  *.r3c*|*.r3d*)
     q=$(find "$m" -name spi-apple-qspi.ko | head -1)
     if [ -n "$q" ] && strings -a "$q" | grep -q -x 'apple,k114s'; then ok "version $ver: spi-apple-qspi has the K114s NVRAM row (r3c 0007)"
     else no "version $ver: spi-apple-qspi lacks the K114s NVRAM row (r3c 0007)"; fi

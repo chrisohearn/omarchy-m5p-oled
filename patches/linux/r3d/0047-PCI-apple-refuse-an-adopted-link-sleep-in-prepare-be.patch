@@ -1,0 +1,104 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Satya Benson <satya@benson.earth>
+Date: Sat, 21 Nov 2026 14:13:52 -0500
+Subject: [PATCH 47/93] PCI: apple: refuse an adopted-link sleep in prepare,
+ before devices suspend
+
+apple_pcie_suspend_noirq() refuses suspend-to-idle for an adopted-link
+host whose root complex or port links aren't up, or for a sleep other
+than suspend-to-idle without platform. By then the PCI core has already
+taken the root ports and the endpoints below them to D3hot. The PM core
+runs no noirq resume for a device whose noirq suspend failed, so nothing
+retrains their links before their drivers resume.
+
+On J775c a refusal at noirq left the RTL8127 behind root port 00:02.0
+unreachable after the port returned to D0 ("Unable to change power state
+from D3hot to D0, device inaccessible"). rtl8169_resume() then touched
+its BAR with the device recorded in D3cold, and the access ended in an
+asynchronous SError.
+
+Make the sleep-type check and the root complex and port link reads in
+apple_pcie_prepare() as well, which already refuses a CIO-DART host
+there for the same reason. The devices' D0 reads stay in noirq, as
+part of the full check.
+
+Signed-off-by: Satya Benson <satya@benson.earth>
+
+[re-cut onto the K114s r3d tree]
+---
+ drivers/pci/controller/pcie-apple.c | 45 ++++++++++++++++++++++-------
+ 1 file changed, 35 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/pci/controller/pcie-apple.c b/drivers/pci/controller/pcie-apple.c
+index 9b6f1940aa4..2cb74854a3f 100644
+--- a/drivers/pci/controller/pcie-apple.c
++++ b/drivers/pci/controller/pcie-apple.c
+@@ -6863,19 +6863,15 @@ static int apple_pcie_check_d0(struct pci_dev *pdev, void *data)
+ 	return *error;
+ }
+ 
+-static int apple_pcie_check_adopted_s2idle(struct apple_pcie *pcie)
++/*
++ * Every host whose links the boot loader trained (hw->adopt_link) keeps them
++ * across suspend-to-idle: the root complex and every port's link must still
++ * be up, read from the hardware. Deeper sleep remains unqualified.
++ */
++static int apple_pcie_adopted_links_ready(struct apple_pcie *pcie)
+ {
+-	struct pci_host_bridge *bridge = pci_host_bridge_from_priv(pcie);
+ 	struct apple_pcie_port *port;
+-	int error = 0;
+ 
+-	/*
+-	 * Every host whose links the boot loader trained (hw->adopt_link) keeps
+-	 * them across suspend-to-idle: the root complex, every port's link and
+-	 * the devices below must still be up and in D0, which the checks below
+-	 * read from the hardware, before and after the sleep. Deeper sleep
+-	 * remains unqualified.
+-	 */
+ 	if (!pm_suspend_no_platform())
+ 		return -EBUSY;
+ 
+@@ -6891,6 +6887,17 @@ static int apple_pcie_check_adopted_s2idle(struct apple_pcie *pcie)
+ 		    (apple_pcie_port_readl(port, PORT_INTSTAT) & BIT(PORT_INT_LINK_DOWN)))
+ 			return -ENOLINK;
+ 	}
++	return 0;
++}
++
++/* ... and the devices below must still be in D0, before and after the sleep. */
++static int apple_pcie_check_adopted_s2idle(struct apple_pcie *pcie)
++{
++	struct pci_host_bridge *bridge = pci_host_bridge_from_priv(pcie);
++	int error = apple_pcie_adopted_links_ready(pcie);
++
++	if (error)
++		return error;
+ 	pci_walk_bus(bridge->bus, apple_pcie_check_d0, &error);
+ 	return error;
+ }
+@@ -7572,6 +7579,24 @@ static int apple_pcie_prepare(struct device *dev)
+ 		dev_warn(dev, "no CIO sleep transaction from the NHI; refusing sleep\n");
+ 		return -EBUSY;
+ 	}
++	/*
++	 * An adopted link that apple_pcie_suspend_noirq() would refuse to keep:
++	 * refuse now. Refused there, the root ports and endpoints below have
++	 * already suspended to D3hot, this host gets no noirq resume, and nothing
++	 * retrains their links before their drivers resume.
++	 */
++	if (pcie && !pcie->cio_prepared && !pcie->neo_sleep_armed &&
++	    !pcie->managed_sids && pcie->hw->adopt_link &&
++	    !READ_ONCE(pcie->t6050_down) &&
++	    pm_suspend_target_state != PM_SUSPEND_ON && !pm_suspend_via_firmware()) {
++		int ret = apple_pcie_adopted_links_ready(pcie);
++
++		if (ret) {
++			dev_warn(dev, "adopted link not kept for this sleep (%d); refusing\n",
++				 ret);
++			return ret;
++		}
++	}
+ 	return apple_radio_prepare(dev);
+ }
+ 

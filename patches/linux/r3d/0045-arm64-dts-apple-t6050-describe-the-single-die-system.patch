@@ -1,0 +1,151 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Erik Bourget <address-in-upstream-commit@localhost>
+Date: Fri, 20 Nov 2026 02:10:16 -0500
+Subject: [PATCH 45/93] arm64: dts: apple: t6050: describe the single-die
+ system cache controller
+
+Single-die T6050 boards all include t6050-max.dtsi. M5 Pro parts enable
+four of the eight die-0 AMCCs (AMCC 0..3, 16 planes, amcc-enable-mask
+0xf), while M5 Max ships in both 460 GB/s (binned) and 614 GB/s (eight
+AMCCs, 32 planes, amcc-enable-mask 0xff) variants under the same board
+device trees.
+
+Describe the die-0 memory cache controller (apple,t6050-mcc) in
+t6050-max.dtsi with the four AMCCs (16 planes) verified across both M5
+Pro and M5 Max and apple,boot-dma-devices = <&dcp>, so neither M5 Pro
+nor a binned M5 Max reads unverified AMCC 4..7 apertures. Size the
+parent bus ranges for all eight die-0 AMCCs so the boot loader can
+populate the full enabled mask from the live ADT.
+
+Add display = <&dcp> to the boot framebuffer node on every single-die
+T6050 laptop (J714c, J714s, J716c, J716s, and the K114/K116 base) so
+apple-mcc waits for the internal DCP to retire the boot scanout before
+enabling cache allocation, including when the bootloader keeps the boot
+framebuffer and leaves the DCP disabled. Desktop boards (t6050-j775c.dts
+and t6050-j873s.dts) also inherit the MCC node, have no boot framebuffer,
+and keep &dcp disabled, so they stay in safe probe deferral with no cache
+allocation until the boot loader enables dcp.
+
+Signed-off-by: Erik Bourget <address-in-upstream-commit@localhost>
+---
+ arch/arm64/boot/dts/apple/t6050-j714c.dts     |  2 +
+ arch/arm64/boot/dts/apple/t6050-j714s.dts     |  2 +
+ arch/arm64/boot/dts/apple/t6050-j716c.dts     |  2 +
+ arch/arm64/boot/dts/apple/t6050-j716s.dts     |  2 +
+ .../arm64/boot/dts/apple/t6050-k114-k116.dtsi |  2 +
+ arch/arm64/boot/dts/apple/t6050-max.dtsi      | 40 +++++++++++++++++++
+ 6 files changed, 50 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714c.dts b/arch/arm64/boot/dts/apple/t6050-j714c.dts
+index d32cd7e3e4c..789779e56ae 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j714c.dts
+@@ -40,6 +40,8 @@ framebuffer0: framebuffer@0 {
+ 			compatible = "apple,simple-framebuffer", "simple-framebuffer";
+ 			reg = <0 0 0 0>; /* To be filled by the loader */
+ 			/* Format properties will be added by the loader */
++			/* Scanned out by the internal DCP, handed off or not. */
++			display = <&dcp>;
+ 			status = "disabled";
+ 		};
+ 	};
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714s.dts b/arch/arm64/boot/dts/apple/t6050-j714s.dts
+index 30140956bad..16954f133d6 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j714s.dts
+@@ -56,6 +56,8 @@ framebuffer0: framebuffer@0 {
+ 			compatible = "apple,simple-framebuffer", "simple-framebuffer";
+ 			reg = <0 0 0 0>; /* To be filled by the loader */
+ 			/* Format properties will be added by the loader */
++			/* Scanned out by the internal DCP, handed off or not. */
++			display = <&dcp>;
+ 			status = "disabled";
+ 		};
+ 	};
+diff --git a/arch/arm64/boot/dts/apple/t6050-j716c.dts b/arch/arm64/boot/dts/apple/t6050-j716c.dts
+index aef59221185..de400fdf01f 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j716c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j716c.dts
+@@ -47,6 +47,8 @@ framebuffer0: framebuffer@0 {
+ 			compatible = "apple,simple-framebuffer", "simple-framebuffer";
+ 			reg = <0 0 0 0>; /* To be filled by the loader */
+ 			/* Format properties will be added by the loader */
++			/* Scanned out by the internal DCP, handed off or not. */
++			display = <&dcp>;
+ 			status = "disabled";
+ 		};
+ 	};
+diff --git a/arch/arm64/boot/dts/apple/t6050-j716s.dts b/arch/arm64/boot/dts/apple/t6050-j716s.dts
+index aa2833ad72f..c5a26bf3293 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j716s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j716s.dts
+@@ -41,6 +41,8 @@ framebuffer0: framebuffer@0 {
+ 			compatible = "apple,simple-framebuffer", "simple-framebuffer";
+ 			reg = <0 0 0 0>; /* To be filled by the loader */
+ 			/* Format properties will be added by the loader */
++			/* Scanned out by the internal DCP, handed off or not. */
++			display = <&dcp>;
+ 			status = "disabled";
+ 		};
+ 	};
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+index f44df8866d0..c5b7bce2355 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+@@ -46,6 +46,8 @@ framebuffer0: framebuffer@0 {
+ 			compatible = "apple,simple-framebuffer", "simple-framebuffer";
+ 			reg = <0 0 0 0>; /* To be filled by the loader */
+ 			/* Format properties will be added by the loader */
++			/* Scanned out by the internal DCP, handed off or not. */
++			display = <&dcp>;
+ 			status = "disabled";
+ 		};
+ 	};
+diff --git a/arch/arm64/boot/dts/apple/t6050-max.dtsi b/arch/arm64/boot/dts/apple/t6050-max.dtsi
+index 6d76d01cbda..98eab6d5db2 100644
+--- a/arch/arm64/boot/dts/apple/t6050-max.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-max.dtsi
+@@ -491,3 +491,43 @@ apciec2_port: pci@0,0 {
+ 	};
+ };
+ #endif
++
++/*
++ * Die 0's memory cache controllers (ADT /arm-io/mcc: amcc-count 8,
++ * dcs-count-per-amcc 4, AMCC a at 0x2220000000 + a * 0x2000000, four 16 KiB
++ * planes at +0x40000). Both M5 Pro and M5 Max boards include this file; M5 Pro
++ * enables AMCC 0..3 only (ADT amcc-enable-mask = 0xf, 16 planes), and M5 Max
++ * ships in both 460 GB/s (binned) and 614 GB/s (amcc-enable-mask = 0xff,
++ * 8 AMCCs) variants under the same board DTS. List the four AMCCs verified
++ * across both parts here until the boot loader populates reg from the live
++ * ADT's amcc-enable-mask; ranges covers all eight AMCCs for that update.
++ *
++ * The boot loader leaves every enabled plane's ways powered with allocation
++ * disabled until apple-mcc allows it; AMCC 4..7 stay non-allocating on six-
++ * and eight-AMCC parts until the boot loader adds their apertures to reg. On
++ * laptops, each board's framebuffer0 names &dcp as its display so allocation
++ * waits for the DCP to retire the boot scanout (and stays off when the boot
++ * loader keeps simpledrm).
++ */
++/ {
++	soc@2220000000 {
++		compatible = "simple-bus";
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges = <0x22 0x20000000 0x22 0x20000000 0x0 0x10000000>;
++		nonposted-mmio;
++
++		mcc: memory-controller@2220000000 {
++			compatible = "apple,t6050-mcc";
++			reg = <0x22 0x20000000 0x0 0x4000>, <0x22 0x20040000 0x0 0x4000>,
++			      <0x22 0x20080000 0x0 0x4000>, <0x22 0x200c0000 0x0 0x4000>,
++			      <0x22 0x22000000 0x0 0x4000>, <0x22 0x22040000 0x0 0x4000>,
++			      <0x22 0x22080000 0x0 0x4000>, <0x22 0x220c0000 0x0 0x4000>,
++			      <0x22 0x24000000 0x0 0x4000>, <0x22 0x24040000 0x0 0x4000>,
++			      <0x22 0x24080000 0x0 0x4000>, <0x22 0x240c0000 0x0 0x4000>,
++			      <0x22 0x26000000 0x0 0x4000>, <0x22 0x26040000 0x0 0x4000>,
++			      <0x22 0x26080000 0x0 0x4000>, <0x22 0x260c0000 0x0 0x4000>;
++			apple,boot-dma-devices = <&dcp>;
++		};
++	};
++};
