@@ -76,3 +76,4 @@ r3e/0071-arm64-dts-apple-t6050-enable-the-media-engines-on-ev.patch
 r3e/0072-arm64-dts-apple-t6050-name-the-second-window-of-the-.patch
 r3e/0073-arm64-dts-apple-t6050-describe-the-Neural-Engine-in-.patch
 r3e/0074-arm64-dts-apple-t6050-enable-the-Neural-Engine-on-J7.patch
+r3e/0075-media-apple-isp-let-a-board-without-a-described-came.patch

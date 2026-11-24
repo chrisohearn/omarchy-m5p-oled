@@ -11,7 +11,7 @@ stays compiled out (`CONFIG_APPLE_SOC_SLEEP` off), as in r3d. Evidence labels as
 | | r3d (Main since 2026-11-24) | r3e |
 | --- | --- | --- |
 | Base | integration/aurora `0bbe021a28bd` | aurora-silicon/linux `main` `c3369f4855e9b5b9cb5024148f65ef2a704018b1` |
-| Series | `patches/linux/r3d.series`: 93 patches | `patches/linux/r3e.series`: 74 patches (`patches/linux/r3e/`) |
+| Series | `patches/linux/r3d.series`: 93 patches | `patches/linux/r3e.series`: 75 patches (`patches/linux/r3e/`): the 74 rebased ones plus `0075`, the camera without a described light (section 2a) |
 | Release | `7.3.0-17.v272-18-k114s-r3d-ARCH` | `7.3.0-17.v272-18-k114s-r3e-ARCH` |
 | Package | `linux-k114s 7.3.0.r3d-1` (Main) | `linux-k114s-r3b 7.3.0.r3e-1`: the Backup slot, replacing r3c-upstream there, so r3d stays the way back while r3e is tried by a one-shot (the PKGBUILD and `check-package.sh` know it) |
 
@@ -161,6 +161,21 @@ function) and #2782 (the SMC WKTP full-wake state). The last group changes `main
 - **r3d 0045 (the system cache controller DT): dropped for #2540's newer head.** `main`'s version keeps the controller node
   `status = "disabled"` until a board enables it (the older head r3d carried had it enabled). The K114s therefore has no
   system-level-cache allocation until a board enables it. The Mac boots its Stage 2 tree anyway (r3d-kernel.md section 3).
+
+## 2a. One new patch: the camera without a described light (0075)
+
+The owner asked for the built-in camera for meetings (2026-11-24). In the T6050 ISP driver, the probe refuses unless the
+device tree describes the camera light (a `cil` register and `apple,cil-config`). The K114s ADT describes no light pin
+(eic `cil` with no `cil-gpio-offset`, as on the K114c), so the camera never probed. This was the November 18 trial's
+`ENODEV` ([r3-camera.md](r3-camera.md)). The owner chose (T3 decision grill, 2026-11-24, "Run it, on-screen dot") to
+run the camera with the display's best-effort indicator (#2561) rather than wait for the light to be traced from macOS.
+
+`0075` adds an opt-in device-tree property, `apple,camera-light-undescribed`. Only a tree that sets it runs the ISP
+with no light control: the probe does not ask for `cil`, no stream is refused on the light, and the capture watchdog
+runs as on the ISPs without a light. Every other board keeps the gate. The r3e trial tree leaves the ISP disabled, as
+r3d does, so `0075` changes nothing until a camera tree sets the property. Built: `Image` unchanged (`f9ed2bc5`), and
+`apple-isp.ko` carries the property (agent-run). The series applied to a clean `main` gives the built tree
+`e0a0aa34` (agent-run).
 
 ## 3. Open pull requests r3d carried
 
