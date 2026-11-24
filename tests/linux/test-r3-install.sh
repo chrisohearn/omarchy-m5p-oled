@@ -48,6 +48,7 @@ k() { lib "$1"; }
 # --- install -----------------------------------------------------------------------------------
 r=$(mk); before=$(snap "$r"); out=$(inst "$r"); ok "install over r2c's persistence" "$? $(echo "$out" | grep -c 'k114s-tooling-install: installed')" "0 1"
 ok "the tools are in place and executable" "$(for f in k114s-guard k114s-holds k114s-repackage k114s-recovery-set k114s-release-check k114s-release k114s-boot-success k114s-modules-cleanup k114s-fdt k114s-binscan; do test -x "$(k "$r")/$f" || echo "$f"; done)" ""
+ok "k114s-boot is on the command path (undo removes it: the snapshot below)" "$(cmp -s "$L/k114s-boot" "$r/usr/local/bin/k114s-boot"; status) $(test -x "$r/usr/local/bin/k114s-boot"; status)" "0 0"
 ok "the library is installed as a file to source, the data beside it" "$(stat -c %a "$(k "$r")/k114s-lib.sh") $(ls "$(k "$r")" | grep -c -x -E 'release-criteria.conf|kernel-config.required|rivals.list|protected.list|noextract.list|extras.list|esp-audit-ignore.list|holds.default')" "644 8"
 ok "installed files are the repository's" "$(for f in k114s-guard k114s-release release-criteria.conf; do cmp -s "$L/$f" "$(k "$r")/$f" || echo "$f"; done; cmp -s "$L/update-boot-ctxr-k114s" "$(k "$r")/update-boot-ctxr" || echo update-boot-ctxr)" ""
 ok "pacman hooks: r3's three, r2c's two gone" "$(ls "$r/etc/pacman.d/hooks" | tr '\n' ' ')" "00-k114s-guard-install.hook 00-k114s-guard-remove.hook 01-k114s-guard-esp.hook "

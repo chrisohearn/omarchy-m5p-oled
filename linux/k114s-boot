@@ -28,43 +28,60 @@ entries=$(awk '
                   nm[d] = name; p = nm[1]; for (i = 2; i <= d; i++) p = p "/" nm[i]; v = ""; n++; next }
   n && line ~ /^comment:[ \t]*Kernel version:/ { v = line; sub(/^comment:[ \t]*Kernel version:[ \t]*/, "", v); sub(/[ \t]+$/, "", v) }
   END { flush() }' "$CONF")
-def=$(opt default_entry)
-defpath=$def
-case $def in
-  '') ;;
-  *[!0-9]*) ;;
-  *) defpath=$(awk -F'\t' -v i="$def" '$1 == i { print $2 }' <<<"$entries") ;;
-esac
+# default_entry as Limine reads it: the first line that starts with the option name (any case), the value after the
+# colon and blanks, verbatim (trailing blanks are part of it)
+def=$(awk 'tolower(substr($0, 1, 14)) == "default_entry:" { v = substr($0, 15); sub(/^[ \t]+/, "", v); print v; exit }' "$CONF")
+row=
+if [ -n "$def" ]; then
+  case $def in
+    *[!0-9]*) row=$(D=$def awk -F'\t' '($2 "") == (ENVIRON["D"] "") { print; exit }' <<<"$entries") ;;
+    *) row=$(D=$def awk -F'\t' '$1 + 0 == ENVIRON["D"] + 0 { print; exit }' <<<"$entries") ;;
+  esac
+fi
+IFS=$'\t' read -r _ defpath defver <<<"$row"
+main=; [ -n "$defver" ] && main=$defpath        # Main exists only when default_entry names an entry that boots a kernel
+IFS=$'\t' read -r _ e1path e1ver <<<"${entries%%$'\n'*}"
 
 # the pending one-shot: efivarfs, else U-Boot's variable file (UTF-16 strings: the name, then its value)
-shot=$(efivar LoaderEntryOneShot)
-if [ -z "$shot" ] && [ -r "$UVAR" ]; then
-  shot=$(strings -a -e l "$UVAR" 2>/dev/null | grep -A1 -xF LoaderEntryOneShot | sed -n 2p)
+shot=$(efivar LoaderEntryOneShot); undecoded=
+if [ -z "$shot" ] && [ -r "$UVAR" ] && ub=$(strings -a -e l "$UVAR" 2>/dev/null | awk '$0 == "LoaderEntryOneShot" { f = 1; getline v; print v; exit } END { if (!f) exit 1 }'); then
+  case $ub in ''|*[!A-Za-z0-9+_.@-]*) undecoded=1 ;; *) shot=$ub ;; esac     # an entry id only; anything else is not decoded
 fi
-sel=$(efivar LoaderEntrySelected)
-run=$(uname -r)
+# the booted entry: LoaderEntrySelected names its row; else the row whose kernel version is this kernel's
+sel=$(efivar LoaderEntrySelected); run=$(uname -r); selpath=; selver=
+if [ -n "$sel" ]; then
+  while IFS=$'\t' read -r _ p v; do
+    [ -n "$v" ] && [ "$sel" = "$(entry_id "$p")" ] && { selpath=$p; selver=$v; }
+  done <<<"$entries"
+fi
 
 echo "K114s boot"
 while IFS=$'\t' read -r i p v; do
   [ -n "$p" ] && [ -n "$v" ] || continue
-  role=Backup; [ "$p" = "$defpath" ] && role=Main
+  role=Kernel; [ -n "$main" ] && role=Backup
+  [ -n "$main" ] && [ "$p" = "$main" ] && role=Main
   [ -n "$shot" ] && [ "$shot" = "$(entry_id "$p")" ] && role=Test
   now=
-  if [ -n "$sel" ]; then [ "$sel" = "$(entry_id "$p")" ] && now="   <- running now"
+  if [ -n "$selpath" ]; then [ "$p" = "$selpath" ] && now="   <- running now"
   elif [ "$v" = "$run" ]; then now="   <- running now (by kernel version)"; fi
   printf '  %-7s %-28s %s%s\n' "$role" "$p" "$v" "$now"
 done <<<"$entries"
+[ -n "$selpath" ] && [ "$selver" != "$run" ] && echo "  note: Limine booted $selpath (kernel $selver), but this kernel is $run"
 
-if [ -z "$def" ]; then echo "  WARNING: limine.conf has no default_entry: Limine boots its first entry"
-elif [ "$defpath" != "$def" ]; then echo "  note: default_entry is index $def, which is $defpath"
-fi
-if [ -n "$def" ] && ! awk -F'\t' -v p="$defpath" '$2 == p && $3 != "" { f = 1 } END { exit !f }' <<<"$entries"; then
-  echo "  WARNING: default_entry '$def' names no kernel entry"
+if [ -z "$def" ]; then echo "  WARNING: limine.conf has no default_entry"
+elif [ -z "$main" ]; then echo "  WARNING: default_entry '$def' names no kernel entry"
+else case $def in *[!0-9]*) ;; *) echo "  note: default_entry is index $def, which is $main" ;; esac
 fi
 case $(opt remember_last_entry | tr 'A-Z' 'a-z') in
   yes|true|1) echo "  note: remember_last_entry is on: Limine may start the entry it booted last, not Main" ;;
 esac
-if [ -n "$shot" ]; then echo "  Next boot: the Test entry once ($shot), then Main again"; else echo "  Next boot: Main (no test boot pending)"; fi
+# no Main: Limine takes entry 1 when it boots a kernel, else it stops at the menu (the built-in keyboard does not work there)
+if [ -n "$main" ]; then fb=Main; idle="Main (no test boot pending)"
+elif [ -n "$e1ver" ]; then fb="no Main: Limine boots entry 1 ($e1path)"; idle=$fb
+else fb="no Main: Limine would stop at the menu (the built-in keyboard does not work there) unless entry 1 is a kernel entry"; idle=$fb; fi
+if [ -n "$shot" ]; then echo "  Next boot: the Test entry once ($shot), then $fb"
+elif [ -n "$undecoded" ]; then echo "  Next boot: a one-shot is present in U-Boot's variable file but undecoded (see k114s-boot-once status), then $fb"
+else echo "  Next boot: $idle"; fi
 
 if [ -r "$ESP/m1n1/boot-ctxr.bin" ]; then cs=$(sha256sum "$ESP/m1n1/boot-ctxr.bin" | cut -c1-8); else cs=missing; fi
 a=; [ -r "$ESP/aura-try" ] && a=$(sed -n 1p "$ESP/aura-try")
