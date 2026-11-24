@@ -124,12 +124,13 @@ the wanted set goes back on from the bottom up.
 | Patch | Fixes | Upstream | State |
 | --- | --- | --- | --- |
 | `0001-claude-account-by-user-and-organization.patch` | The agents panel keys a Claude account by the claude.ai user alone. One user who belongs to two organizations (a personal plan and a Team) cannot add the second one ("That's Main ..., sign in as the other account"), and both would share one usage cache. The patch keys the account by user and organization in the account registry, the account copy and the Claude usage cache, and checks the organization when an account signs in again. | [omacom/omarchy#18681](https://github.com/omacom/omarchy/pull/18681) (head `560ce87ad93b`), carrying [#16144](https://github.com/omacom/omarchy/pull/16144) onto `quattro`; reconciled here with quattro's login seating and collector locking at `a490d5bdb` (omarchy-dev `4.0.0.r8044`) | open upstream; applied here 2026-11-14; refreshed 2026-11-18 after r8044 changed its lines, and 2026-11-24 after r8296 added the account email (#243) |
-| `0002-agents-panel-room-left-pace-and-model-rows.patch` | Local preference, not an upstream fix. In the agents panel every limit meter reads as room left (it drains), as T3 Code's usage view does, so Claude's and Codex's bars move the same way. A hairline marks even pace (the share of the window's time left), and the tooltip says ahead of, on or under pace within 5 points. A model-scoped window such as Fable Weekly gets its own row instead of a tick on the Weekly bar. The usage records still hold the share used. | none (this machine's choice) | applied here 2026-11-15 |
+| `0002-agents-panel-room-left-pace-and-model-rows.patch` | Local preference, not an upstream fix. In the agents panel every limit meter reads as room left (it drains), as T3 Code's usage view does, so Claude's and Codex's bars move the same way. A hairline marks even pace (the share of the window's time left), and the tooltip says ahead of, on or under pace within 5 points. A model-scoped window such as Fable Weekly gets its own row instead of a tick on the Weekly bar. For Claude and Codex, an exhausted weekly allowance blocks the session bar and removes its pace marker. The panel marks retained readings as Stale after failed refreshes. The usage records still hold the share used. | none (local display policy) | applied here 2026-11-15 |
 | `0003-omarchy-mac-k114s-display-cutout.patch` | The bar has no notch floor on the K114s: omarchy-mac's `display-cutouts.json` has no 3024x1986 entry. Two lines: `eDP` (for upstream) and `Unknown-1` (local only: the boot framebuffer's name). `top = 96` is derived, not measured. | to be sent to omacom/omarchy-mac-pkgs ([draft](platform-data.md#upstream-draft-omacomomarchy-mac-pkgs)) | written 2026-11-15, not installed |
 | `0004-omarchy-mac-k-board-audio-names.patch` | The M5 MacBook Pros are K boards (`AppleK114`, `effect_output.k114-mic`), so omarchy-mac's jNNN patterns miss them: the stereo microphone mapper, `audio.json`, the microphone name and the no-suspend rule. | same draft | written 2026-11-15, not installed |
 | `0005-factory-reset-off-on-k114s-until-qualified.patch` | Local safety switch. The stock `Remove > Factory Reset` action (`remove.factory-reset`) calls `omarchy-system-factory-reset` on btrfs roots. On the K114s the stock reset would replace the Limine menu (dropping the K114s repair entry), rebuild the boot files from the image and erase the system. The patch stops the command before sudo and before any change when the device tree says `apple,k114s` and `/etc/omarchy-k114s/factory-reset-qualified` does not exist. The menu row is owned by `omarchy-settings-dev`. The [platform audit](platform-audit.md#factory-reset-69) gives the user extension that hides it. | none (this machine's choice) | Gate present in `/usr/bin/omarchy-system-factory-reset` on `omarchy-mac` (read-only, 2026-11-20). Menu visibility remains unverified and a real reset remains unqualified. |
 
-Tests: `tests/test-platform-data.sh` runs 0003 and 0004 through the installer in a fake root and checks the K114s names against them (docs/platform-data.md).
+Tests: `node tests/linux/test-agents-panel.mjs` exercises the display rules in the patched panel.
+`tests/test-platform-data.sh` runs 0003 and 0004 through the installer in a fake root and checks the K114s names against them (docs/platform-data.md).
 `tests/linux/test-factory-reset-gate.sh` runs 0005 against the installed command. `tests/linux/test-omarchy-patches.sh linux [OMARCHY_SRC]` runs the mechanism in a fake
 root. With `OMARCHY_SRC`, an omacom/omarchy checkout at the installed revision, it also checks that
 each real patch applies to it without fuzz and comes out again byte for byte. For 0001 against
@@ -142,8 +143,10 @@ files (0003, 0004) have no counterpart in an omacom/omarchy tree, so that run sk
 ## On another Omarchy machine
 
 0001 and 0002 are not specific to the K114s. A second machine of the owner's (x86_64, Omarchy
-stable 4.5.0, package `omarchy`) runs those two only, installed on 2026-11-15 from a copy of
-this repository with the source narrowed to them.
+stable 4.5.0, package `omarchy`) runs those two, installed on 2026-11-15 from a copy of
+this repository with the source narrowed to them. The Stable panel's nested account rows
+also need the provider passed in by the companion patch under `patches/omarchy-stable/`.
+Edge already passes the provider on each account row.
 
 **The 0001 refreshed on 2026-11-18 targets the Edge build (r8044) and does not fit `v4.5.0`.**
 Installing it there would take the working 0001 out and skip the new one. Until that machine's
@@ -156,12 +159,13 @@ W=$(mktemp -d) && mkdir "$W/src" &&
   git cat-file -e 050dd93 &&   # a shallow clone may lack it: git fetch --unshallow first
   git show 050dd93:patches/omarchy/0001-claude-account-by-user-and-organization.patch \
     > "$W/src/0001-claude-account-by-user-and-organization.patch" &&   # the stable-build 0001
-  cp patches/omarchy/0002-*.patch "$W/src/" &&
+  cp patches/omarchy/0002-*.patch patches/omarchy-stable/0002-*.patch "$W/src/" &&
+  cp -r patches/omarchy/0002-*.base "$W/src/" &&
   sudo env K114S_OMARCHY_PATCHES_SRC="$W/src" bash linux/omarchy-patches-install &&
   omarchy-restart-shell
 ```
 
 Both applied to `v4.5.0` without fuzz on 2026-11-15, and `tests/linux/test-omarchy-patches.sh`
 passed with only those two in the source against an export of that tag (74 checks). The hook
-keeps the installed copies through Omarchy updates. A change to 0002 here reaches that machine
-only when the install is run there again.
+keeps the installed copies through Omarchy updates. When Stable moves to the per-account
+layout used by Edge, leave the companion patch out of the source set on the next refresh.

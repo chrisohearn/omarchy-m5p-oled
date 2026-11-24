@@ -1,0 +1,14 @@
+Pass the provider to the account rows in the Omarchy 4.5.0 Agents panel.
+Apply after the shared Agents panel patch.
+
+--- a/share/omarchy/shell/plugins/agents/Panel.qml
++++ b/share/omarchy/shell/plugins/agents/Panel.qml
+@@ -2854,7 +2854,7 @@
+           spacing: Style.space(12)
+
+           Repeater {
+-            model: root.displayWindows({ limits: accountBlock.modelData.limits || [] })
++            model: root.displayWindows(section.provider, accountBlock.modelData)
+
+             CompactLimit {
+               required property var modelData

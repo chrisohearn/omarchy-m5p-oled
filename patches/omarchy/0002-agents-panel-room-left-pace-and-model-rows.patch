@@ -5,14 +5,31 @@ Local change for this machine, not an upstream fix. The owner wants every
 provider's limit bars to drain the same way and to show pace the way T3 Code's
 usage view does: the bar is the share left, a hairline marks the share of the
 window's time left (even pace), and the tooltip says ahead of, on or under pace
-within 5 points. The usage records keep the share used; only the display
-changes. Strings use I18n.t fallbacks, so no translation file is touched.
+within 5 points. For Claude and Codex, an exhausted weekly allowance blocks
+the session row and suppresses its pace marker. Failed refreshes visibly
+mark retained readings as stale. The usage records keep the share used. Strings use I18n.t
+fallbacks, so no translation file is touched.
 
 Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shell).
 
---- a/share/omarchy/shell/plugins/agents/Panel.qml	2026-11-14 18:11:50.423213038 -0700
-+++ b/share/omarchy/shell/plugins/agents/Panel.qml	2026-11-14 18:17:13.082935168 -0700
-@@ -973,10 +973,23 @@
+--- a/share/omarchy/shell/plugins/agents/Panel.qml
++++ b/share/omarchy/shell/plugins/agents/Panel.qml
+@@ -943,11 +943,12 @@
+   // known: they stay on show until a check succeeds again. A failed refresh
+   // with numbers kept may leave the status empty and say why only in its help.
+   function usageNote(item) {
+-    if (!item || needsSignIn(item)) return ""
++    if (!item) return ""
+     var status = String(item.usageStatusText || "")
+     var stale = item.limitsStale === true || item.stale === true
+-    if (status === "" && !(stale && String(item.authHelpText || "") !== "")) return ""
++    if (!stale && (status === "" || needsSignIn(item))) return ""
+     return helpDisplayText(item.authHelpText) || statusDisplayText(status)
++      || Commons.I18n.t("agents.staleLimitsDetail", "Showing the last known limits.")
+   }
+
+   // Sign an account that's already here in again, following along in the
+@@ -1074,10 +1075,23 @@
      return {
        title: String(title || "") !== "" ? String(title) : windowTitle(label),
        percent: expired ? 0 : Number(percent),
@@ -21,7 +38,7 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
 +      span: windowTitleSpanMs(String(title || "") !== "" ? String(title) : windowTitle(label), label)
      }
    }
- 
+
 +  // K114s local change: how long a window runs, for its pace line. The title
 +  // decides where it can (a model name like "Opus 5 (1M context)" must not
 +  // be read as a one-minute window). A model-scoped Session window takes its
@@ -37,15 +54,17 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
    function limitWindows(p) {
      if (!p) return []
      var out = []
-@@ -998,27 +1011,31 @@
+@@ -1099,30 +1113,54 @@
      return match ? { model: match[1], window: match[2] } : null
    }
- 
+
+-  function displayWindows(p) {
+-    var windows = limitWindows(p)
 +  // K114s local change: a model-scoped window gets a row of its own, right
 +  // after the window whose clock it runs on, so its room left and pace show
 +  // without hovering. One with nothing to follow goes last.
-   function displayWindows(p) {
-     var windows = limitWindows(p)
++  function displayWindows(provider, account) {
++    var windows = limitWindows(account || provider)
      var out = []
 -    var byTitle = {}
 +    var placed = []
@@ -76,13 +95,36 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
 +      windows[k].scoped = []
 +      out.push(windows[k])
 +    }
++    applyWeeklyCap(provider, out)
      return out
    }
- 
-@@ -1039,6 +1056,30 @@
+
++  // Once the all-models week is spent, the raw session allowance cannot be used.
++  function applyWeeklyCap(provider, windows) {
++    if (!provider || (provider.providerId !== "claude" && provider.providerId !== "codex")) return
++    var session = windows.find(window => window.title === "Session")
++    var weekly = windows.find(window => window.title === "Weekly" && window.percent >= 1)
++    if (!session || !weekly) return
++
++    var sessionReset = resetMsFor(session)
++    var weeklyReset = resetMsFor(weekly)
++    var resetAt = ""
++    if (sessionReset > 0 && weeklyReset > 0) {
++      resetAt = sessionReset > weeklyReset && session.percent >= 1 ? session.resetAt : weekly.resetAt
++    }
++    session.percent = 1
++    session.resetAt = resetAt
++    session.span = 0
++    session.weeklyBlocked = true
++  }
++
+   // The window that decides how much room is left — the fullest one, since
+   // that is what stops the next prompt.
+   function bindingWindow(p) {
+@@ -1140,6 +1178,30 @@
      return isFinite(ms) ? ms - root.nowMs : -1
    }
- 
+
 +  // K114s local change: limit meters read as room left, as T3 Code's do, so
 +  // every provider's bar drains the same way. Records keep the share used.
 +  function leftShare(w) {
@@ -110,7 +152,26 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
    function formatDuration(ms) {
      if (!(ms > 0)) return Commons.I18n.t("agents.durationNow")
      var minutes = Math.floor(ms / 60000)
-@@ -3046,10 +3087,12 @@
+@@ -3188,8 +3250,9 @@
+     id: noteMark
+     property var record: null
+     readonly property string message: root.usageNote(record)
++    readonly property bool stale: !!record && (record.limitsStale === true || record.stale === true)
+     visible: message !== ""
+-    text: "󰋽"
++    text: stale ? Commons.I18n.t("agents.staleLimits", "Stale") : "󰋽"
+     textFormat: Text.PlainText
+     color: root.dim
+     font.family: root.fontFamily
+@@ -3216,6 +3279,7 @@
+     property real fetchedAt: 0
+     readonly property var scoped: window && window.scoped ? window.scoped : []
+     readonly property bool alarming: window && window.percent >= 0.9
++    readonly property bool weeklyBlocked: !!window && window.weeklyBlocked === true
+     readonly property real resetMs: root.resetMsFor(window)
+     implicitHeight: Math.max(compactTitle.implicitHeight, compactValue.implicitHeight)
+
+@@ -3227,10 +3291,14 @@
          var lines = []
          if (compact.window) {
            var windowName = root.windowDisplayTitle(compact.window.title)
@@ -121,12 +182,29 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
 -            : Commons.I18n.t("agents.windowUsed").arg(windowName).arg(used))
 +            ? Commons.I18n.t("agents.windowLeftResets", "%1: %2% left · resets in %3").arg(windowName).arg(left).arg(root.formatDuration(compact.resetMs))
 +            : Commons.I18n.t("agents.windowLeft", "%1: %2% left").arg(windowName).arg(left))
++          if (compact.weeklyBlocked)
++            lines.push(Commons.I18n.t("agents.blockedByWeeklyLimit", "Blocked by the weekly limit."))
 +          var pace = root.paceText(compact.window)
 +          if (pace !== "") lines.push(pace)
          }
          if (compact.stale)
            lines.push(compact.fetchedAt > 0 && root.nowMs - compact.fetchedAt > 60000
-@@ -3078,7 +3121,8 @@
+@@ -3247,8 +3315,12 @@
+       textFormat: Text.PlainText
+       width: parent.width * 0.3
+       anchors.verticalCenter: parent.verticalCenter
+-      text: compact.window ? root.windowDisplayTitle(compact.window.title) : ""
+-      color: root.foreground
++      text: {
++        if (!compact.window) return ""
++        var title = root.windowDisplayTitle(compact.window.title)
++        return compact.weeklyBlocked ? Commons.I18n.t("agents.weeklyBlockedWindow", "%1 · Blocked").arg(title) : title
++      }
++      color: compact.weeklyBlocked ? root.urgent : root.foreground
+       font.family: root.fontFamily
+       font.pixelSize: Style.font.bodySmall
+       elide: Text.ElideRight
+@@ -3259,7 +3331,8 @@
        anchors.right: compactValue.left
        anchors.rightMargin: Style.space(20)
        anchors.verticalCenter: parent.verticalCenter
@@ -136,28 +214,28 @@ Paths are relative to /usr (Omarchy's shell/ installs as /usr/share/omarchy/shel
        alarming: compact.alarming
        markers: compact.scoped
      }
-@@ -3108,7 +3152,8 @@
+@@ -3289,7 +3362,8 @@
      }
    }
- 
+
 -  // Rounded track showing the percentage of the allowance used.
 +  // Rounded track showing a share of the allowance: room left on the limit
 +  // rows (K114s local change), the amount on the others.
    component Meter: Item {
      id: meter
      property real value: -1
-@@ -3118,6 +3163,10 @@
+@@ -3299,6 +3373,10 @@
      // Other allowances on the same clock, drawn as ticks across the track.
      property var markers: []
- 
+
 +    // K114s local change: where the meter would stand at an even pace, as a
 +    // hairline across the track like T3 Code's; below zero draws none.
 +    property real pace: -1
 +
      implicitHeight: thickness
- 
+
      Rectangle {
-@@ -3156,5 +3205,17 @@
+@@ -3337,5 +3415,17 @@
          color: meter.alarming ? root.urgent : root.foreground
        }
      }
