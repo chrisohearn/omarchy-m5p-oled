@@ -7,16 +7,20 @@ traced from macOS. Built, not booted yet:
 | Part | What | Result |
 | --- | --- | --- |
 | Kernel | r3e with `patches/linux/r3e/0075`: the opt-in `apple,camera-light-undescribed` lets the T6050 ISP probe and stream with no light control. Boards without the property keep the gate | `apple-isp.ko` carries it; `Image` unchanged (`f9ed2bc5`) |
-| Tree | `dts/t6050-k114s-r3d-camera.dts`: the configured tree `a0897a5a`, unchanged, plus that property on `isp0` | `34ddb0a6…`, 153,874 bytes; the node diff against `a0897a5a` is that one property; the three tree lints pass |
+| Tree | `dts/t6050-k114s-r3d-camera.dts`: the configured tree `a0897a5a`, unchanged, plus that property on `isp0` and the on-screen indicator: `apple,camera-indicator = <&dcp>` on `isp0` and `apple,camera-indicator-surface = <3>` on the DCP (slots 0 and 1 are the desktop's; the K114s DCP runs the firmware-27 H17P present path, which carries the indicator hook) | `b7efcc0d…`, 153,960 bytes; the node diff against `a0897a5a` is three properties: that one and the two indicator properties below; the three tree lints pass |
 | Loader | Aura v1.0.0b15 + the K114s row `{"apple,k114s", 0xba, V27_2}` (`patches/aura/camera-b15/0001`) | `06b38fd0…`, 3,932,160 bytes, the size of the configured b15 |
-| Stage 2 test file | the loader + the camera tree + the configured U-Boot trailer | `bc2fc295…`; the same recipe with b15 and `a0897a5a` rebuilds the configured `6b984811` byte for byte |
+| Stage 2 test file | the loader + the camera tree + the configured U-Boot trailer | `3e46007a…`; the same recipe with b15 and `a0897a5a` rebuilds the configured `6b984811` byte for byte |
 | Setfile | the IMX958 tuning `apple/isp_2226_02XX.dat` is not installed; it is carved from the macOS camera daemon, which Linux cannot read here | the driver then streams "without sensor tuning" (colour and exposure untuned) until the file is copied from macOS |
 
 The display's best-effort indicator (aurora-silicon/linux #2561, in r3e) is the only signal that the camera is on. The
 hardware LED may or may not light: nothing drives it. The trial follows the r3e kernel's promotion: one `aura-try` boot of the
-test file, checked by the camera kit (the ISP node enabled with platform ID `0xba`, the no-light probe line, a capture
-node from `apple-isp`, one frame with picture content), then promotion if every check passes.
-`tests/hardware/k114s-camera-check.sh` accepts the opt-in and still refuses an ISP with neither a light nor the opt-in.
+test file. Promotion depends on the trial kit's own check (outside this repository, like P9), not on the helper below.
+That check requires: the ISP node enabled with platform ID `0xba`; the opt-in and both indicator properties in the
+booted tree; the driver's no-light probe line; the DCP taking the indicator surface; a capture node from `apple-isp`;
+one raw grey frame with picture content (mean and spread of real pixels); and no new kernel warnings, errors or
+indicator failures after the capture. The owner confirms the green square by eye.
+`tests/hardware/k114s-camera-check.sh` is a manual helper. It accepts the opt-in, refuses an ISP with neither a light
+nor the opt-in, and refuses one with both.
 
 The rest of this record is the November 15-20 work.
 

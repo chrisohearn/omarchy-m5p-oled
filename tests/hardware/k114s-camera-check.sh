@@ -42,7 +42,10 @@ if [[ -d $isp ]]; then
   else
     bad "ISP platform ID: ${platform_id:-absent} (expected 0xba)"
   fi
-  if [[ -s $isp/apple,cil-config ]] &&
+  if [[ -e $isp/apple,camera-light-undescribed ]] && [[ -s $isp/apple,cil-config ]]; then
+    # The driver lets the opt-in win and drives no light, so a described light here would be misleading.
+    bad "the tree both describes a camera light and opts in to apple,camera-light-undescribed: the driver drives no light"
+  elif [[ -s $isp/apple,cil-config ]] &&
     grep -zFxq cil "$isp/reg-names" 2>/dev/null; then
     ok "physical camera activity light described"
   elif [[ -e $isp/apple,camera-light-undescribed ]]; then

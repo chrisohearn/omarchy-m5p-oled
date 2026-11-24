@@ -10,10 +10,22 @@
  * The K114s ADT describes no camera-light pin (eic cil without a cil-gpio-offset, as on the K114c), so the T6050
  * ISP driver refuses to probe without one. The owner chose (2026-11-24) to run the camera with the display's
  * best-effort camera indicator instead of a verified light: apple,camera-light-undescribed tells the r3e driver
- * (patches/linux/r3e/0075) to run this ISP with no light control.
+ * (patches/linux/r3e/0075) to run this ISP with no light control, and the two indicator properties below turn the
+ * on-screen indicator on.
  */
 #include "t6050-k114s-r3d.dts"
 
+/*
+ * The display's best-effort software camera indicator (aurora-silicon/linux #2561, in r3e): a kernel-owned green
+ * square on the internal panel while the camera streams. With no apple,iomfb-surfaces the K114s DCP uses swap slots
+ * 0 and 1, so the indicator takes slot 3, the top one (as t8122-j615 does), free above them. It is software, not a
+ * privacy guarantee.
+ */
+&dcp {
+	apple,camera-indicator-surface = <3>;
+};
+
 &isp0 {
 	apple,camera-light-undescribed;
+	apple,camera-indicator = <&dcp>;
 };
