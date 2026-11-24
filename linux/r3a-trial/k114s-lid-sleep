@@ -1,0 +1,159 @@
+#!/bin/sh
+# K114s (omarchy-m5p-oled): the lid sleeps the Mac on battery, locks it on external power, and a boot trial never sleeps.
+#
+#   sudo sh k114s-lid-sleep install   from linux/r3a-trial: unmask suspend.target only, install the gate unit, the two
+#                                     fail-closed 30-k114s-r3a-trial drop-ins and the two 40 drop-ins, apply it now
+#   sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep undo     back to the four masked targets and the two 30 drop-ins, the gate removed
+#   sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep check    0 only if no trial boot could sleep (k114s-boot-once check and P9 use it)
+#   sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep status   what this boot is and what is in place
+#   sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep gate     what the unit runs at boot: open on an ordinary boot, close on a trial boot
+#   sudo /usr/local/lib/omarchy-k114s/k114s-lid-sleep open [--force] | close
+#                                     the two halves of the gate, by hand (no reboot needed); open refuses on a trial boot unless --force
+#
+# Layers, fail closed. Persistent in /etc: hibernate, hybrid-sleep and suspend-then-hibernate masked; the 30 drop-ins
+# (AllowSuspend=no, lid action lock). On an ordinary boot the gate adds /run drop-ins (name 40, sorts later, wins) that
+# allow suspend and set the lid action; /run is empty after every reboot. On a trial boot it runtime-masks suspend.target
+# instead. A trial is a boot with /proc/device-tree/chosen/aurora,trial, or the boot a k114s-boot-once arm targeted
+# (LoaderEntrySelected equals the id in boot-once-armed, armed in an earlier boot; unreadable counts as a trial).
+# The boot that ran `arm` is an ordinary boot and may sleep. The gate records the trial boot it closed in $STATE/lid-sleep-trial-seen,
+# which spends that arming record: a later boot that selects the same entry (the trial entry promoted to the default) is ordinary.
+#
+# Test hooks (environment): K114S_ROOT K114S_EFIVARS K114S_STATE K114S_BOOTID K114S_SYSTEMCTL.
+set -u
+ROOT=${K114S_ROOT:-}
+HERE=$(cd "$(dirname "$0")" && pwd)
+LIB=$ROOT/usr/local/lib/omarchy-k114s
+SYSD=$ROOT/etc/systemd
+RUN=$ROOT/run/systemd
+EFIVARS=${K114S_EFIVARS:-$ROOT/sys/firmware/efi/efivars}
+STATE=${K114S_STATE:-$ROOT/var/lib/k114s-recovery}
+BOOTID=${K114S_BOOTID:-$(tr -d - </proc/sys/kernel/random/boot_id 2>/dev/null)}
+SYSTEMCTL=${K114S_SYSTEMCTL:-systemctl}
+BLI=4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+GATE=k114s-lid-sleep-gate.service
+SLEEP_OPEN=$RUN/sleep.conf.d/40-k114s-lid-sleep.conf
+LOGIND_OPEN=$RUN/logind.conf.d/40-k114s-lid-sleep.conf
+RT_MASK=$RUN/system/suspend.target
+SEEN=$STATE/lid-sleep-trial-seen
+die() { echo "k114s-lid-sleep: $*" >&2; exit 1; }
+need_root() { [ "$(id -u)" = 0 ] || [ -n "${K114S_ROOT:-}${K114S_STATE:-}" ] || die "run as root"; }
+
+# Prints why this boot is a trial and returns 0, or returns 1 for an ordinary boot.
+trial_reason() {
+  [ -e "$ROOT/proc/device-tree/chosen/aurora,trial" ] && { echo "Stage 2 trial"; return 0; }
+  [ -e "$STATE/boot-once-armed" ] || return 1
+  read -r ab aid < "$STATE/boot-once-armed" 2>/dev/null || { echo "boot-once-armed unreadable"; return 0; }
+  [ "$ab" != "$BOOTID" ] || return 1
+  # A record the gate already spent (it closed the trial boot it named) is a trial only in that boot: otherwise it goes stale
+  # once the trial entry becomes the default, and then names every later boot.
+  if read -r sab said sboot < "$SEEN" 2>/dev/null && [ "$sab $said" = "$ab $aid" ]; then
+    [ "$sboot" = "$BOOTID" ] && { echo "one-shot kernel trial"; return 0; }
+    return 1
+  fi
+  sel=$(tail -c +5 "$EFIVARS/LoaderEntrySelected-$BLI" 2>/dev/null | iconv -f UTF-16LE -t UTF-8 2>/dev/null | tr -d '\0')
+  if [ -z "$sel" ]; then echo "armed one-shot, boot entry unreadable"; return 0; fi
+  [ "$sel" = "$aid" ] && { echo "one-shot kernel trial"; return 0; }
+  return 1
+}
+
+# logind reads its drop-ins on HUP. At boot the gate runs before logind, so there is nothing to signal.
+reload_logind() { if $SYSTEMCTL is-active --quiet systemd-logind.service; then $SYSTEMCTL kill -s HUP systemd-logind.service; fi; return 0; }
+
+cmd_open() {
+  need_root
+  if [ "${1:-}" != --force ] && r=$(trial_reason); then die "this boot is a trial ($r): not opening it (open --force overrides)"; fi
+  mkdir -p "$RUN/sleep.conf.d" "$RUN/logind.conf.d" || die "cannot create $RUN"
+  cp "$LIB/lid-sleep/sleep-40-k114s-lid-sleep.conf" "$SLEEP_OPEN" && cp "$LIB/lid-sleep/logind-40-k114s-lid-sleep.conf" "$LOGIND_OPEN" || { rm -f "$SLEEP_OPEN" "$LOGIND_OPEN"; die "the 40 drop-ins are not in $LIB/lid-sleep; nothing opened"; }
+  if [ -L "$RT_MASK" ]; then rm -f "$RT_MASK"; $SYSTEMCTL daemon-reload; fi
+  reload_logind; echo "k114s-lid-sleep: open (ordinary boot): lid close suspends on battery, locks on external power"
+}
+cmd_close() {
+  need_root
+  rm -f "$SLEEP_OPEN" "$LOGIND_OPEN"
+  mkdir -p "$RUN/system" && ln -sf /dev/null "$RT_MASK" && $SYSTEMCTL daemon-reload || die "suspend.target did not mask at runtime; the 40 drop-ins are gone, so AllowSuspend=no and the lid lock from /etc hold"
+  reload_logind; echo "k114s-lid-sleep: closed: suspend.target runtime-masked; AllowSuspend=no and the lid lock from /etc stay"
+}
+cmd_gate() {
+  if r=$(trial_reason); then
+    echo "k114s-lid-sleep: trial boot ($r)"
+    if [ "$r" = "one-shot kernel trial" ] && read -r ab aid < "$STATE/boot-once-armed"; then   # spend the arming record, see trial_reason
+      { mkdir -p "$STATE" && printf '%s %s %s\n' "$ab" "$aid" "$BOOTID" > "$SEEN"; } || echo "k114s-lid-sleep: cannot write $SEEN; the arming record stays until: k114s-boot-once clear" >&2
+    fi
+    cmd_close
+  else cmd_open --force; fi
+}
+
+cmd_check() {
+  need_root; rc=0; bad() { echo "BAD   $*"; rc=1; }
+  for t in hibernate.target hybrid-sleep.target suspend-then-hibernate.target; do
+    s=$($SYSTEMCTL is-enabled "$t" 2>/dev/null); [ "$s" = masked ] || bad "$t is '$s', not masked in /etc"
+  done
+  s=$($SYSTEMCTL is-enabled suspend.target 2>/dev/null); g=$($SYSTEMCTL is-enabled "$GATE" 2>/dev/null)
+  if [ "$s" = masked ]; then echo "ok    suspend.target is masked in /etc"
+  else
+    # open, or masked only in /run (the next boot has no /run mask): only the gate unit and its files close it for a trial boot
+    [ "$g" = enabled ] || bad "suspend.target is '$s' and $GATE is '$g': nothing closes it for a trial boot"
+    [ -x "$LIB/k114s-lid-sleep" ] || bad "suspend.target is '$s' and the tool is not in $LIB: the gate cannot run"
+    for f in sleep-40-k114s-lid-sleep.conf logind-40-k114s-lid-sleep.conf; do [ -f "$LIB/lid-sleep/$f" ] || bad "suspend.target is '$s' and $LIB/lid-sleep/$f is missing: the gate cannot open an ordinary boot"; done
+    grep -qx 'AllowSuspend=no' "$SYSD/sleep.conf.d/30-k114s-r3a-trial.conf" 2>/dev/null || bad "suspend.target is '$s' and $SYSD/sleep.conf.d/30-k114s-r3a-trial.conf (AllowSuspend=no) is missing: no fail-closed lock"
+    grep -qx 'HandleLidSwitch=lock' "$SYSD/logind.conf.d/30-k114s-r3a-trial.conf" 2>/dev/null || bad "suspend.target is '$s' and $SYSD/logind.conf.d/30-k114s-r3a-trial.conf (HandleLidSwitch=lock) is missing: no fail-closed lock"
+    [ $rc = 0 ] && echo "ok    suspend.target is $s, held by $GATE (enabled) over the 30-k114s-r3a-trial locks"
+  fi
+  if r=$(trial_reason); then
+    case $s in masked | masked-runtime) ;; *) bad "this boot is a trial ($r) and suspend.target is '$s': the gate did not close it" ;; esac
+    if [ -e "$SLEEP_OPEN" ] || [ -e "$LOGIND_OPEN" ]; then bad "this boot is a trial ($r) and a 40 drop-in is in $RUN"; fi
+  fi
+  [ $rc = 0 ] && echo "ok    no trial boot could sleep"
+  return $rc
+}
+
+cmd_status() {
+  need_root
+  if r=$(trial_reason); then echo "this boot: trial ($r)"; else echo "this boot: ordinary"; fi
+  for t in suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target; do echo "$t: $($SYSTEMCTL is-enabled $t 2>/dev/null)"; done
+  echo "$GATE: $($SYSTEMCTL is-enabled $GATE 2>/dev/null)"
+  for f in "$SLEEP_OPEN" "$LOGIND_OPEN"; do if [ -e "$f" ]; then echo "open: $f"; else echo "closed: $f absent"; fi; done
+}
+
+cmd_install() {
+  need_root
+  for f in k114s-lid-sleep k114s-boot-once k114s-lid-sleep-gate.service sleep-30-k114s-r3a-trial.conf logind-30-k114s-r3a-trial.conf sleep-40-k114s-lid-sleep.conf logind-40-k114s-lid-sleep.conf; do
+    [ -f "$HERE/$f" ] || die "$HERE/$f is missing: run install from the repository's linux/r3a-trial folder; nothing changed"
+  done
+  [ "$HERE" != "$LIB" ] || die "run install from the repository copy, not from $LIB"
+  mkdir -p "$LIB/lid-sleep" "$SYSD/system" "$SYSD/sleep.conf.d" "$SYSD/logind.conf.d" || die "cannot create the folders"
+  # the fail-closed locks first (the same files docs/r3-integration.md step C installs), then the opener, then the unmask
+  install -m644 "$HERE/sleep-30-k114s-r3a-trial.conf" "$SYSD/sleep.conf.d/30-k114s-r3a-trial.conf" &&
+  install -m644 "$HERE/logind-30-k114s-r3a-trial.conf" "$SYSD/logind.conf.d/30-k114s-r3a-trial.conf" &&
+  install -m644 "$HERE/sleep-40-k114s-lid-sleep.conf" "$HERE/logind-40-k114s-lid-sleep.conf" "$LIB/lid-sleep/" &&
+  install -m755 "$HERE/k114s-lid-sleep" "$LIB/k114s-lid-sleep" &&
+  # k114s-boot-once must be the version that accepts an open suspend.target behind this gate (else every check, arm
+  # and P9 refuses); the copy it replaces is kept for undo
+  { [ -f "$LIB/k114s-boot-once.before-lid-sleep" ] || [ -e "$LIB/lid-sleep/boot-once-was-absent" ] ||
+    if [ -f "$LIB/k114s-boot-once" ]; then cp -p "$LIB/k114s-boot-once" "$LIB/k114s-boot-once.before-lid-sleep"; else : > "$LIB/lid-sleep/boot-once-was-absent"; fi; } &&
+  install -m755 "$HERE/k114s-boot-once" "$LIB/k114s-boot-once.k114s-new" && mv -f "$LIB/k114s-boot-once.k114s-new" "$LIB/k114s-boot-once" &&
+  cmp -s "$HERE/k114s-boot-once" "$LIB/k114s-boot-once" &&
+  install -m644 "$HERE/k114s-lid-sleep-gate.service" "$SYSD/system/$GATE" || die "a file did not install; the targets are untouched"
+  $SYSTEMCTL daemon-reload && $SYSTEMCTL enable "$GATE" >/dev/null || die "the gate unit did not enable; the targets are untouched"
+  $SYSTEMCTL unmask suspend.target || die "suspend.target did not unmask (is /etc/systemd/system/suspend.target a plain file?)"
+  cmd_gate
+  echo "k114s-lid-sleep: installed. Undo: sudo $LIB/k114s-lid-sleep undo"
+}
+
+cmd_undo() {
+  need_root
+  rm -f "$SLEEP_OPEN" "$LOGIND_OPEN" "$RT_MASK"
+  $SYSTEMCTL disable "$GATE" >/dev/null 2>&1; rm -f "$SYSD/system/$GATE"
+  $SYSTEMCTL mask suspend.target || die "suspend.target did not mask; run: systemctl mask suspend.target"
+  $SYSTEMCTL daemon-reload; reload_logind
+  if [ -f "$LIB/k114s-boot-once.before-lid-sleep" ]; then mv -f "$LIB/k114s-boot-once.before-lid-sleep" "$LIB/k114s-boot-once"
+  elif [ -e "$LIB/lid-sleep/boot-once-was-absent" ]; then rm -f "$LIB/k114s-boot-once"; fi
+  rm -rf "$LIB/lid-sleep"; rm -f "$LIB/k114s-lid-sleep"
+  echo "k114s-lid-sleep: undone: the four sleep targets are masked, the 30-k114s-r3a-trial drop-ins stay, the gate is gone"
+}
+
+case ${1:-} in
+  gate) cmd_gate ;; open) cmd_open "${2:-}" ;; close) cmd_close ;; check) cmd_check ;; status) cmd_status ;;
+  install) cmd_install ;; undo) cmd_undo ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

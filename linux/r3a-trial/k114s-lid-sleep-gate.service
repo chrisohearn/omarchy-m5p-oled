@@ -1,0 +1,19 @@
+# /etc/systemd/system/k114s-lid-sleep-gate.service
+# Runs before logind on every boot. An ordinary boot gets lid-close sleep; a trial boot (a Stage 2 trial or a Limine
+# one-shot kernel trial) keeps suspend masked. If this unit does not run, the persistent 30-k114s-r3a-trial drop-ins
+# still refuse suspend and make the lid lock.
+[Unit]
+Description=K114s: lid-close sleep on an ordinary boot, never on a trial boot
+DefaultDependencies=no
+After=local-fs.target sys-firmware-efi-efivars.mount
+Before=sysinit.target systemd-logind.service shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=/usr/local/lib/omarchy-k114s/k114s-lid-sleep
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/omarchy-k114s/k114s-lid-sleep gate
+
+[Install]
+WantedBy=sysinit.target

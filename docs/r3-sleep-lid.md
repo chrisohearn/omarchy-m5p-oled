@@ -311,7 +311,7 @@ What is still open before a real suspend:
 
 1. **`0010`** (receive by interrupt only) is not in r3a. The interrupt evidence above is the K114s proof the earlier gate asked for; `0010` belongs to the shared T6050 kernel lane (betizzel/omarchy-m5, r3b). Suspend on the GPU tree stays forbidden until a kernel with `0010` boots (#1843 panicked in noirq without it).
 2. **PMP nodes** are not in the running tree, so `0008` cannot help yet. Upstream reports PMP crashes at wake without always-on domains.
-3. **Masked targets** (the four above) stay until 1 and 2 are done, together with the trial's other two suspend blocks (the `sleep.conf.d` drop-in and the logind lid action `lock`; see `docs/r3-integration.md` step C). The lid and the menu therefore do nothing, by design.
+3. **Masked targets** (the four above) stay until 1 and 2 are done, together with the trial's other two suspend blocks (the `sleep.conf.d` drop-in and the logind lid action `lock`; see `docs/r3-integration.md` step C). The lid and the menu therefore do nothing, by design, on a trial boot and until [r3-lid-sleep-battery.md](r3-lid-sleep-battery.md) is installed. That page then opens `suspend.target` on ordinary boots only, for lid close on battery (and the menu); the other three targets stay masked.
 
 `tests/linux/test-sleep-gates.sh` (in `run-r3.sh`) guards the static pieces: `0003` admits only `apple,k114s`, the series order, the sleep fragment in the r3a tree and the masked-target check in `k114s-boot-once`.
 
