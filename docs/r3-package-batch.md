@@ -12,6 +12,8 @@ Evidence labels: **agent-run** (on this Mac), **source-read**.
 | Package | Was | Now | Why |
 | --- | --- | --- | --- |
 | `mesa-aurora`, `vulkan-aurora` | `1:26.3.0_devel.20261122.232644.e705eca833f-1` (Omarchy's build of omacom/mesa `carry/aurora-7.3`) | `1:26.3.0_devel.20261124.233153.e775d773684-1`, built here | aurora-silicon/mesa `aurora-wip` moved 518 commits past the pin, including the merged M5/G17 fixes (#642, #698, #731, #819, #820 and the borealis M5 work) |
+| `mesa-aurora`, `vulkan-aurora` (second batch) | `1:26.3.0_devel.20261124.233153.e775d773684-1` | `1:26.3.0_devel.20261124.233241.886a7732455-1`, built here | aurora-wip head later the same day; installed by the same guarded kit |
+| `mesa-aurora`, `vulkan-aurora` (third batch) | `1:26.3.0_devel.20261124.233241.886a7732455-1` | `1:26.3.0_devel.20261124.233311.89472d5e832-1`, built here | aurora-wip head (merge of #726); `meson test` 252 ok, 0 fail; the guarded test boot at 23:48Z passed (panel at 120 Hz, zink on the M5 Pro, Vulkan, microphone, speaker gate) and it stays installed |
 | `omarchy-mac` | `0.2.7-2` (omarchy-mac-pkgs `35dc7ed`) | `0.2.7-3`, built here at omarchy-mac-pkgs `0750b74` | the microphone mapper stays quiet while the lid is closed (5 commits on `omarchy-audio-asahi-mic-map`), which matters now that lid sleep is on |
 
 Both builds use Omarchy's own PKGBUILDs (omacom/omarchy-pkgs `pkgbuilds/`), changed only in the source pin and version:
