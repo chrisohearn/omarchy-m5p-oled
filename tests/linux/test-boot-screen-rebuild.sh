@@ -42,17 +42,20 @@ exit ${PACMAN_RC:-0}
 S
 cat > "$t/stub/df" <<'S'
 #!/bin/bash
-printf 'Avail\n%s\n' "$FREE"
+# FREE is one value per call (the last repeats); DF_RC makes df fail as after an I/O error.
+n=$(grep -c '^df$' "$LOG"); echo df >> "$LOG"
+set -- $FREE; i=$(( n + 1 > $# ? $# : n + 1 )); printf 'Avail\n%s\n' "${!i:-}"
+exit ${DF_RC:-0}
 S
 chmod +x "$t/stub/"*
 printf 'apple,k114s\0apple,t6050\0' > "$t/k114s"; printf 'apple,j714s\0apple,t6050\0' > "$t/other"
 run() { # dt packages free -> status; the log is $t/log
-  : > "$t/log"; env -i ${PACMAN_RC:+PACMAN_RC=$PACMAN_RC} ${MOUNTED:+MOUNTED=$MOUNTED} ${LIMINE:+LIMINE=$LIMINE} PATH="$t/stub:/usr/bin:/bin" LOG="$t/log" K114S_DT_COMPATIBLE=$1 PKGS="$2" FREE=$3 bash "$t/block" </dev/null 2>"$t/err"; }
+  : > "$t/log"; env -i ${PACMAN_RC:+PACMAN_RC=$PACMAN_RC} ${MOUNTED:+MOUNTED=$MOUNTED} ${LIMINE:+LIMINE=$LIMINE} ${DF_RC:+DF_RC=$DF_RC} PATH="$t/stub:/usr/bin:/bin" LOG="$t/log" K114S_DT_COMPATIBLE=$1 PKGS="$2" FREE="$3" bash "$t/block" </dev/null 2>"$t/err"; }
 all='linux-aurora linux-k114s linux-k114s-r3b linux-k114s-r3b'
 
 run "$t/k114s" "$all" 123527168; rc=$?
 ok "K114s: succeeds" "$rc" 0
-ok "K114s: rebuilds only the K114s kernels, once each" "$(grep limine-mkinitcpio "$t/log")" "sudo limine-mkinitcpio linux-k114s linux-k114s-r3b"
+ok "K114s: rebuilds only the K114s kernels, one at a time, once each" "$(grep limine-mkinitcpio "$t/log" | paste -sd,)" "sudo limine-mkinitcpio linux-k114s,sudo limine-mkinitcpio linux-k114s-r3b"
 ok "K114s: still sets the theme first" "$(head -1 "$t/log")" "sudo plymouth-set-default-theme omarchy"
 run "$t/k114s" "$all" 44000000; rc=$?
 ok "K114s, low space: exit 1, nothing rebuilt" "$rc:$(grep -c limine-mkinitcpio "$t/log")" "1:0"
@@ -62,7 +65,11 @@ ok "K114s, unreadable space: exit 1, nothing rebuilt" "$rc:$(grep -c limine-mkin
 run "$t/k114s" "linux-aurora" 123527168; rc=$?
 ok "K114s, no K114s kernel: exit 1 with its message, nothing rebuilt" "$rc:$(grep -c limine-mkinitcpio "$t/log"):$(grep -c "No linux-k114s kernel is installed" "$t/err")" "1:0:1"
 PACMAN_RC=1; export PACMAN_RC; run "$t/k114s" "$all" 123527168; rc=$?; unset PACMAN_RC
-ok "K114s, a module folder pacman does not own: still rebuilds the K114s kernels" "$rc:$(grep limine-mkinitcpio "$t/log")" "0:sudo limine-mkinitcpio linux-k114s linux-k114s-r3b"
+ok "K114s, a module folder pacman does not own: still rebuilds the K114s kernels" "$rc:$(grep limine-mkinitcpio "$t/log" | paste -sd,)" "0:sudo limine-mkinitcpio linux-k114s,sudo limine-mkinitcpio linux-k114s-r3b"
+run "$t/k114s" "$all" "123527168 44000000"; rc=$?
+ok "K114s, room for only the first image: rebuilds it, then refuses" "$rc:$(grep limine-mkinitcpio "$t/log" | paste -sd,)" "1:sudo limine-mkinitcpio linux-k114s"
+DF_RC=1; run "$t/k114s" "$all" 123527168; rc=$?; unset DF_RC
+ok "K114s, df fails: exit 1 with the refusal, nothing rebuilt" "$rc:$(grep -c limine-mkinitcpio "$t/log"):$(grep -c 'unreadable or too full' "$t/err")" "1:0:1"
 MOUNTED=no; run "$t/k114s" "$all" 123527168; rc=$?; unset MOUNTED
 ok "K114s, EFI partition not mounted: exit 1, nothing rebuilt" "$rc:$(grep -c limine-mkinitcpio "$t/log"):$(grep -c 'not mounted' "$t/err")" "1:0:1"
 LIMINE=no; run "$t/k114s" "$all" 123527168; rc=$?; unset LIMINE
