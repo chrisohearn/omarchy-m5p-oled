@@ -71,6 +71,366 @@
       "follow_up": "none",
       "acknowledged": null,
       "maintainer_feedback": []
+    },
+    {
+      "id": "aura-k114s-camera-row-2026-11-25",
+      "destination": "aurora-silicon/aura (new draft PR)",
+      "url": "https://github.com/aurora-silicon/aura/pull/515",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "draft PR",
+      "result": "adds {apple,k114s, 0xba, V27_2} to t6050_isp_boards; stop-gap until #362 + linux #2275",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "booted at the PR head; hardware LED",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "aura-362-k114s-row-2026-11-25",
+      "destination": "aurora-silicon/aura #362",
+      "url": "https://github.com/aurora-silicon/aura/pull/362#issuecomment-7148997854",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "comment (K114s ADT values and test)",
+      "result": "K114s values for the ADT-driven camera hand-off",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "#362's head on the K114s",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "aura-282-k114s-port0-2026-11-25",
+      "destination": "aurora-silicon/aura #282",
+      "url": "https://github.com/aurora-silicon/aura/pull/282#issuecomment-7148998163",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "comment (support + offer of a K114s row)",
+      "result": "the K114s needs port 0 described; offers a row at the head",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "nothing booted",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-2631-k114s-partial-2026-11-25",
+      "destination": "aurora-silicon/linux #2631",
+      "url": "https://github.com/aurora-silicon/linux/pull/2631#issuecomment-7149007604",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "comment (partial evidence, not a head row)",
+      "result": "SEP warm attach on a newly admitted board with the mailbox enabled",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "J616s enrol/verify; disabled-mailbox board; a Touch ID match",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-2275-k114s-partial-2026-11-25",
+      "destination": "aurora-silicon/linux #2275",
+      "url": "https://github.com/aurora-silicon/linux/pull/2275#issuecomment-7149007902",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "comment (partial evidence, not a head row)",
+      "result": "camera capture with a byte-identical t6050-isp.dtsi plus local additions",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "the PR's nodes alone; s2idle; idle power",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-2281-k114s-partial-2026-11-25",
+      "destination": "aurora-silicon/linux #2281",
+      "url": "https://github.com/aurora-silicon/linux/pull/2281#issuecomment-7149008206",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "comment (partial evidence, not a head row)",
+      "result": "fans, power and 81 temperature channels read",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "fan ramp under load; the PR's block in isolation",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-k114s-nvram-2026-11-25",
+      "destination": "aurora-silicon/linux (new draft PR)",
+      "url": "https://github.com/aurora-silicon/linux/pull/3103",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "draft PR",
+      "result": "K114s NVRAM partition, read-only",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "booted at the PR head; any write",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-2115-sep-dt-rework-2026-11-25",
+      "destination": "aurora-silicon/linux #2115 (reworked, back to draft)",
+      "url": "https://github.com/aurora-silicon/linux/pull/2115",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "PR rework",
+      "result": "K114s SEP/Touch ID device tree instead of the profile hunk; after #2631",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "booted at the PR head; macOS Touch ID after Linux enrolment",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-k114-macaudio-jack-2026-11-25",
+      "destination": "aurora-silicon/linux (new draft PR)",
+      "url": "https://github.com/aurora-silicon/linux/pull/3104",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "draft PR",
+      "result": "apple,k114-macaudio binding and jack-only entry, speakers off; DT later",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "the DT; KUnit run; a headset",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-k114s-brightness-floor-2026-11-25",
+      "destination": "aurora-silicon/linux (new draft PR)",
+      "url": "https://github.com/aurora-silicon/linux/pull/3105",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "draft PR",
+      "result": "apple,min-brightness binding and the floor on the nits backlight",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "a write below the floor on hardware; a DT user",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-k114s-vrr-dcp-crash-2026-11-25",
+      "destination": "aurora-silicon/linux (new issue)",
+      "url": "https://github.com/aurora-silicon/linux/issues/3107",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "issue (Bring-up)",
+      "result": "VRR on the K114s OLED crashes the DCP at 24 and 48 Hz minimums",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "a retest on current main",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-2060-update-2026-11-25",
+      "destination": "aurora-silicon/linux #2060",
+      "url": "https://github.com/aurora-silicon/linux/issues/2060#issuecomment-7149324880",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "comment (update)",
+      "result": "r3f result: EDR on via #2694, P3 primaries",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "the uncapped 2000-nit path; PQ validated",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-2087-closed-2026-11-25",
+      "destination": "aurora-silicon/linux #2087 (closed)",
+      "url": "https://github.com/aurora-silicon/linux/pull/2087#issuecomment-7149325308",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "closing comment",
+      "result": "withdrawn in favour of #2798 and #2694",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "n/a",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "omarchy-mac-pkgs-157-nudge-2026-11-25",
+      "destination": "omacom/omarchy-mac-pkgs #157",
+      "url": "https://github.com/omacom/omarchy-mac-pkgs/pull/157#issuecomment-7149328653",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "rebase + nudge",
+      "result": "rebased on main 0750b741, version bump dropped, 134 tests ok",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "maintainer review",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "omarchy-mac-pkgs-153-evidence-2026-11-25",
+      "destination": "omacom/omarchy-mac-pkgs #153",
+      "url": "https://github.com/omacom/omarchy-mac-pkgs/issues/153#issuecomment-7149329090",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "comment (evidence)",
+      "result": "UPower is_macbook thresholds vs SMC percentage",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "a packaged fix",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "omarchy-mac-pkgs-148-notch-2026-11-25",
+      "destination": "omacom/omarchy-mac-pkgs #148",
+      "url": "https://github.com/omacom/omarchy-mac-pkgs/issues/148#issuecomment-7149329547",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "comment (update)",
+      "result": "96 is a derived 16:10 band, not measured",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "a measured notch height",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "betizzel-12-rolando-2026-11-25",
+      "destination": "betizzel/omarchy-m5 #12",
+      "url": "https://github.com/betizzel/omarchy-m5/issues/12#issuecomment-7149329897",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "comment to the author",
+      "result": "his 0001/0002 work on the K114s; asks about upstreaming; VRR gate suggestion",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "n/a",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-aurora-422-eduard-2026-11-25",
+      "destination": "omacom/linux-aurora #422",
+      "url": "https://github.com/omacom/linux-aurora/pull/422#issuecomment-7149330237",
+      "posted": "2026-11-25T01:30:00Z",
+      "account": "chrisohearn",
+      "kind": "comment to the author",
+      "result": "his camera commits work on the K114s; asks about upstreaming",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "the camera light (none on the K114s)",
+      "state": "submitted",
+      "read_back": "URL returned by the API",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
     }
   ]
 }
