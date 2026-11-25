@@ -4,6 +4,15 @@
 log of the D6 boot, kept root-only as `$D/D6-dcp-crash-20261116-123243.log`), **owner-observed**, **inference**. The D6 run
 itself is in `docs/r3-display-d5-d9.md` 4c. Nothing in sections 2 to 4 has been booted.
 
+**Status 2026-11-25: still crashes on current code; VRR stays masked.** One attended boot of r3f (aurora-silicon/linux
+`main` `4abf0f83c290`, which includes #3052, plus the K114s series) with `fw27_panel_vrr=1`, the default 24 Hz minimum,
+nothing else changed. The boot was clean (`vrr_capable` 1). Turning `misc:vrr` on gave `VRR_ENABLED 1`,
+`minRR = 0x180000` and a `mode_set_gated … VRR=YES`, then the DCP crashed about 0.6 s after the request with the same
+`apt firmware: video_mode_main_init.c:288 main_init()` (agent-run, from the log; the full log is kept root-only in
+`/var/lib/k114s-recovery/vrr-retest/`). The panel went black and stayed black until a reboot (owner-observed). The next
+boot, masked again, was normal. Reported on [linux#3107](https://github.com/aurora-silicon/linux/issues/3107), where the
+open question remains a live adaptive-sync change (parameter 15) without the mode reselect.
+
 ## 1. What happened (D6, r3b.c1, 2026-11-16)
 
 With the mask out (`fw27_panel_vrr=1`) the boot was clean: `vrr_capable` 1, and the DCP's `set_digital_out_mode() ...
