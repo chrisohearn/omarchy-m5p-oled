@@ -18,7 +18,7 @@ in r3d and r3e. Evidence labels as in [r3d-kernel.md](r3d-kernel.md): **agent-ru
 | Base | aurora-silicon/linux `main` `c3369f4855e9` | aurora-silicon/linux `main` `4abf0f83c290fd7275d44b09dc490e34b405749b` (Merge of #2559, 144 commits after `c3369f48`: 96 of them not merges) |
 | Series | `patches/linux/r3e1.series`: 76 patches | `patches/linux/r3f.series`: 74 patches (`patches/linux/r3f/`) |
 | Release | `7.3.0-17.v272-18-k114s-r3e1-ARCH` | `7.3.0-17.v272-18-k114s-r3f-ARCH` (label `K114S-R3F`) |
-| Package | `linux-k114s 7.3.0.r3e1-1` | `linux-k114s-r3b 7.3.0.r3f-1`: the Backup slot, replacing r3e there (`vercmp`: `r3f` is newer than `r3e`) |
+| Package | `linux-k114s 7.3.0.r3e1-1` | `linux-k114s-r3b 7.3.0.r3f-1`: staged in the Backup slot, replacing r3e there (`vercmp`: `r3f` is newer than `r3e`); Main since its promotion |
 
 The 76 r3e1 patches became: **72 kept as they were, 2 re-cut onto #2694, 2 dropped**. `git range-diff` of the r3e1 branch
 against the r3f branch shows exactly that. The 72 kept patches are r3e's own text under their new numbers, and the 2 re-cuts are
@@ -153,5 +153,5 @@ PKGBUILD with `pkgver` `26.3.0_devel.20261124.233311.89472d5e832` (UTC date of t
 - Done 2026-11-24: staged into the Backup slot, tried by a one-shot (23:49Z, `R3F-CHECK: PASS`) and promoted (see the
   status at the top). The trial recorded EDR on at the 1200-nit cap, HDR blocks in the EDID and the CLPC profiles intact.
 - Still open: the panel's own 2000-nit peak (needs the 1200-nit override removed) and a validated PQ picture
-  ([r3-vrr.md](r3-vrr.md) and linux#2060); VRR stays masked ([r3-vrr.md](r3-vrr.md), linux#3107).
+  ([r3-hdr.md](r3-hdr.md) and linux#2060); VRR stays masked ([r3-vrr.md](r3-vrr.md), linux#3107).
 - The r3e and r3e1 series (`r3e.series`, `r3e1.series`, `r3e/`) stay in the repository: they are the booted kernels' record.
