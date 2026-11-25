@@ -71,11 +71,27 @@ changes, change this file through a PR.
    1. packages (Mesa): a guarded ordinary reboot with automatic rollback;
    2. kernel: stage into Backup from an ordinary boot, then a one-shot trial, then promote;
    3. Stage 2: an `aura-try` trial, then promote.
-8. **Docs.** Update the status lines of the docs that changed (kernel, Stage 2, camera, matrix rows) through a docs PR.
-9. **Report** in the morning to the owner's K114s thread and to Jarvis's inbox. List what was promoted, what was tried
+8. **One upstream PR head per night** (owner's decision, 2026-11-25: "Fold into nightly"). Our draft upstream PRs need a
+   hardware result from a boot of their exact head before they leave draft. They are listed in `ledger/outgoing.json`
+   (state `submitted`, kind `draft PR`): aura#515, linux#3103, #3104, #3105 and #2115. Each night, take the oldest one
+   that has no head result yet and whose head is not already covered:
+   - build the head as upstream would (a kernel from the PR branch with this Mac's config for a kernel PR, packaged into
+     the **Backup** slot; a Stage 2 test file for an Aura PR), keeping the K114s patches the head needs to boot and
+     naming each one in the result;
+   - boot it once, by a Limine one-shot or `aura-try`, under the same gates as step 7. **Never promote a PR-head
+     build**: Main stays as it was, and the next boot returns to it;
+   - run the checks that PR's text says are open (its "Not yet" list) and the kit's usual gates;
+   - post the result on the PR as a hardware row for that head SHA, following the destination's rules (no AI
+     attribution in aurora-silicon repos), after an independent review of the draft. Mark the PR ready only when the
+     row covers everything its "Not yet" list asked for;
+   - record the post in `ledger/outgoing.json`. Linux#2115 waits until #2631 merges.
+
+   The speakers stay off for #3104: its head has no speaker path, and the speaker gate runs before and after as usual.
+9. **Docs.** Update the status lines of the docs that changed (kernel, Stage 2, camera, matrix rows) through a docs PR.
+10. **Report** in the morning to the owner's K114s thread and to Jarvis's inbox. List what was promoted, what was tried
    and failed (with the failing gates), what was skipped and why, what is new upstream, and anything that needs the
    owner.
-10. **Verify and close.** A fresh GPT-6.2 Sol (xhigh) verifier checks the night's done-checks against the live Mac. Record
+11. **Verify and close.** A fresh GPT-6.2 Sol (xhigh) verifier checks the night's done-checks against the live Mac. Record
     the result on the run's ledger row (`k114s/nightly-<date>`).
 
 ## Way back
