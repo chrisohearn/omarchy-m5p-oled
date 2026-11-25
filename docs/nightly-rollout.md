@@ -44,7 +44,7 @@ changes, change this file through a PR.
    - omacom/omarchy-mac-pkgs, and the omacom/omarchy-pkgs `pkgbuilds/` for the packages we install.
 
    Pick out the changes that touch the T6050, K114/K116, M5, G17 or AGX3 hardware, or code our series uses. If nothing
-   relevant changed, report that and stop.
+   relevant changed, skip steps 3 to 7 for the update and say so in the report, but still run step 8.
 3. **Kernel** (when relevant). Rebase the current series onto the new `main`:
    - drop what main now carries and re-cut what conflicts, as `docs/r3e-kernel.md` sections 1 and 2 describe;
    - keep the owner's choices: the camera runs without a described light (`0075`), the small indicator sits under the
@@ -72,14 +72,22 @@ changes, change this file through a PR.
    2. kernel: stage into Backup from an ordinary boot, then a one-shot trial, then promote;
    3. Stage 2: an `aura-try` trial, then promote.
 8. **One upstream PR head per night** (owner's decision, 2026-11-25: "Fold into nightly"). Our draft upstream PRs need a
-   hardware result from a boot of their exact head before they leave draft. They are listed in `ledger/outgoing.json`
-   (state `submitted`, kind `draft PR`): aura#515, linux#3103, #3104, #3105 and #2115. Each night, take the oldest one
-   that has no head result yet and whose head is not already covered:
-   - build the head as upstream would (a kernel from the PR branch with this Mac's config for a kernel PR, packaged into
-     the **Backup** slot; a Stage 2 test file for an Aura PR), keeping the K114s patches the head needs to boot and
-     naming each one in the result;
-   - boot it once, by a Limine one-shot or `aura-try`, under the same gates as step 7. **Never promote a PR-head
-     build**: Main stays as it was, and the next boot returns to it;
+   hardware result from a boot of their exact head before they leave draft. They are the `ledger/outgoing.json` rows
+   with these ids, while their state is `submitted`: `linux-k114s-nvram-2026-11-25` (#3103),
+   `linux-k114-macaudio-jack-2026-11-25` (#3104), `linux-k114s-brightness-floor-2026-11-25` (#3105),
+   `linux-2115-sep-dt-rework-2026-11-25` (#2115) and `aura-k114s-camera-row-2026-11-25` (aura#515). Each night, take the
+   oldest kernel PR that has no head result yet and whose head is not already covered:
+   - build the head as upstream would (a kernel from the PR branch with this Mac's config), keeping the K114s patches the
+     head needs to boot and naming each one in the result, and package it into the **Backup** slot through a stage kit
+     whose rollback set holds the current Backup package, image and `limine.conf`;
+   - boot it once by a Limine one-shot, under the same gates as step 7. **Never promote a PR-head build**: Main stays as
+     it was, and the next boot returns to it;
+   - **put the known-good Backup back** as soon as the result is recorded: reinstall the saved Backup package, restore
+     Main's image and block as the stage kits do, check P9 holds with the original Backup pin, and boot nothing
+     else until that check passes. A PR-head build never stays installed after its night;
+   - **aura#515 and any other Stage 2 head are never run unattended**: the trial watchdog does not arm on this Mac
+     (`docs/r3-integration.md`), so a Stage 2 that hangs needs someone at the Mac to force a power-off. List them in
+     the morning report as waiting for an attended window instead;
    - run the checks that PR's text says are open (its "Not yet" list) and the kit's usual gates;
    - post the result on the PR as a hardware row for that head SHA, following the destination's rules (no AI
      attribution in aurora-silicon repos), after an independent review of the draft. Mark the PR ready only when the
