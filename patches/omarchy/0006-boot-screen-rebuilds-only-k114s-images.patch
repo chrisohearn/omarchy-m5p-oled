@@ -10,14 +10,15 @@ next update at the space guard.
 Where /proc/device-tree/compatible lists apple,k114s, the rebuild names the installed
 linux-k114s* kernel packages instead, through limine-mkinitcpio only (never mkinitcpio -P), one
 kernel at a time. Before each one it checks that the EFI partition is mounted and has the space
-guard's minimum free (one new image is written beside the old one), and otherwise refuses with
-the command to run later. Other machines are unchanged.
+guard's minimum plus the boot theme's size free (one new image is written beside the old one,
+and a large custom logo grows it), reading the free space under Limine's boot-partition lock,
+and otherwise refuses with the command to run later. Other machines are unchanged.
 
 Paths are relative to /usr.
 
 --- a/bin/omarchy-plymouth-set
 +++ b/bin/omarchy-plymouth-set
-@@ -373,7 +373,33 @@
+@@ -373,7 +373,39 @@
  if [[ $mode != "refresh-sddm" ]]; then
    sudo plymouth-set-default-theme omarchy
  
@@ -26,7 +27,10 @@ Paths are relative to /usr.
 +  # including the held stock linux-aurora, whose 79 MB image fills the EFI partition, adds a third
 +  # boot menu entry and stops every later update (docs/esp-space.md). On the K114s only the
 +  # linux-k114s* kernels' images are rebuilt, through Limine only, one kernel at a time, each only
-+  # when the mounted EFI partition has room for one image beside the old one.
++  # when the mounted EFI partition has room for one image beside the old one. The room needed is
++  # the space guard's minimum plus the boot theme's size (a large custom logo grows every image).
++  # The free space is read under Limine's boot-partition lock, so a snapshot sync or another
++  # rebuild that is writing finishes first; limine-mkinitcpio takes that lock itself to write.
 +  if grep -qx 'apple,k114s' < <(tr '\0' '\n' 2>/dev/null <"${K114S_DT_COMPATIBLE:-/proc/device-tree/compatible}"); then
 +    k114s_kernels=($({ pacman -Qqo /usr/lib/modules/*/modules.builtin 2>/dev/null || true; } | sort -u | sed -n -E '/^linux-k114s(-|$)/p'))
 +    if ! omarchy-cmd-present limine-mkinitcpio; then
@@ -36,13 +40,16 @@ Paths are relative to /usr.
 +      echo "No linux-k114s kernel is installed; the boot images were not rebuilt." >&2
 +      exit 1
 +    fi
++    k114s_theme=$(du -sb /usr/share/plymouth/themes/omarchy 2>/dev/null | cut -f1) || k114s_theme=
++    [[ $k114s_theme =~ ^[0-9]+$ ]] || k114s_theme=67108864
++    k114s_need=$(( ${K114S_ESP_MIN_FREE:-88080384} + k114s_theme ))
 +    for k114s_kernel in "${k114s_kernels[@]}"; do
 +      k114s_free=
 +      if mountpoint -q /boot/efi; then
-+        k114s_free=$(df -B1 --output=avail /boot/efi 2>/dev/null | tail -n 1 | tr -d ' ') || k114s_free=
++        k114s_free=$(sudo flock -w 60 /run/lock/boot-partition.lock df -B1 --output=avail /boot/efi 2>/dev/null | tail -n 1 | tr -d ' ') || k114s_free=
 +      fi
-+      if [[ ! $k114s_free =~ ^[0-9]+$ ]] || (( k114s_free < ${K114S_ESP_MIN_FREE:-88080384} )); then
-+        echo "The EFI partition is not mounted, unreadable or too full to rebuild the $k114s_kernel image beside the old one." >&2
++      if [[ ! $k114s_free =~ ^[0-9]+$ ]] || (( k114s_free < k114s_need )); then
++        echo "The EFI partition is not mounted, unreadable, busy or too full to rebuild the $k114s_kernel image beside the old one (it needs $k114s_need bytes free)." >&2
 +        echo "The boot screen changes at the next rebuild; once there is room: sudo limine-mkinitcpio ${k114s_kernels[*]}" >&2
 +        exit 1
 +      fi

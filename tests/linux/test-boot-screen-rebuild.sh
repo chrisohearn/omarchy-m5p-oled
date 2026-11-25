@@ -14,7 +14,10 @@ ok() { if [ "$2" = "$3" ]; then pass=$((pass+1)); echo "PASS $1"; else fail=$((f
 t=$(mktemp -d "${TMPDIR:-/tmp}/k114s-boot-screen.XXXXXX"); trap 'rm -rf "$t"' EXIT
 mkdir -p "$t/usr/bin" "$t/stub"; cp "$src" "$t/usr/bin/omarchy-plymouth-set"
 f=$t/usr/bin/omarchy-plymouth-set
-grep -q 'K114s local change: a bare limine-mkinitcpio' "$f" && patch -p1 -d "$t/usr" -F0 -s -R < "$patch_file"
+# A machine that already has a version of 0006 (perhaps an older one): test the forward patch on
+# the base file it was written for instead.
+grep -q 'K114s local change: a bare limine-mkinitcpio' "$f" &&
+  cp "${patch_file%.patch}.base/bin/omarchy-plymouth-set" "$f"
 patch -p1 -d "$t/usr" -F0 -s --dry-run < "$patch_file" >/dev/null 2>&1; ok "patch fits the installed script without fuzz" "$?" 0
 patch -p1 -d "$t/usr" -F0 -s < "$patch_file"; ok "patch applies" "$?" 0
 bash -n "$f"; ok "patched script parses" "$?" 0
@@ -25,6 +28,12 @@ start=$(grep -n '^if \[\[ \$mode != "refresh-sddm" \]\]; then$' "$f" | tail -1 |
 cat > "$t/stub/sudo" <<'S'
 #!/bin/bash
 echo "sudo $*" >> "$LOG"
+# sudo flock -w N LOCK cmd...: run the command (the lock itself is not taken in the test)
+if [ "$1" = flock ]; then shift 4; exec "$@"; fi
+S
+cat > "$t/stub/du" <<'S'
+#!/bin/bash
+printf '%s\t%s\n' "${THEME:-174225}" "$2"
 S
 cat > "$t/stub/omarchy-cmd-present" <<'S'
 #!/bin/bash
@@ -50,13 +59,14 @@ S
 chmod +x "$t/stub/"*
 printf 'apple,k114s\0apple,t6050\0' > "$t/k114s"; printf 'apple,j714s\0apple,t6050\0' > "$t/other"
 run() { # dt packages free -> status; the log is $t/log
-  : > "$t/log"; env -i ${PACMAN_RC:+PACMAN_RC=$PACMAN_RC} ${MOUNTED:+MOUNTED=$MOUNTED} ${LIMINE:+LIMINE=$LIMINE} ${DF_RC:+DF_RC=$DF_RC} PATH="$t/stub:/usr/bin:/bin" LOG="$t/log" K114S_DT_COMPATIBLE=$1 PKGS="$2" FREE="$3" bash "$t/block" </dev/null 2>"$t/err"; }
+  : > "$t/log"; env -i ${PACMAN_RC:+PACMAN_RC=$PACMAN_RC} ${MOUNTED:+MOUNTED=$MOUNTED} ${LIMINE:+LIMINE=$LIMINE} ${DF_RC:+DF_RC=$DF_RC} ${THEME:+THEME=$THEME} PATH="$t/stub:/usr/bin:/bin" LOG="$t/log" K114S_DT_COMPATIBLE=$1 PKGS="$2" FREE="$3" bash "$t/block" </dev/null 2>"$t/err"; }
 all='linux-aurora linux-k114s linux-k114s-r3b linux-k114s-r3b'
 
 run "$t/k114s" "$all" 123527168; rc=$?
 ok "K114s: succeeds" "$rc" 0
 ok "K114s: rebuilds only the K114s kernels, one at a time, once each" "$(grep limine-mkinitcpio "$t/log" | paste -sd,)" "sudo limine-mkinitcpio linux-k114s,sudo limine-mkinitcpio linux-k114s-r3b"
 ok "K114s: still sets the theme first" "$(head -1 "$t/log")" "sudo plymouth-set-default-theme omarchy"
+ok "K114s: reads the free space under Limine's boot-partition lock, once per image" "$(grep -c '^sudo flock -w 60 /run/lock/boot-partition.lock df ' "$t/log")" 2
 run "$t/k114s" "$all" 44000000; rc=$?
 ok "K114s, low space: exit 1, nothing rebuilt" "$rc:$(grep -c limine-mkinitcpio "$t/log")" "1:0"
 ok "K114s, low space: prints the command for later" "$(grep -c 'sudo limine-mkinitcpio linux-k114s linux-k114s-r3b' "$t/err")" 1
@@ -69,7 +79,9 @@ ok "K114s, a module folder pacman does not own: still rebuilds the K114s kernels
 run "$t/k114s" "$all" "123527168 44000000"; rc=$?
 ok "K114s, room for only the first image: rebuilds it, then refuses" "$rc:$(grep limine-mkinitcpio "$t/log" | paste -sd,)" "1:sudo limine-mkinitcpio linux-k114s"
 DF_RC=1; run "$t/k114s" "$all" 123527168; rc=$?; unset DF_RC
-ok "K114s, df fails: exit 1 with the refusal, nothing rebuilt" "$rc:$(grep -c limine-mkinitcpio "$t/log"):$(grep -c 'unreadable or too full' "$t/err")" "1:0:1"
+ok "K114s, df fails: exit 1 with the refusal, nothing rebuilt" "$rc:$(grep -c limine-mkinitcpio "$t/log"):$(grep -c 'unreadable, busy or too full' "$t/err")" "1:0:1"
+THEME=40000000; run "$t/k114s" "$all" 123527168; rc=$?; unset THEME
+ok "K114s, a 40 MB boot theme: needs the guard's minimum plus the theme, refuses at 123.5 MB" "$rc:$(grep -c limine-mkinitcpio "$t/log"):$(grep -c 'needs 128080384 bytes' "$t/err")" "1:0:1"
 MOUNTED=no; run "$t/k114s" "$all" 123527168; rc=$?; unset MOUNTED
 ok "K114s, EFI partition not mounted: exit 1, nothing rebuilt" "$rc:$(grep -c limine-mkinitcpio "$t/log"):$(grep -c 'not mounted' "$t/err")" "1:0:1"
 LIMINE=no; run "$t/k114s" "$all" 123527168; rc=$?; unset LIMINE
