@@ -85,10 +85,10 @@
         "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
         "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
       },
-      "not_claimed": "booted at the PR head; hardware LED",
-      "state": "submitted",
+      "not_claimed": "hardware LED",
+      "state": "hardware_confirmed",
       "read_back": "PR read back: state open, draft True, merged False (2026-11-25)",
-      "follow_up": "watch for review",
+      "follow_up": "head result posted (row aura-515-hwrow-2026-11-25): PASS at fa1f89224cfc; stays draft until #362 and linux #2275 land",
       "acknowledged": null,
       "maintainer_feedback": []
     },
@@ -469,6 +469,46 @@
       "state": "submitted",
       "read_back": "comment read back, author chrisohearn (2026-11-25)",
       "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "own-262-plymouth-cause-2026-11-25",
+      "destination": "chrisohearn/omarchy-m5p-oled #262",
+      "url": "https://github.com/chrisohearn/omarchy-m5p-oled/issues/262#issuecomment-7151096283",
+      "posted": "2026-11-25T02:43:23Z",
+      "account": "chrisohearn",
+      "kind": "comment (cause)",
+      "result": "likely cause: a use-after-free in plymouth's script plugin (a keyboard left behind when its DRM renderer is freed at the simpledrm-to-appledrm handover)",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "a tested fix; the upstream plymouth issue is drafted for Chris to file",
+      "state": "submitted",
+      "read_back": "comment read back, author chrisohearn (2026-11-25)",
+      "follow_up": "file upstream from Chris's gitlab.freedesktop.org account",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "aura-515-hwrow-2026-11-25",
+      "destination": "aurora-silicon/aura #515",
+      "url": "https://github.com/aurora-silicon/aura/pull/515#issuecomment-7152059652",
+      "posted": "2026-11-25T03:35:40Z",
+      "account": "chrisohearn",
+      "kind": "hardware result (PR head)",
+      "result": "PASS at fa1f89224cfc: one boot of a Stage 2 built from the head; camera hand-off (platform 0xba) and a 150-frame capture; no regressions in GPU, decode, ANE/ProRes/JPEG, audio, SEP or units",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura 1.0.0b17-gfa1f8922 (aura#515 head, one attended trial boot)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "a second K114s; the K114s with #362 and #2275 instead of this row",
+      "state": "hardware_confirmed",
+      "read_back": "comment and PR body read back, author chrisohearn (2026-11-25)",
+      "follow_up": "stays draft until #362 and linux #2275 land",
       "acknowledged": null,
       "maintainer_feedback": []
     }
