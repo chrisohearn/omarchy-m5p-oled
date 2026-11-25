@@ -85,10 +85,10 @@
         "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
         "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
       },
-      "not_claimed": "booted at the PR head; hardware LED",
-      "state": "submitted",
+      "not_claimed": "hardware LED",
+      "state": "hardware_confirmed",
       "read_back": "PR read back: state open, draft True, merged False (2026-11-25)",
-      "follow_up": "watch for review",
+      "follow_up": "head result posted (row aura-515-hwrow-2026-11-25): PASS at fa1f89224cfc; stays draft until #362 and linux #2275 land",
       "acknowledged": null,
       "maintainer_feedback": []
     },
