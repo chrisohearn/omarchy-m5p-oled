@@ -13,12 +13,12 @@ in r3d and r3e. Evidence labels as in [r3d-kernel.md](r3d-kernel.md): **agent-ru
 
 ## 1. What r3f is
 
-| | r3e1 (Main) | r3f |
+| | r3e1 (Main until 2026-11-24; now Backup) | r3f (now Main) |
 | --- | --- | --- |
 | Base | aurora-silicon/linux `main` `c3369f4855e9` | aurora-silicon/linux `main` `4abf0f83c290fd7275d44b09dc490e34b405749b` (Merge of #2559, 144 commits after `c3369f48`: 96 of them not merges) |
 | Series | `patches/linux/r3e1.series`: 76 patches | `patches/linux/r3f.series`: 74 patches (`patches/linux/r3f/`) |
 | Release | `7.3.0-17.v272-18-k114s-r3e1-ARCH` | `7.3.0-17.v272-18-k114s-r3f-ARCH` (label `K114S-R3F`) |
-| Package | `linux-k114s 7.3.0.r3e1-1` | `linux-k114s-r3b 7.3.0.r3f-1`: the Backup slot, replacing r3e there (`vercmp`: `r3f` is newer than `r3e`) |
+| Package | `linux-k114s 7.3.0.r3e1-1` | `linux-k114s-r3b 7.3.0.r3f-1`: staged in the Backup slot, replacing r3e there (`vercmp`: `r3f` is newer than `r3e`); Main since its promotion |
 
 The 76 r3e1 patches became: **72 kept as they were, 2 re-cut onto #2694, 2 dropped**. `git range-diff` of the r3e1 branch
 against the r3f branch shows exactly that. The 72 kept patches are r3e's own text under their new numbers, and the 2 re-cuts are
@@ -65,7 +65,7 @@ ramps the panel towards the cap in force: 1200 nits on this Mac while `/etc/modp
 below), the panel's own 2000-nit peak without it. PQ content has been shown on this OLED only up to a 1200-nit
 cap (owner-observed 2026-11-16, [r3-hdr.md](r3-hdr.md) sections 8 and 9), never at the full 2000-nit peak.
 
-**On this Mac the trial still runs at 1200 nits.** The managed HDR default, `/etc/modprobe.d/k114s-edr-cap.conf`
+**On this Mac r3f runs at 1200 nits** (the trial did, and Main does). The managed HDR default, `/etc/modprobe.d/k114s-edr-cap.conf`
 (`linux/display/k114s-edr-cap`), sets `options appledrm fw27_panel_edr_max_nits=1200`, and it applies to r3f as it did to
 r3e1. The owner chose that cap on 2026-11-16, and the 2026-11-24 decision was about the kernel's own default, so the
 override stays (a reversible default; `sudo bash linux/display/k114s-edr-cap --undo` and a reboot give the panel's own
@@ -146,12 +146,12 @@ this document: `~/k114s-build/build/pkg-r3f.IsPVg3/d/linux-k114s-r3b-7.3.0.r3f-1
 r3e1's pairing `886a7732455`), without the omacom M3/G15 carries (#415, #416), as `mesa-886a773` was built: the same
 PKGBUILD with `pkgver` `26.3.0_devel.20261124.233311.89472d5e832` (UTC date of the head, `git rev-list --count` 233311,
 11-character sha) and `_commit` moved, the source the local clone, `makepkg -e` over a prepared `src/mesa-k114s` worktree.
-`meson test`: **252 ok, 0 fail**. Packages (epoch 1, `-1`): `~/k114s-build/build/mesa-89472d5.0EQu5z/mesa-aurora-1:26.3.0_devel.20261124.233311.89472d5e832-1-aarch64.pkg.tar.xz` (sha256 `c10baafe…`) and `…/vulkan-aurora-1:26.3.0_devel.20261124.233311.89472d5e832-1-aarch64.pkg.tar.xz` (sha256 `4b02898d…`). Nothing is installed (agent-run).
+`meson test`: **252 ok, 0 fail**. Packages (epoch 1, `-1`): `~/k114s-build/build/mesa-89472d5.0EQu5z/mesa-aurora-1:26.3.0_devel.20261124.233311.89472d5e832-1-aarch64.pkg.tar.xz` (sha256 `c10baafe…`) and `…/vulkan-aurora-1:26.3.0_devel.20261124.233311.89472d5e832-1-aarch64.pkg.tar.xz` (sha256 `4b02898d…`). Installed after its guarded test boot passed on 2026-11-24 (agent-run; [r3-package-batch.md](r3-package-batch.md)).
 
 ## 8. Left for later
 
-- The trial: Stage 2, one-shot boot and gates are r3d's ([r3d-kernel.md](r3d-kernel.md) section 3); nothing of r3f has run on
-  the Mac. What is new to look at: the panel's HDR (the PQ property, the EDID, the first PQ frame and the 2000-nit ramp),
-  the CLPC low-power profile (#3090), and the camera as r3e1.
-- Nothing is installed. Install, the Limine one-shot and promotion are root steps for the lead.
+- Done 2026-11-24: staged into the Backup slot, tried by a one-shot (23:49Z, `R3F-CHECK: PASS`) and promoted (see the
+  status at the top). The trial recorded EDR on at the 1200-nit cap, HDR blocks in the EDID and the CLPC profiles intact.
+- Still open: the panel's own 2000-nit peak (needs the 1200-nit override removed) and a validated PQ picture
+  ([r3-hdr.md](r3-hdr.md) and linux#2060); VRR stays masked ([r3-vrr.md](r3-vrr.md), linux#3107).
 - The r3e and r3e1 series (`r3e.series`, `r3e1.series`, `r3e/`) stay in the repository: they are the booted kernels' record.
