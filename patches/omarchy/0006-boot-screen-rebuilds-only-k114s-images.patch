@@ -8,14 +8,15 @@ screen change put its 79 MB image back, added a third menu entry, left 43 MB fre
 next update at the space guard.
 
 Where /proc/device-tree/compatible lists apple,k114s, the rebuild names the installed
-linux-k114s* kernel packages instead, and refuses with the command to run later when the EFI
-partition has less room than the space guard's minimum. Other machines are unchanged.
+linux-k114s* kernel packages instead, through limine-mkinitcpio only (never mkinitcpio -P), and
+refuses with the command to run later when the EFI partition is not mounted or has less room
+than the space guard's minimum. Other machines are unchanged.
 
 Paths are relative to /usr.
 
 --- a/bin/omarchy-plymouth-set
 +++ b/bin/omarchy-plymouth-set
-@@ -373,7 +373,24 @@
+@@ -373,7 +373,28 @@
  if [[ $mode != "refresh-sddm" ]]; then
    sudo plymouth-set-default-theme omarchy
  
@@ -23,16 +24,20 @@ Paths are relative to /usr.
 +  # K114s local change: a bare limine-mkinitcpio rebuilds the image of every installed kernel,
 +  # including the held stock linux-aurora, whose 79 MB image fills the EFI partition, adds a third
 +  # boot menu entry and stops every later update (docs/esp-space.md). On the K114s only the
-+  # linux-k114s* kernels' images are rebuilt, and only when the partition has room for one.
-+  if grep -qx 'apple,k114s' < <(tr '\0' '\n' 2>/dev/null <"${K114S_DT_COMPATIBLE:-/proc/device-tree/compatible}") &&
-+    omarchy-cmd-present limine-mkinitcpio; then
++  # linux-k114s* kernels' images are rebuilt, through Limine only, and only when the mounted EFI
++  # partition has room for one.
++  if grep -qx 'apple,k114s' < <(tr '\0' '\n' 2>/dev/null <"${K114S_DT_COMPATIBLE:-/proc/device-tree/compatible}"); then
 +    k114s_kernels=($({ pacman -Qqo /usr/lib/modules/*/modules.builtin 2>/dev/null || true; } | sort -u | sed -n -E '/^linux-k114s(-|$)/p'))
-+    k114s_free=$(df -B1 --output=avail /boot/efi 2>/dev/null | tail -n 1 | tr -d ' ')
-+    if (( ${#k114s_kernels[@]} == 0 )); then
++    k114s_free=
++    mountpoint -q /boot/efi && k114s_free=$(df -B1 --output=avail /boot/efi 2>/dev/null | tail -n 1 | tr -d ' ')
++    if ! omarchy-cmd-present limine-mkinitcpio; then
++      echo "limine-mkinitcpio is missing; the boot images were not rebuilt (mkinitcpio -P is not used on this Mac)." >&2
++      exit 1
++    elif (( ${#k114s_kernels[@]} == 0 )); then
 +      echo "No linux-k114s kernel is installed; the boot images were not rebuilt." >&2
 +      exit 1
 +    elif [[ ! $k114s_free =~ ^[0-9]+$ ]] || (( k114s_free < ${K114S_ESP_MIN_FREE:-88080384} )); then
-+      echo "The EFI partition has too little room to rebuild a boot image; the boot screen changes at the next rebuild:" >&2
++      echo "The EFI partition is not mounted or has too little room to rebuild a boot image; the boot screen changes at the next rebuild:" >&2
 +      echo "  sudo limine-mkinitcpio ${k114s_kernels[*]}" >&2
 +      exit 1
 +    fi

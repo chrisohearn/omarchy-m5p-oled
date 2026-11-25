@@ -28,7 +28,11 @@ echo "sudo $*" >> "$LOG"
 S
 cat > "$t/stub/omarchy-cmd-present" <<'S'
 #!/bin/bash
-exit 0
+[ "$1" != limine-mkinitcpio ] || [ "${LIMINE:-yes}" = yes ]
+S
+cat > "$t/stub/mountpoint" <<'S'
+#!/bin/bash
+[ "${MOUNTED:-yes}" = yes ]
 S
 cat > "$t/stub/pacman" <<'S'
 #!/bin/bash
@@ -43,7 +47,7 @@ S
 chmod +x "$t/stub/"*
 printf 'apple,k114s\0apple,t6050\0' > "$t/k114s"; printf 'apple,j714s\0apple,t6050\0' > "$t/other"
 run() { # dt packages free -> status; the log is $t/log
-  : > "$t/log"; env -i ${PACMAN_RC:+PACMAN_RC=$PACMAN_RC} PATH="$t/stub:/usr/bin:/bin" LOG="$t/log" K114S_DT_COMPATIBLE=$1 PKGS="$2" FREE=$3 bash "$t/block" </dev/null 2>"$t/err"; }
+  : > "$t/log"; env -i ${PACMAN_RC:+PACMAN_RC=$PACMAN_RC} ${MOUNTED:+MOUNTED=$MOUNTED} ${LIMINE:+LIMINE=$LIMINE} PATH="$t/stub:/usr/bin:/bin" LOG="$t/log" K114S_DT_COMPATIBLE=$1 PKGS="$2" FREE=$3 bash "$t/block" </dev/null 2>"$t/err"; }
 all='linux-aurora linux-k114s linux-k114s-r3b linux-k114s-r3b'
 
 run "$t/k114s" "$all" 123527168; rc=$?
@@ -59,6 +63,12 @@ run "$t/k114s" "linux-aurora" 123527168; rc=$?
 ok "K114s, no K114s kernel: exit 1 with its message, nothing rebuilt" "$rc:$(grep -c limine-mkinitcpio "$t/log"):$(grep -c "No linux-k114s kernel is installed" "$t/err")" "1:0:1"
 PACMAN_RC=1; export PACMAN_RC; run "$t/k114s" "$all" 123527168; rc=$?; unset PACMAN_RC
 ok "K114s, a module folder pacman does not own: still rebuilds the K114s kernels" "$rc:$(grep limine-mkinitcpio "$t/log")" "0:sudo limine-mkinitcpio linux-k114s linux-k114s-r3b"
+MOUNTED=no; run "$t/k114s" "$all" 123527168; rc=$?; unset MOUNTED
+ok "K114s, EFI partition not mounted: exit 1, nothing rebuilt" "$rc:$(grep -c limine-mkinitcpio "$t/log"):$(grep -c 'not mounted' "$t/err")" "1:0:1"
+LIMINE=no; run "$t/k114s" "$all" 123527168; rc=$?; unset LIMINE
+ok "K114s, no limine-mkinitcpio: exit 1, no mkinitcpio -P" "$rc:$(grep -c mkinitcpio "$t/log"):$(grep -c 'limine-mkinitcpio is missing' "$t/err")" "1:0:1"
+LIMINE=no; run "$t/other" "$all" 44000000; rc=$?; unset LIMINE
+ok "other Mac, no limine-mkinitcpio: unchanged mkinitcpio -P" "$rc:$(grep mkinitcpio "$t/log")" "0:sudo mkinitcpio -P"
 run "$t/other" "$all" 44000000; rc=$?
 ok "other Mac: unchanged bare rebuild" "$rc:$(grep limine-mkinitcpio "$t/log")" "0:sudo limine-mkinitcpio"
 
