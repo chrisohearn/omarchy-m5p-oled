@@ -75,19 +75,26 @@ changes, change this file through a PR.
    hardware result from a boot of their exact head before they leave draft. They are the `ledger/outgoing.json` rows
    with these ids, while their state is `submitted`: `linux-k114s-nvram-2026-11-25` (#3103),
    `linux-k114-macaudio-jack-2026-11-25` (#3104), `linux-k114s-brightness-floor-2026-11-25` (#3105),
-   `linux-2115-sep-dt-rework-2026-11-25` (#2115) and `aura-k114s-camera-row-2026-11-25` (aura#515). Each night, take the
-   oldest kernel PR that has no head result yet and whose head is not already covered:
-   - build the head as upstream would (a kernel from the PR branch with this Mac's config), keeping the K114s patches the
-     head needs to boot and naming each one in the result, and package it into the **Backup** slot through a stage kit
-     whose rollback set holds the current Backup package, image and `limine.conf`;
-   - boot it once by a Limine one-shot, under the same gates as step 7. **Never promote a PR-head build**: Main stays as
-     it was, and the next boot returns to it;
-   - **put the known-good Backup back** as soon as the result is recorded: reinstall the saved Backup package, restore
-     Main's image and block as the stage kits do, check P9 holds with the original Backup pin, and boot nothing
-     else until that check passes. A PR-head build never stays installed after its night;
-   - **aura#515 and any other Stage 2 head are never run unattended**: the trial watchdog does not arm on this Mac
-     (`docs/r3-integration.md`), so a Stage 2 that hangs needs someone at the Mac to force a power-off. List them in
-     the morning report as waiting for an attended window instead;
+   `linux-2115-sep-dt-rework-2026-11-25` (#2115) and `aura-k114s-camera-row-2026-11-25` (aura#515).
+
+   **The nightly run prepares; the boot is attended.** A PR head that hangs before userspace is not recovered by the
+   Limine one-shot or `aura-try` alone: someone has to hold the power button (the loader's trial watchdog does not arm
+   on this Mac, `docs/r3-integration.md`). So each night take the oldest PR that has no head result yet, prepare it, and
+   ask in the morning report for an attended window; boot it only while the owner is at the Mac and says go:
+   - **Kernel PRs** (#3104, #3105): build the head as upstream would (a kernel from the PR branch with this Mac's config),
+     keeping the K114s patches the head needs to boot and naming each one in the result, and package it into the
+     **Backup** slot through a stage kit whose rollback set holds the current Backup package, image and `limine.conf`.
+     Boot it once by a Limine one-shot under the same gates as step 7.
+   - **Device-tree PRs** (#3103, #2115): the tree comes from the Stage 2, not the kernel package, so build a Stage 2 test
+     file whose tree is the K114s board file at the PR head (with the includes the head needs) and boot it once by
+     `aura-try`, with the running kernel. #2115 waits until #2631 merges.
+   - **Loader PRs** (aura#515): a Stage 2 test file built from the PR head, booted once by `aura-try`.
+   - **Never promote a PR-head build**: Main and the configured Stage 2 stay as they were, and the next boot returns to
+     them.
+   - **Put the known-good Backup back from Main**: after the result is recorded, first return to an ordinary boot of
+     Main (the one-shot is spent; reboot through the ordinary-reboot gate if needed), then reinstall the saved Backup
+     package from Main, restore Main's image and block as the stage kits do, and check that P9 holds with the original
+     Backup pin before any other boot. A PR-head build never stays installed past its window.
    - run the checks that PR's text says are open (its "Not yet" list) and the kit's usual gates;
    - post the result on the PR as a hardware row for that head SHA, following the destination's rules (no AI
      attribution in aurora-silicon repos), after an independent review of the draft. Mark the PR ready only when the
