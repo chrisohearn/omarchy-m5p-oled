@@ -431,6 +431,46 @@
       "follow_up": "watch for review",
       "acknowledged": null,
       "maintainer_feedback": []
+    },
+    {
+      "id": "linux-3107-vrr-retest-2026-11-25",
+      "destination": "aurora-silicon/linux #3107",
+      "url": "https://github.com/aurora-silicon/linux/issues/3107#issuecomment-7150501769",
+      "posted": "2026-11-25T02:15:31Z",
+      "account": "chrisohearn",
+      "kind": "comment (retest)",
+      "result": "VRR on r3f (includes #3052) still crashes the DCP in main_init() about 0.6 s after the request",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "a live adaptive-sync change without the mode reselect",
+      "state": "submitted",
+      "read_back": "comment read back, author chrisohearn (2026-11-25)",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "own-262-plymouth-repeat-2026-11-25",
+      "destination": "chrisohearn/omarchy-m5p-oled #262",
+      "url": "https://github.com/chrisohearn/omarchy-m5p-oled/issues/262#issuecomment-7150505227",
+      "posted": "2026-11-25T02:15:42Z",
+      "account": "chrisohearn",
+      "kind": "comment (repeat)",
+      "result": "plymouthd SIGSEGV hiding the splash on 2 of 3 r3f boots, same stack",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
+      },
+      "not_claimed": "the cause",
+      "state": "submitted",
+      "read_back": "comment read back, author chrisohearn (2026-11-25)",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
     }
   ]
 }
