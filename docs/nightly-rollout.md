@@ -44,7 +44,7 @@ changes, change this file through a PR.
    - omacom/omarchy-mac-pkgs, and the omacom/omarchy-pkgs `pkgbuilds/` for the packages we install.
 
    Pick out the changes that touch the T6050, K114/K116, M5, G17 or AGX3 hardware, or code our series uses. If nothing
-   relevant changed, report that and stop.
+   relevant changed, skip steps 3 to 7 for the update and say so in the report, but still run step 8.
 3. **Kernel** (when relevant). Rebase the current series onto the new `main`:
    - drop what main now carries and re-cut what conflicts, as `docs/r3e-kernel.md` sections 1 and 2 describe;
    - keep the owner's choices: the camera runs without a described light (`0075`), the small indicator sits under the
@@ -71,11 +71,42 @@ changes, change this file through a PR.
    1. packages (Mesa): a guarded ordinary reboot with automatic rollback;
    2. kernel: stage into Backup from an ordinary boot, then a one-shot trial, then promote;
    3. Stage 2: an `aura-try` trial, then promote.
-8. **Docs.** Update the status lines of the docs that changed (kernel, Stage 2, camera, matrix rows) through a docs PR.
-9. **Report** in the morning to the owner's K114s thread and to Jarvis's inbox. List what was promoted, what was tried
+8. **One upstream PR head per night** (owner's decision, 2026-11-25: "Fold into nightly"). Our draft upstream PRs need a
+   hardware result from a boot of their exact head before they leave draft. They are the `ledger/outgoing.json` rows
+   with these ids, while their state is `submitted`: `linux-k114s-nvram-2026-11-25` (#3103),
+   `linux-k114-macaudio-jack-2026-11-25` (#3104), `linux-k114s-brightness-floor-2026-11-25` (#3105),
+   `linux-2115-sep-dt-rework-2026-11-25` (#2115) and `aura-k114s-camera-row-2026-11-25` (aura#515).
+
+   **The nightly run prepares; the boot is attended.** A PR head that hangs before userspace is not recovered by the
+   Limine one-shot or `aura-try` alone: someone has to hold the power button (the loader's trial watchdog does not arm
+   on this Mac, `docs/r3-integration.md`). So each night take the oldest PR that has no head result yet, prepare it, and
+   ask in the morning report for an attended window; boot it only while the owner is at the Mac and says go:
+   - **Kernel PRs** (#3104, #3105): build the head as upstream would (a kernel from the PR branch with this Mac's config),
+     keeping the K114s patches the head needs to boot and naming each one in the result, and package it into the
+     **Backup** slot through a stage kit whose rollback set holds the current Backup package, image and `limine.conf`.
+     Boot it once by a Limine one-shot under the same gates as step 7.
+   - **Device-tree PRs** (#3103, #2115): the tree comes from the Stage 2, not the kernel package, so build a Stage 2 test
+     file whose tree is the K114s board file at the PR head (with the includes the head needs) and boot it once by
+     `aura-try`, with the running kernel. #2115 waits until #2631 merges.
+   - **Loader PRs** (aura#515): a Stage 2 test file built from the PR head, booted once by `aura-try`.
+   - **Never promote a PR-head build**: Main and the configured Stage 2 stay as they were, and the next boot returns to
+     them.
+   - **Put the known-good Backup back from Main**: after the result is recorded, first return to an ordinary boot of
+     Main (the one-shot is spent; reboot through the ordinary-reboot gate if needed), then reinstall the saved Backup
+     package from Main, restore Main's image and block as the stage kits do, and check that P9 holds with the original
+     Backup pin before any other boot. A PR-head build never stays installed past its window.
+   - run the checks that PR's text says are open (its "Not yet" list) and the kit's usual gates;
+   - post the result on the PR as a hardware row for that head SHA, following the destination's rules (no AI
+     attribution in aurora-silicon repos), after an independent review of the draft. Mark the PR ready only when the
+     row covers everything its "Not yet" list asked for;
+   - record the post in `ledger/outgoing.json`. Linux#2115 waits until #2631 merges.
+
+   The speakers stay off for #3104: its head has no speaker path, and the speaker gate runs before and after as usual.
+9. **Docs.** Update the status lines of the docs that changed (kernel, Stage 2, camera, matrix rows) through a docs PR.
+10. **Report** in the morning to the owner's K114s thread and to Jarvis's inbox. List what was promoted, what was tried
    and failed (with the failing gates), what was skipped and why, what is new upstream, and anything that needs the
    owner.
-10. **Verify and close.** A fresh GPT-6.2 Sol (xhigh) verifier checks the night's done-checks against the live Mac. Record
+11. **Verify and close.** A fresh GPT-6.2 Sol (xhigh) verifier checks the night's done-checks against the live Mac. Record
     the result on the run's ledger row (`k114s/nightly-<date>`).
 
 ## Way back
