@@ -1,6 +1,8 @@
 # Package batch 2026-11-24: Mesa at aurora-wip head, omarchy-mac at omarchy-mac-pkgs head
 
-Status 2026-11-24: **installed and promoted** after one guarded test boot (18:19Z) passed. This is the package part of the
+Status 2026-11-24: **installed and promoted** after one guarded test boot (18:19Z) passed. Mesa has since moved on twice
+by the same kit: `886a773`, then `89472d5` (aurora-wip head, `meson test` 252/0), whose guarded test boot (23:48Z)
+passed and is installed. This is the package part of the
 owner's request to "get this device on the latest known code and fixes" (intake 2026-11-24; owner's answer for this
 batch: "All, same rules", with test boots under the standing "Reboot when ready, tell me"). The speakers stay off.
 Evidence labels: **agent-run** (on this Mac), **source-read**.
