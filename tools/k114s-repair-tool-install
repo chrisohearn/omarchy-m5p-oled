@@ -10,7 +10,7 @@ Two files on the ESP, both written whole (a temporary file, a sync, a rename, a 
         script is the step that does, after every change to the tool. The copy it replaces is kept as k114s_repair.py.prev.
   k114s-repair/known-loaders.json          the Aura loader and the U-Boot tail of the configured Stage 2 (m1n1/boot-ctxr.bin),
         added to the entries already in the file, so the tool on the Mac can read a Stage 2 that its built-in lists do not
-        carry yet (docs/bundle-r2c.md, "Which Stage 2 the tool knows"). Entries are only ever added.
+        carry yet (docs/bundle-r2c.md, "Which Stage 2 the tool knows"). Valid entries are kept. Malformed entries are dropped.
 
 The loader is the file the configured Stage 2 was built from (default: usr/lib/asahi-boot/m1n1-ctxr.bin, else m1n1.bin, the
 two the Stage 2 hook reads). The Stage 2 must start with it, carry one K114s device tree and end in a gzip U-Boot; otherwise
@@ -80,12 +80,12 @@ def entries(esp, loader_path):
     path = os.path.join(esp, repair.KNOWN_JSON)
     try:
         known = json.loads(read(path)) if os.path.exists(path) else {}
-        loaders, trailers = list(known.get("loaders", [])), list(known.get("trailers", []))
+        loaders, trailers = repair.known_entries(known)
     except (ValueError, AttributeError, TypeError):
         die("%s is damaged: look at it, then remove it and run this again" % path)
-    have_l = {e.get("sha256") for e in loaders} | {d for _, _, d in repair.KNOWN_LOADERS}
-    have_t = {e.get("sha256") for e in trailers} | {d for _, d in repair.KNOWN_TRAILERS}
-    if sha(loader) not in have_l:
+    have_l = {(e["bytes"], e["sha256"]) for e in loaders} | {(n, d) for _, n, d in repair.KNOWN_LOADERS}
+    have_t = {e["sha256"] for e in trailers} | {d for _, d in repair.KNOWN_TRAILERS}
+    if (len(loader), sha(loader)) not in have_l:
         loaders.append({"name": "aura-" + sha(loader)[:8], "bytes": len(loader), "sha256": sha(loader)})
     if sha(trailer) not in have_t:
         trailers.append({"name": "uboot-" + sha(trailer)[:8], "sha256": sha(trailer)})
