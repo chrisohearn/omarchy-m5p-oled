@@ -48,10 +48,11 @@ case $rel in
   *-k114s-r3e-ARCH) want=linux-k114s-r3b ;;   # r3e takes the r3b slot, the Backup beside r3d (docs/r3e-kernel.md)
   *-k114s-r3e1-ARCH) want=linux-k114s ;;   # r3e1 takes the linux-k114s slot, the Backup beside r3e (docs/r3e-kernel.md)
   *-k114s-r3f-ARCH) want=linux-k114s-r3b ;;   # r3f takes the linux-k114s-r3b slot, the Backup beside r3e1 (docs/r3f-kernel.md)
+  *-k114s-pr3104-ARCH) want=linux-k114s ;; # temporary #3104 trial in the r3e1 Backup slot
   *) want= ;;
 esac
 name=$(info pkgname); base=$(info pkgbase)
-[ -n "$want" ] && [ "$name" = "$want" ] && ok "package name $name fits release $rel" || no "package name '$name' for release $rel (want '${want:-a k114s r3a, r3b, r3b-t1, r3c, r3d, r3e, r3e1 or r3f release}')"
+[ -n "$want" ] && [ "$name" = "$want" ] && ok "package name $name fits release $rel" || no "package name '$name' for release $rel (want '${want:-a k114s r3a, r3b, r3b-t1, r3c, r3d, r3e, r3e1, r3f or pr3104 release}')"
 [ "$base" = "$name" ] && ok "pkgbase $base equals the package name" || no "pkgbase '$base' is not the package name '$name'"
 [ "$(cat "$m/pkgbase" 2>/dev/null)" = "$name" ] && ok "module directory pkgbase file is $name" || no "module directory pkgbase file is '$(cat "$m/pkgbase" 2>/dev/null)', not '$name'"
 [ -f "$w/usr/share/$name/config-$rel" ] && [ "$(ls "$w/usr/share")" = "$name" ] && ok "config at usr/share/$name/config-$rel" || no "config not (only) at usr/share/$name/config-$rel"
@@ -148,6 +149,14 @@ case $ver in
     if [ -n "$a" ] && strings -a "$a" | grep -q 'sensor blob'; then ok "version $ver: aop carries the 193-byte calibration message (r3c 0004)"
     else no "version $ver: aop lacks the 193-byte calibration message (r3c 0004)"; fi ;;
 esac
+if [[ $rel == *-k114s-pr3104-ARCH ]]; then
+  sound=$(find "$m" -name 'snd-soc-macaudio.ko' | head -1)
+  if [ -n "$sound" ] && modinfo -F alias "$sound" | grep -q 'Capple,k114-macaudio'; then
+    ok "#3104: macaudio module matches apple,k114-macaudio"
+  else
+    no "#3104: macaudio module has no apple,k114-macaudio alias"
+  fi
+fi
 if [ $fail != 0 ]; then echo "check-package: FAILED"
 elif [ $skipped != 0 ]; then echo "check-package: all run checks passed; $skipped skipped ($other is not installed)"
 else echo "check-package: all passed"; fi
