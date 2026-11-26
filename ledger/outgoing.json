@@ -86,7 +86,7 @@
         "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
       },
       "not_claimed": "hardware LED",
-      "state": "hardware_confirmed",
+      "state": "submitted",
       "read_back": "PR read back: state open, draft True, merged False (2026-11-25)",
       "follow_up": "head result posted (row aura-515-hwrow-2026-11-25): PASS at fa1f89224cfc; stays draft until #362 and linux #2275 land",
       "acknowledged": null,
@@ -206,7 +206,7 @@
         "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
       },
       "not_claimed": "any write",
-      "state": "hardware_confirmed",
+      "state": "submitted",
       "read_back": "PR read back: state open, draft True, merged False (2026-11-25); marked ready for review after the head row, body Tested/Not yet updated, read back: draft False (2026-11-26)",
       "follow_up": "hardware row at the head: linux-3103-hwrow-2026-11-26; watch for review",
       "acknowledged": null,
@@ -246,7 +246,7 @@
         "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
       },
       "not_claimed": "a headphone or headset plugged in (plug detection, playback, headset mic); the DT",
-      "state": "hardware_confirmed",
+      "state": "submitted",
       "read_back": "PR read back: state open, draft True, merged False (2026-11-25); marked ready after the head row (owner: wired jack tests not wanted), body Tested/Not yet updated, read back: draft False (2026-11-26)",
       "follow_up": "hardware row at the head: linux-3104-hwrow-2026-11-26; watch for review",
       "acknowledged": null,
@@ -506,7 +506,7 @@
         "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
       },
       "not_claimed": "a second K114s; the K114s with #362 and #2275 instead of this row",
-      "state": "hardware_confirmed",
+      "state": "submitted",
       "read_back": "comment and PR body read back, author chrisohearn (2026-11-25)",
       "follow_up": "stays draft until #362 and linux #2275 land",
       "acknowledged": null,
@@ -527,7 +527,7 @@
         "firmware": "OS firmware 27.2 (mBoot-20457.41.3), system firmware 27.3 beta (mBoot-20457.60.65.0.1)"
       },
       "not_claimed": "the startup-disk write path; panel, sound and Wi-Fi (not in this board file); a second K114s",
-      "state": "hardware_confirmed",
+      "state": "submitted",
       "read_back": "comment read back, author chrisohearn; PR draft False, head unchanged (2026-11-26)",
       "follow_up": "watch for review",
       "acknowledged": null,
@@ -548,7 +548,7 @@
         "firmware": "OS firmware 27.2 (mBoot-20457.41.3), system firmware 27.3 beta (mBoot-20457.60.65.0.1)"
       },
       "not_claimed": "a headphone or headset plugged in (owner decided not to test wired audio); a second K114s",
-      "state": "hardware_confirmed",
+      "state": "submitted",
       "read_back": "comment read back, author chrisohearn; PR draft False, head unchanged (2026-11-26)",
       "follow_up": "watch for review",
       "acknowledged": null,

@@ -154,7 +154,7 @@ package() {
     grep -q 'fw27_panel_edr_max_nits = 500;' "$_src/drivers/gpu/drm/apple/dcp.c" ||
       { echo "$_src has no 500-nit EDR cap (patches/linux/r3e.series)" >&2; return 1; }
   fi
-  if [[ $_cand == r3f ]]; then
+  if [[ $_cand == r3f || $_cand == pr3104 ]]; then
     ! grep -q 'fw27_panel_edr_max_nits = 500;' "$_src/drivers/gpu/drm/apple/dcp.c" &&
       grep -q '^static unsigned int fw27_panel_edr_max_nits;' "$_src/drivers/gpu/drm/apple/dcp.c" &&
       grep -q '^bool dcp_panel_edr(struct platform_device \*pdev)' "$_src/drivers/gpu/drm/apple/dcp.c" &&
@@ -163,7 +163,7 @@ package() {
       grep -q 'after a counted dark wake' "$_src/drivers/mfd/macsmc.c" ||
       { echo "$_src lacks #2694's EDR code, or still has the 500-nit cap, or lacks #2559 (docs/r3f-kernel.md)" >&2; return 1; }
   fi
-  if [[ $_cand == r3e || $_cand == r3e1 || $_cand == r3f ]]; then
+  if [[ $_cand == r3e || $_cand == r3e1 || $_cand == r3f || $_cand == pr3104 ]]; then
     grep -q 'dcp_bl_set_minimum' "$_src/drivers/gpu/drm/apple/dcp_backlight.h" &&
       grep -q 'dcp_panel_color_target' "$_src/drivers/gpu/drm/apple/dcp-display-metadata.c" &&
       grep -q 'panel EDR off: cap %u nits set and the SDR maximum is unknown' "$_src/drivers/gpu/drm/apple/dcp.c" &&
@@ -172,7 +172,8 @@ package() {
       grep -q 'apple_pcie_adopted_links_ready' "$_src/drivers/pci/controller/pcie-apple.c" &&
       sed -n '/^static const struct hw_info t6050_hw = {/,/^};/p' "$_src/drivers/pci/controller/pcie-apple.c" | grep -q 'adopt_link[[:space:]]*= true' &&
       grep -q 'apple_qspi_find_part' "$_src/drivers/spi/spi-apple-qspi.c" &&
-      ! grep -q '0xc8, 0x83, 0x17' "$_src/drivers/spi/spi-apple-qspi-policy.h" &&
+      # pr3104's newer upstream base lists this Mac's flash part (GD25UF64E); there, read_only=true (checked below) keeps NVRAM closed
+      { [[ $_cand == pr3104 ]] || ! grep -q '0xc8, 0x83, 0x17' "$_src/drivers/spi/spi-apple-qspi-policy.h"; } &&
       ! grep -q 'apple,k114s' "$_src/drivers/spi/spi-apple-qspi.c" &&
       grep -q 'static bool read_only = true;' "$_src/drivers/spi/spi-apple-qspi.c" &&
       grep -q 'apple,camera-light-undescribed' "$_src/drivers/media/platform/apple/isp/isp-drv.c" &&
@@ -185,7 +186,7 @@ package() {
       { echo "$_src has the 26B8125 G17S firmware entry more than once" >&2; return 1; }
   fi
   # r3e1 adds r3e/0076: on apple,k114s the camera indicator is a solid 32x32 square under the notch (r3f keeps it)
-  if [[ $_cand == r3e1 || $_cand == r3f ]]; then
+  if [[ $_cand == r3e1 || $_cand == r3f || $_cand == pr3104 ]]; then
     grep -q 'IND_COMPACT_SIDE	32' "$_src/drivers/gpu/drm/apple/dcp-indicator.c" &&
       grep -q 'of_machine_is_compatible("apple,k114s")' "$_src/drivers/gpu/drm/apple/dcp-indicator.c" ||
       { echo "$_src lacks r3e/0076 (the small camera indicator)" >&2; return 1; }
