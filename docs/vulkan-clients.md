@@ -10,7 +10,8 @@ Parity target: Asahi M1/M2 has conformant Vulkan 1.4 (vulkan-asahi). The K114s h
 | `vulkaninfo --summary` (vulkan-tools 1.4.363.0 unpacked in a scratch directory, nothing installed) with the GPU desktop running: one device, `Apple M5 Pro (G17S B1)`, integrated GPU, apiVersion 1.4.363, driverName `Borealis`, driverInfo `Mesa 26.3.0-devel (git-043a4c5808), Borealis, derived from Honeykrisp`, conformanceVersion `0.0.0.0` (not conformance-tested) | agent-run, 2026-11-15 |
 | Full `vulkaninfo`: three queue families (graphics+compute+transfer+sparse, compute+transfer, transfer), 8 queues each; instance extensions include `VK_KHR_wayland_surface`; the Wayland surface lists 4 present modes | agent-run, 2026-11-15 |
 | Zink on the native driver, off-screen: `zink Vulkan 1.4(Apple M5 Pro (G17S B1) (AURORA_BOREALIS))` | agent-run, docs/r3-gpu-result.md |
-| No Vulkan client has drawn a frame: `vkcube` was not run (it opens a window on the owner's screen) | gap |
+| The post-boot probe rendered off-screen through Zink Vulkan 1.4 on the Apple M5 Pro (G17S B1) and read back RGBA `255 0 255 255` | agent-run, 2026-11-24, [package batch post-boot check](r3-package-batch.md#how-it-was-tested) |
+| A visible `vkcube` window on the built-in panel still needs an attended run | pending |
 | The one zink desktop attempt ended black, run with `ASAHI_M5_BRINGUP=0`, so it proves nothing about zink | owner-observed, see docs/r3-gpu-result.md |
 | Jens Axboe ran vkcube on the same stack on a K116s; linux #1173/#1650 are draft | upstream-reported |
 
@@ -72,4 +73,4 @@ sits on Borealis, so a Mesa-side fault is for betizzel/mesa-aurora, not this rep
 Owner steps 1 and 2, plus offline items still open for #26: a headless vkcube in a nested or
 headless wlroots session, a compute-only Vulkan run (the script only checks that a graphics+compute
 queue family exists), and `vulkan-tools` in the image list (owner decision). The upstream K116s comparison needs aurora-silicon's report text, which is
-not in this repo. The issue stays open until a client has drawn.
+not in this repo. The visible `vkcube` check remains open.
