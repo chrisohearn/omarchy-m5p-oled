@@ -190,8 +190,9 @@ was the only new setting.
 | E3.1: `k114s-cm-trial hdredid 20` | the trial took effect (`colorManagementPreset hdredid`). The first run went unwatched; on the second the owner saw it stay lit and look normal. Every revert was verified | owner-observed |
 | E3.2: the 10-bit PQ clip (white at 1000 nits) in a window during `k114s-cm-trial hdredid 45` | "Test looks good"; mpv `VO: [gpu-next] 1280x720 yuv420p10`; no DCP crash | owner-observed |
 
-E3.3 (the `hdr` preset) was not run, because the owner asked to keep `hdredid` on. **HDR is now the default** (the owner's
-words: "Looked good let's keep it on"):
+The owner asked to keep `hdredid` after E3.2, so **HDR became the default on 2026-11-16**.
+The local override below later switched the desktop back to SDR Display P3.
+
 - `linux/display/k114s-edr-cap` installs `/etc/modprobe.d/k114s-edr-cap.conf` (the 1200-nit cap) and removes the
   one-boot test file. It refuses while any other modprobe file sets the cap. `--check` also fails then, and on this Mac it
   requires `modprobe -c` to read exactly one cap, 1200. `--undo` is there too.
@@ -203,6 +204,21 @@ words: "Looked good let's keep it on"):
 
 Not measured: the panel's real luminance (no meter), whether the firmware tone-maps above the cap, and the power cost of
 HDR output.
+
+
+### Local SDR Display P3 override
+
+The live `~/.config/hypr/monitors.lua` has a rule after the managed block that sets `eDP-1`
+to 10-bit `dp3` and disables automatic HDR (`render:cm_auto_hdr=0`). Its comment records the
+reason: fullscreen HDR washed out the panel. The file's last modification was 2026-11-23.
+Its Git history is unavailable, so the exact activation time is unverified. Pacman's log
+records Omarchy updates that day. The display settings code saves mode, position, scale and
+rotation, and the local monitor rule sets colour.
+
+On 2026-11-26, `hyprctl monitors -j` reported `dp3` and `XRGB2101010` on `eDP-1`, and
+`hyprctl getoption render:cm_auto_hdr` returned 0. `bash linux/display/k114s-edr-cap --check`
+reported a running `appledrm` cap of 1200 nits. The boot journal confirmed active EDR
+headroom in the driver. Hyprland sends SDR Display P3 on the built-in panel.
 
 
 ## 10. 10-bit output, 2026-11-16
