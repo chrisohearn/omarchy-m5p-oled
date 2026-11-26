@@ -1,33 +1,41 @@
 # r3d Stage 2: the K114s tree on the r3d includes, and Aura b15
 
-Status 2026-11-24: **promoted.** Test A booted once (section 4) and was not promoted. Test A4 (Aura b13 + tree `a0897a5a`, the video encoder and its DARTs off) passed and was promoted at 05:47Z: Stage 2 `bd329c9f`. Test B4 (the self-built Aura `v1.0.0b15` loader `788277b6` + the same tree) passed and was promoted at 05:56Z: the configured Stage 2 is `6b984811`, built through the loader override `/usr/lib/asahi-boot/m1n1-ctxr.bin`. A local pacman hook flags each new aura package while the override stands (owner's choice: "Promote my b15, watch for packages"). An ordinary boot at 05:58Z confirmed loader `1.0.0b15`. This is the loader-and-tree batch of the owner's request
-to "get this device on the latest known code and fixes" (docs/r3d-kernel.md). The owner chose this batch next and
-standing one-boot tests ("Reboot when ready, tell me"). Evidence labels: **agent-run**, **inferred**.
+**In use on 2026-11-26.** The live ESP has Stage 2 `3e46007a`, using the self-built
+Aura `v1.0.0b15` loader with the K114s camera row (`06b38fd0`) and the camera tree
+`b7efcc0d`. The camera tree builds on `a0897a5a` with the video encoder and its
+DARTs still disabled ([camera promotion](r3-camera.md)). The loader override is
+`/usr/lib/asahi-boot/m1n1-ctxr.bin`. The local pacman hook flags new Aura packages
+while the override stands.
 
-## 1. The tree
+**2026-11-24 trial record.** Test A booted once and was not promoted. Test A4
+(Aura b13 and tree `a0897a5a`) passed and was promoted at 05:47Z as Stage 2
+`bd329c9f`. Test B4 (self-built Aura b15 loader `788277b6` and the same tree)
+passed and was promoted at 05:56Z as `6b984811`. An ordinary boot at 05:58Z
+confirmed loader `1.0.0b15`. These were the loader and tree trials for the
+[r3d kernel](r3d-kernel.md).
 
-`dts/t6050-k114s-r3d.dts` is the configured r3c tree (`t6050-k114s-r3c.dts`), unchanged, plus the two board values
-that r3d's shared `t6050-k114-k116.dtsi` now takes from the board file:
+## 1. Test A tree
+
+The Test A revision of `dts/t6050-k114s-r3d.dts` started from the configured r3c tree
+(`t6050-k114s-r3c.dts`). It added two board values required by r3d’s shared `t6050-k114-k116.dtsi`:
 - `T6050_K_N1_FIRMWARE`: `"apple/centauri/k114s-ftab.bin"`;
 - `T6050_K_BOARD_ID`: `0x14`.
 
-The values are those of r3d's own `t6050-k114s.dts`. Without them the build stops. The wrapper also carries the
-enables that r3d's board file makes at board level:
+The values came from r3d’s own `t6050-k114s.dts`. The wrapper also enabled:
 - `T6050_ANE`, defined before `t6050-peripherals.dtsi` is included: the Neural Engine (#2293);
 - `t6050-media.dtsi`: the video encoder, ProRes and both JPEG engines (#2278);
 - `t6050-isp.dtsi`: the shared camera tree (#2275).
 
-In the built tree, `neural-processor@508000000`, `video-encoder@2283100000`, `prores@48d000000` and the two `jpeg` nodes
-are `okay`. The camera's `isp@580000000` and its DARTs stay `disabled` until a loader hands the camera over; the K114s
-also needs its activity light described first (#231). USB-C (`t6050-k114-k116-usb.dtsi`) and the GPU stay this
-repository's own fragments, and the USB-C lint passes.
+In the Test A tree, `neural-processor@508000000`, `video-encoder@2283100000`, `prores@48d000000` and the two `jpeg` nodes
+were `okay`. The camera's `isp@580000000` and its DARTs stayed `disabled` pending loader hand-off and the K114s activity-light description (#231).
+USB-C (`t6050-k114-k116-usb.dtsi`) and the GPU used this repository’s fragments. The USB-C lint passed.
 
-Build with `build/build-r3a-dtb.sh <r3d kernel tree> t6050-k114s-r3d <out>`, with the private PMP tunables in
-`K114S_PMP_TUNABLES` (sha256 `df27244e4900…`). The result is `26c3407f8793e3e11adcc0642f5bb2d35c3882dd50772d557b7c817631929d70`,
+The build used `build/build-r3a-dtb.sh <r3d kernel tree> t6050-k114s-r3d <out>` with PMP tunables in
+`K114S_PMP_TUNABLES` (sha256 `df27244e4900…`). The result was `26c3407f8793e3e11adcc0642f5bb2d35c3882dd50772d557b7c817631929d70`,
 153,819 bytes (agent-run). Without the three engine and camera enables it was `a3e27280…`, which the first review caught (P1).
 
-The node diff (`tests/dtb-node-diff.py`) is against the configured blob `8258c8a8…` (agent-run). 12 nodes are added and
-none removed. The changes are real; this is not just phandle renumbering:
+The node diff (`tests/dtb-node-diff.py`) against the pre-trial blob `8258c8a8…` found 12 added nodes
+and zero removed (agent-run).
 - **Added:**
   - `memory-controller@2220000000` (`apple,t6050-mcc`, with `apple,boot-dma-devices = <&dcp>`). The r3d kernel has
     `CONFIG_APPLE_MCC=y`, so its driver probes on the K114s for the first time. It waits for the display coprocessor to
@@ -47,9 +55,8 @@ none removed. The changes are real; this is not just phandle renumbering:
   `remap-streams`. `/chosen/framebuffer@0` gets `display = <&dcp>`, and the DARTs get `reg-names`.
 - **Unchanged:** PCIe port 0 and the N1, the exposed pins, the USB-C ports, the PMP, the AOP and the sound node.
 
-So test A tries out the MCC, five engines and their power domains, not just the MCC. Its check gates on the MCC
-enabling cleanly, on no new error-priority kernel line, and on each engine's binding (agent-run evidence goes in the
-boot record).
+Test A exercised the MCC, five engines and their power domains. The check covered a clean MCC enable,
+new error-priority kernel messages and each engine’s binding.
 
 | Check | Result | Label |
 | --- | --- | --- |
@@ -57,20 +64,19 @@ boot record).
 | `linux/audio/tree-check --root` on an unflattened replica | "the Stage A tree: jack link only, no amplifier, no speaker channel" | agent-run |
 | `t6050-aop.dtsi` (it would enable the AOP's speaker DMA) | not in the include list | agent-run |
 
-The configured `8258c8a8` itself does not rebuild byte for byte from its recorded inputs: its source state was not
-saved. So the diff above is against the blob.
+The pre-trial tree `8258c8a8` differed from the rebuild using its recorded inputs. The diff used the original blob.
 
-## 2. The loader
+## 2. Pre-trial loader and b15 build
 
-The configured Stage 2 `d1254de6` is Aura `1.0.0b13` (omacom/m1n1 `703a0a92`, the omacom package) plus `8258c8a8` plus
-the U-Boot trailer. Rebuilt here, it is byte-identical, which confirms the `build/make-stage2.sh` layout.
+The pre-trial Stage 2 `d1254de6` was Aura `1.0.0b13` (omacom/m1n1 `703a0a92`, the omacom package) plus `8258c8a8` plus
+the U-Boot trailer. The byte-identical rebuild confirmed the `build/make-stage2.sh` layout.
 
 Aura `v1.0.0b15` (aurora-silicon/aura, tagged 2026-11-22) was built from the tag with the package's flags:
-`make RELEASE=1 CHAINLOADING=1 ESP_STAGE2=1 USE_CLANG=1`, rust 1.99.0, the Omarchy logos. The result is `788277b6…`,
-3,932,160 bytes (agent-run). It is a faithful source build, not omacom's bytes: the same recipe for b13 differs from
-the package in about 202 KB, most likely because of the compiler.
+`make RELEASE=1 CHAINLOADING=1 ESP_STAGE2=1 USE_CLANG=1`, rust 1.99.0, the Omarchy logos. The result was `788277b6…`,
+3,932,160 bytes (agent-run). Building b13 with the same recipe produced a file about 202 KB different from the omacom package,
+most likely because of the compiler.
 
-What b15 changes on this Mac:
+The b15 build included these changes:
 - **#399:** usb-drd defaults for every ATC port (inferred).
 - PCIe root-port and AOP firmware handling, firmware-27 DCP clocks on the legacy path, and fail-closed T6050 bandwidth
   blocks (inferred).
@@ -78,39 +84,38 @@ What b15 changes on this Mac:
 - Aura's b15 qualification lists no T6050 Mac. Main, which has the live-DCP hand-off that stops the boot hard, was not
   built.
 
-## 3. The test boots
+## 3. Original A and B test plan
 
-There are two one-boot tests, in this order, each with its own record. If the second fails, the cause is the loader.
+The original plan paired two one-boot tests against the same tree to isolate the loader change. Only Test A ran
+with this tree. A4 and B4 used the revised tree (section 4).
 
 | Test | Stage 2 | sha256 |
 | --- | --- | --- |
 | A | b13 (installed) + tree `26c3407f` | `d9aab35c6d7a25755b8d39ceb5f80ce3fbae02ecbb595b06b2024fa75b36459d` |
 | B | b15 + tree `26c3407f` | `1ac3c9315cad838889dc0886b986a6f002878b759b0924c3c4fada657ab8cfb7` |
 
-- **How it boots:** each test goes through `aura-try`, which arms the trial file once. The configured Stage 2 stays the
-  default, so a hang is followed by the configured file at the next power-on. For test A that is `d1254de6`. For test
-  B it is whatever is configured when B is armed: `d9aab35c` if test A was promoted, else `d1254de6`. The test B kit
-  pins that file, not `d1254de6`. The trial watchdog does not arm on this Mac, so a hang needs a long press on the
-  power button.
-- **What must pass:** the r3d checks: the speaker gate and both cards, P9, kernel health, the 120 Hz 10-bit panel, the
+- **Boot method.** The plan called for arming each trial file once with `aura-try`. After a hang, the next power-on
+  would use the configured Stage 2. Test A fell back to `d1254de6`. The Test B kit would pin the fallback at arming,
+  either `d9aab35c` if Test A was promoted or `d1254de6`. The trial watchdog did not arm on this Mac, so recovery
+  from a hang required holding the power button.
+- **Planned checks:** the r3d checks: the speaker gate and both cards, P9, kernel health, the 120 Hz 10-bit panel, the
   GPU, the light sensor, the NVRAM read path, the SEP, the microphone, network, Bluetooth, the battery and bit-exact
-  decode. Test A also gates on:
+  decode. Test A also checked:
   - the MCC: its node in the booted tree, its line "system level cache allocation enabled on N planes", and none of
     its failure or warning lines;
   - no error-priority kernel line that the previous boot did not have, which catches an engine that fails to probe;
   - the Apple MTP keyboard and multi-touch.
 
-  The binding of the Neural Engine, the encoder, ProRes and both JPEG engines is recorded for each device. The ISP is
-  expected to stay unbound, because its node is disabled.
-- **Promotion:** a test that passes is promoted: both pinned trees and, for B, the loader become the tested ones.
-  Before anything changes, the promote script proves that `update-boot-ctxr`'s own recipe (loader + tree + `boot.bin`'s
-  U-Boot trailer) gives the tested file. It then requires the written Stage 2 to be that file byte for byte. If
-  anything fails or is interrupted, it restores the trees, the Stage 2 and P9.
-- **Test B waits for the macOS repair tool.** `macos/tools/k114s_repair.py` recognises a Stage 2 only by the loader
-  prefixes it knows: the r2c bundle's installed loader (3,997,696 bytes) and the pin loader (4,063,232 bytes). The
-  Stage 2 configured since 2026-11-23 (`d1254de6`, Aura b13 at 3,932,160 bytes, with the aurora9 U-Boot trailer) is
-  already unknown to it. Test A keeps that loader, so it changes nothing here. Test B would configure another unknown
-  prefix, so it is not promoted until the repair tool knows the configured loader and trailer (#234).
+  The check recorded driver bindings for the Neural Engine, encoder, ProRes and both JPEG engines. The ISP
+  was expected to stay unbound because its node was disabled.
+- **Promotion plan:** promote both pinned trees from the passing test and the loader from Test B.
+  The promote script was to verify that `update-boot-ctxr`'s own recipe (loader + tree + `boot.bin`'s
+  U-Boot trailer) gives the tested file. It would then require the written Stage 2 to be that file byte for byte. On failure or
+  interruption, the script would restore the trees, Stage 2 and P9.
+- **Repair-tool prerequisite for Test B.** At the time, the macOS repair tool recognised the r2c bundle’s installed
+  loader (3,997,696 bytes) and the pin loader (4,063,232 bytes). Test A kept the pre-trial Stage 2’s Aura b13
+  prefix (3,932,160 bytes), which the tool did not recognise. Test B would add another unknown prefix, so the
+  plan required adding both the new loader and the U-Boot trailer to the repair tool before promotion (#234).
 
 ## 4. Test A result, and the encoder (2026-11-24)
 
@@ -136,7 +141,7 @@ them off, which the review of PR #237 caught (P1). `FAB0_SOC` stays on for the J
 | Test A4: b13 loader (installed) + the tree | `a0897a5a0b31de4c5300d74367a3747354febc9b4aca26edd2b0f98d3ff6fc30` (153,831 bytes) | `bd329c9fa8efffbc677b30c3202b439d85d5446caef5a01e43b989cfa4497aa5` |
 | Test B4: Aura b15 + the same tree | same | `6b9848118206371b050f2b606181f1776cf904432a01ca8a04c58c9350ec68b3` |
 
-These replace the A and B rows of section 3. The four lints pass, and `tree-check` gives jack only, no amplifier and
+These were the retry builds after Test A. The four lints pass, and `tree-check` gives jack only, no amplifier and
 no speaker channel (agent-run).
 
 What A4 must pass is section 3's list, without the encoder. The engines that must bind are the Neural Engine,

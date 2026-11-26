@@ -64,8 +64,9 @@ done, because it is not simpler or more robust here (design review, source-read,
 - The failure it closes is already covered twice: `AllowSuspend=no` and the lid `lock` stay in `/etc` on a trial boot, and `close`
   now fails loudly if the mask or the reload does not take.
 
-What stays unproven is that the `daemon-reload` inside a unit ordered `Before=sysinit.target` behaves at boot, hence the watched
-first reboot below. If that boot shows the reload failing, the generator is the next step.
+The 2026-11-24 05:55Z trial journal shows `close` reporting a runtime mask after `daemon-reload`, followed by systemd
+marking the gate unit finished. The 05:58Z ordinary boot logged that the gate opened. Both entries were read back
+on 2026-11-26.
 
 ## Where the masks are asserted or set
 
@@ -73,15 +74,15 @@ first reboot below. If that boot shows the reload failing, the generator is the 
 | --- | --- | --- |
 | `linux/r3a-trial/k114s-boot-once check` (and so `arm`) | four targets masked | three masked in `/etc` (exactly `masked`); `suspend.target` masked in `/etc`, or `k114s-lid-sleep check` passes: gate unit enabled, tool and the two 40 drop-ins in `/usr/local/lib/omarchy-k114s`, both 30 locks in `/etc`, and a trial boot is closed. `masked-runtime` alone never passes: a `/run` mask is gone after the reboot that starts the trial |
 | `tests/hardware/k114s-r3a-check.sh` | four masked | three masked in `/etc`; suspend masked in `/etc`, or `sudo -n /usr/local/lib/omarchy-k114s/k114s-lid-sleep check` passes (it also sees a one-shot kernel trial); a failing check, or one that cannot run, is `BAD` |
-| P9 (`~/.local/state/k114s-recovery/owner-session-touchid/p9.sh`, outside the repo) | four masked | patch below (the root applies it) |
+| P9 (`~/.local/state/k114s-recovery/owner-session-touchid/p9.sh`, outside the repo) | four masked | gate-aware check verified in the 2026-11-24 close-out |
 | runbook blocks in `docs/r3a-promotion.md` (2), `docs/r3-display-trials.md` (2), `docs/r3-display-d5-d9.md` (2) | `systemctl is-enabled` of four, `= masked` | three must read `masked`; `suspend.target` must read `masked`, or `k114s-lid-sleep check` must pass |
 | `docs/r3-integration.md` step C and its check at line 433, `docs/r3-integration.md` line 535 | masks as the trial's lock | unchanged: they describe a machine without the gate, still true before `install`. Step C's two 30 files are what `install` also installs |
 | `tests/linux/test-sleep-gates.sh`, `test-boot-once.sh`, new `test-lid-sleep.sh` | | see Tests |
 | Not changed: `docs/r3-gpu-result.md` (`systemctl mask ...` for the GPU trial), `docs/r3a-promotion.md` prose, `docs/r3c-kernel.md` "Still open" | | history; the lid-sleep item in `docs/r3c-kernel.md` is now this document |
 
-### P9 patch (for the root; P9 is not in the repo)
+### P9 patch applied on 2026-11-24
 
-In `p9.sh`, replace the line
+The installed `p9.sh` replaced the original line
 
     [ "$(systemctl is-enabled suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target | sort -u)" = masked ] || stop "a sleep target is not masked"
 
@@ -89,8 +90,8 @@ with
 
     [ "$(systemctl is-enabled hibernate.target hybrid-sleep.target suspend-then-hibernate.target | sort -u)" = masked ] && case $(systemctl is-enabled suspend.target) in masked) true ;; *) sudo $L/k114s-lid-sleep check >/dev/null ;; esac || stop "a sleep target is not masked, or suspend.target is not masked and the lid-sleep gate does not hold it (sudo $L/k114s-lid-sleep check says why)"
 
-(`$L` is `/usr/local/lib/omarchy-k114s` in P9.) Before `install` the first branch passes exactly as today. P9 also runs
-`sudo $K check`, which now applies the same rule. The line is applied the same way in the three runbooks above.
+In P9, `$L` is `/usr/local/lib/omarchy-k114s`. The first branch accepts an /etc mask for suspend. Otherwise P9
+requires the lid-sleep gate check. The installed `k114s-boot-once check` read back on 2026-11-26 uses the same rule.
 
 ## Install
 
@@ -163,6 +164,4 @@ ordinary while a new `arm` is a trial again, `open` refuses on a trial boot unle
 each intended state (four masks, ordinary open, trial closed) and refuse when a trial could sleep (suspend open on a trial boot, gate
 disabled, tool or a 40 drop-in missing, a 30 lock missing, hibernate, hybrid or suspend-then-hibernate unmasked or masked only in
 `/run`, suspend masked only in `/run` with the gate disabled, the tool missing or a lock gone), and `undo`. `test-boot-once.sh` and
-`test-sleep-gates.sh` cover the same refusals in boot-once and as static guards (including `k114s-r3a-check.sh`). What no fake can show: that the gate unit orders before logind and that
-`systemctl daemon-reload` inside it behaves at boot, that logind honours the HUP, and the lid close itself. Those are the three
-manual checks above.
+`test-sleep-gates.sh` cover the same refusals in boot-once and as static guards (including `k114s-r3a-check.sh`). Use the boot journal to verify the gate and its reload. The HUP and physical lid response need the live checks above.
