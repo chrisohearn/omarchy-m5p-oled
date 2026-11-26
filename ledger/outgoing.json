@@ -245,10 +245,10 @@
         "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
         "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
       },
-      "not_claimed": "the DT; KUnit run; a headset",
-      "state": "submitted",
-      "read_back": "PR read back: state open, draft True, merged False (2026-11-25)",
-      "follow_up": "watch for review",
+      "not_claimed": "a headphone or headset plugged in (plug detection, playback, headset mic); the DT",
+      "state": "hardware_confirmed",
+      "read_back": "PR read back: state open, draft True, merged False (2026-11-25); marked ready after the head row (owner: wired jack tests not wanted), body Tested/Not yet updated, read back: draft False (2026-11-26)",
+      "follow_up": "hardware row at the head: linux-3104-hwrow-2026-11-26; watch for review",
       "acknowledged": null,
       "maintainer_feedback": []
     },
@@ -527,6 +527,27 @@
         "firmware": "OS firmware 27.2 (mBoot-20457.41.3), system firmware 27.3 beta (mBoot-20457.60.65.0.1)"
       },
       "not_claimed": "the startup-disk write path; panel, sound and Wi-Fi (not in this board file); a second K114s",
+      "state": "hardware_confirmed",
+      "read_back": "comment read back, author chrisohearn; PR draft False, head unchanged (2026-11-26)",
+      "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-3104-hwrow-2026-11-26",
+      "destination": "aurora-silicon/linux #3104",
+      "url": "https://github.com/aurora-silicon/linux/pull/3104#issuecomment-7179936508",
+      "posted": "2026-11-26T01:36:06Z",
+      "account": "chrisohearn",
+      "kind": "hardware result (PR head)",
+      "result": "PASS at 9d3eeaa5d8dd: one boot of a kernel built from the head (Backup slot, one-shot); card AppleK114, CS42L84 and its jack input registered, no speaker volume/gain/protection control; no new kernel errors vs r3f; one failed unit, plymouth-start (the #262 splash crash, also on r3f); KUnit 62 cases (QEMU) and dt_binding_check pass",
+      "tested_revisions": {
+        "kernel": "linux-k114s 7.3.0.r3f.pr3104-1 (aurora-silicon/linux PR #3104 head 9d3eeaa5d8dd plus 71 r3f carries, build 1166bfa7), one attended trial boot, Backup restored to r3e1 after",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)",
+        "firmware": "OS firmware 27.2 (mBoot-20457.41.3), system firmware 27.3 beta (mBoot-20457.60.65.0.1)"
+      },
+      "not_claimed": "a headphone or headset plugged in (owner decided not to test wired audio); a second K114s",
       "state": "hardware_confirmed",
       "read_back": "comment read back, author chrisohearn; PR draft False, head unchanged (2026-11-26)",
       "follow_up": "watch for review",
