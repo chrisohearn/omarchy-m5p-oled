@@ -101,6 +101,18 @@ The notification is best effort and never fails the hook.
 The hook runs after the transaction and can never stop an update. It leaves no `.orig` or `.rej`
 files. `pacman -Qkk omarchy-dev` lists the patched files as modified, which is expected.
 
+## Refreshing without asking (owner's standing rule)
+
+This Mac follows Omarchy's Edge channel on purpose (`omarchy-channel-current` prints `edge`), to get
+Apple Silicon changes early, so Omarchy changes the patched lines often. When the hook reports a
+patch as **does not fit this Omarchy build** or **Omarchy ships part of this change itself now**,
+the agent that sees it refreshes the patch (or retires it, if Omarchy now has the fix) straight
+away: new patch and base against the installed build, its test, a PR with the hosted review, merge
+and `omarchy-patches-install`, then a check that the hook reports it **applied** or **in place**. No
+approval is asked first; the owner is told afterwards (owner's decision, 2026-11-25). The patch's
+own safety rules still apply, and a refresh that would change what the patch does, rather than
+carry it onto the new lines, is a new decision.
+
 ## Retiring a patch
 
 When the upstream change is merged and the Edge build carries it, the hook reports **Omarchy
