@@ -64,25 +64,36 @@ entry_id() { printf '%s' "$1" | sed 's#/#.#g; s#[^A-Za-z0-9+_.@-]#-#g'; }
 # leading slashes; a '+' after them marks a directory as expanded and is not part of the name. The name is the rest
 # of the line after blanks, as Limine's config.c takes it (trailing blanks included, so a path or id built here is
 # the one Limine matches).
-# shortcut: the index counts every entry line, which is Limine's own count for expanded directories only;
-# collapsed ones (a directory without '+') would hide their children from it. The live file uses /+Omarchy.
+# Numeric defaults count only visible entries. Give hidden descendants distinct negative indices so path defaults
+# and one-shot targets can still address them.
 list_entries() {
   awk '
-    function flush() { if (n) print n "\t" p "\t" bp; }
+    function flush() { if (n) print idx "\t" p "\t" bp; }
     { line = $0; sub(/^[ \t]+/, "", line) }
     line ~ /^\/+/ {
-      flush(); match(line, /^\/+/); d = RLENGTH; name = substr(line, d + 1); sub(/^\+/, "", name); sub(/^[ \t]+/, "", name)
-      nm[d] = name; p = nm[1]; for (i = 2; i <= d; i++) p = p "/" nm[i]; n++; bp = ""; next
+      flush(); match(line, /^\/+/); d = RLENGTH; name = substr(line, d + 1)
+      if (collapsed && d <= collapsed) collapsed = 0
+      n++; idx = collapsed ? -n : ++visible
+      if (!collapsed && name !~ /^\+/) collapsed = d
+      sub(/^\+/, "", name); sub(/^[ \t]+/, "", name)
+      nm[d] = name; p = nm[1]; for (i = 2; i <= d; i++) p = p "/" nm[i]; bp = ""; next
     }
     n && line ~ /^path:/ { bp = substr(line, 6); sub(/^[ \t]+/, "", bp); sub(/[ \t]+$/, "", bp) }
     END { flush() }
   ' "$CONF"
 }
 
+index_label() {
+  if [ "$1" -lt 0 ]; then echo "entry under a collapsed directory"; else echo "entry $1"; fi
+}
+
 cmd_entries() {
   [ -r "$CONF" ] || die "cannot read $CONF"
   grep -E '^default_entry' "$CONF"
-  list_entries | while IFS="$(printf '\t')" read -r i p bp; do printf '%2s  %-44s  %s\n' "$i" "$(entry_id "$p")" "${bp:-(directory)}"; done
+  list_entries | while IFS="$(printf '\t')" read -r i p bp; do
+    [ "$i" -gt 0 ] || i=-
+    printf '%2s  %-44s  %s\n' "$i" "$(entry_id "$p")" "${bp:-(directory)}"
+  done
 }
 
 # the EFI file an entry boots, and the hash Limine will check, from 'boot():/EFI/Linux/x.efi#<b2sum>'
@@ -127,7 +138,7 @@ cmd_check() {
     di=$(printf '%s' "$row" | cut -f1); dp=$(printf '%s' "$row" | cut -f2); fp=$(printf '%s' "$row" | cut -f3)
     if [ -z "$fp" ]; then bad "default_entry '$d' names a directory ($dp): Limine would stop at the menu"
     else
-      echo "ok    default_entry is $d (entry $di, id $(entry_id "$dp"), boots $fp)"
+      echo "ok    default_entry is $d ($(index_label "$di"), id $(entry_id "$dp"), boots $fp)"
       m=$(check_boot_file "$fp") && echo "ok    the default entry's file matches limine.conf" || bad "$m"
       case $fp in *'#'*) ;; *) f=${fp#boot\(\):}; [ -f "$ESP$f" ] && echo "info  the default entry's file has no #hash in limine.conf; its sha256 is $(sha256sum "$ESP$f" | cut -c1-64)" ;; esac
     fi
@@ -223,10 +234,10 @@ cmd_arm() {
     die "'$target' boots the same file as the default entry ($dp): a hang would have nothing else to fall back to; nothing armed"
   fi
   if [ "$ti" != "$di" ] && [ -e "$STATE/boot-once-not-durable" ]; then
-    die "the durability check failed on this Mac ($STATE/boot-once-not-durable exists): only the default entry ($dp, entry $di) can be armed; nothing armed"
+    die "the durability check failed on this Mac ($STATE/boot-once-not-durable exists): only the default entry ($dp, $(index_label "$di")) can be armed; nothing armed"
   fi
   if [ "$ti" != "$di" ] && ! grep -q '^ok ' "$STATE/boot-once-selftest-ok" 2>/dev/null; then
-    die "the one-shot mechanism has not been measured on this Mac ($STATE/boot-once-selftest-ok is missing). Arm the default entry itself ($dp, entry $di), reboot, run 'status' first thing; nothing armed"
+    die "the one-shot mechanism has not been measured on this Mac ($STATE/boot-once-selftest-ok is missing). Arm the default entry itself ($dp, $(index_label "$di")), reboot, run 'status' first thing; nothing armed"
   fi
   if [ $with_s2 = 0 ]; then
     [ "$(sed -n 1p "$ESP/aura-try" 2>/dev/null)" = armed ] && die "a Stage 2 trial is armed ($(sed -n 2p "$ESP/aura-try")): the kernel would run on that tree. Write 'spent' to $ESP/aura-try first; nothing armed"

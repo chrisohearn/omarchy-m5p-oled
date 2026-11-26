@@ -82,6 +82,16 @@ refuse() { name=$1; shift; out=$(run "$@"); r=$?; has "refused: $name" "$out" "$
 mk b; printf 'armed\nm1n1/boot-ctxr-r3-gpu.bin\n' > $W/b/esp/aura-try; EXP="a Stage 2 trial is armed"; refuse "armed Stage 2 trial" b arm Omarchy/linux-k114s
 out=$(run b arm Omarchy/linux-k114s --with-stage2-trial); has "armed trial allowed with --with-stage2-trial" "$out" "armed: the next boot"
 mk c; printf 'm1n1/boot-ctxr-r3-gpu.bin\nabc\n' > $W/c/etc/stage2-trial; EXP="would re-arm a Stage 2 trial"; refuse "configured Stage 2 re-arm" c arm Omarchy/linux-k114s
+mk collapsed
+sed -i '/^interface_branding:/a /Archive\n//+Nested\n///Old\npath: boot():/EFI/Linux/omarchy_linux-aurora-k114s.efi' "$W/collapsed/esp/limine.conf"
+sed -i 's/^default_entry: 1/default_entry: 4/' "$W/collapsed/esp/limine.conf"
+out=$(run collapsed check)
+has "a numeric default skips all descendants of a collapsed directory" "$out" "ok    default_entry is 4 (entry 4, id Omarchy.linux-k114s"
+has "a one-shot can still target a descendant of a collapsed directory" "$(run collapsed arm Archive/Nested/Old)" "armed"
+sed -i 's#^default_entry: 4#default_entry: Archive/Nested/Old#' "$W/collapsed/esp/limine.conf"
+out=$(run collapsed check)
+has "a path default can still name a descendant of a collapsed directory" "$out" "ok    default_entry is Archive/Nested/Old (.*id Archive.Nested.Old"
+
 mk d; sed -i 's/^default_entry: 1/default_entry: 2/' $W/d/esp/limine.conf; EXP="names a directory"; refuse "default_entry names the Omarchy directory" d arm Omarchy/linux-k114s
 mk d2; sed -i 's/^default_entry: 1/default_entry: 9/' $W/d2/esp/limine.conf; EXP="is past the last entry"; refuse "default_entry past the last entry" d2 arm Omarchy/linux-k114s
 mk e; echo x >> $W/e/esp/EFI/Linux/omarchy_linux-k114s.efi; EXP="does not match the hash"; refuse "UKI hash mismatch" e arm Omarchy/linux-k114s

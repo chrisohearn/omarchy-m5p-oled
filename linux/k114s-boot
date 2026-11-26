@@ -19,13 +19,19 @@ entry_id() { printf '%s' "$1" | sed 's#/#.#g; s#[^A-Za-z0-9+_.@-]#-#g'; }
 efivar() { [ -r "$EFIVARS/$1-$BLI" ] && tail -c +5 "$EFIVARS/$1-$BLI" | iconv -f UTF-16LE -t UTF-8 2>/dev/null | tr -d '\0'; }
 opt() { grep -i -m1 "^$1:" "$CONF" | sed 's/^[^:]*:[ \t]*//; s/[ \t]*$//'; }
 
-# INDEX<TAB>PATH<TAB>KERNEL-VERSION for every entry line in menu order (index as Limine counts expanded entries);
+# INDEX<TAB>PATH<TAB>KERNEL-VERSION in menu order. Hidden entries keep their paths but have a negative index;
 # KERNEL-VERSION is empty for entries that boot no kernel (directories, other loaders)
 entries=$(awk '
-  function flush() { if (n) print n "\t" p "\t" v; }
+  function flush() { if (n) print idx "\t" p "\t" v; }
   { line = $0; sub(/^[ \t]+/, "", line) }
-  line ~ /^\/+/ { flush(); match(line, /^\/+/); d = RLENGTH; name = substr(line, d + 1); sub(/^\+/, "", name); sub(/^[ \t]+/, "", name)
-                  nm[d] = name; p = nm[1]; for (i = 2; i <= d; i++) p = p "/" nm[i]; v = ""; n++; next }
+  line ~ /^\/+/ {
+    flush(); match(line, /^\/+/); d = RLENGTH; name = substr(line, d + 1)
+    if (collapsed && d <= collapsed) collapsed = 0
+    n++; idx = collapsed ? -n : ++visible
+    if (!collapsed && name !~ /^\+/) collapsed = d
+    sub(/^\+/, "", name); sub(/^[ \t]+/, "", name)
+    nm[d] = name; p = nm[1]; for (i = 2; i <= d; i++) p = p "/" nm[i]; v = ""; next
+  }
   n && line ~ /^comment:[ \t]*Kernel version:/ { v = line; sub(/^comment:[ \t]*Kernel version:[ \t]*/, "", v); sub(/[ \t]+$/, "", v) }
   END { flush() }' "$CONF")
 # default_entry as Limine reads it: the first line that starts with the option name (any case), the value after the
