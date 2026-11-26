@@ -17,7 +17,8 @@ APPLY=$LIB/omarchy-patches-apply
 SHARED=$LIB/omarchy-patches-lib.sh
 HOOK=$ROOT/etc/pacman.d/hooks/03-k114s-omarchy-patches.hook
 BOOT_GUARD=$ROOT/etc/boot/hooks/pre.d/00-k114s-boot-rebuild-guard
-BOOT_PATCH=0006-boot-screen-rebuilds-only-k114s-images.patch
+BOOT_SCREEN_PATCH=0006-boot-screen-rebuilds-only-k114s-images.patch
+INITCPIO_PATCH=0007-initcpio-sync-rebuilds-only-k114s-images.patch
 die() { echo "omarchy-patches-install: $*" >&2; exit 1; }
 say() { echo "omarchy-patches-install: $*"; }
 
@@ -47,8 +48,10 @@ if [[ ${1:-} == --undo ]]; then
 fi
 wanted=("$SRC"/*.patch)
 (( ${#wanted[@]} )) || die "no patches in $SRC. To retire the last one, run: sudo bash $HERE/omarchy-patches-install --undo"
-if [[ -f $SRC/$BOOT_PATCH && ! -f $HERE/${BOOT_GUARD##*/} ]]; then
-  die "the Limine pre-build guard is missing; nothing changed"
+needs_boot_guard=false
+if [[ -f $SRC/$BOOT_SCREEN_PATCH || -f $SRC/$INITCPIO_PATCH ]]; then
+  needs_boot_guard=true
+  [[ -f $HERE/${BOOT_GUARD##*/} ]] || die "the Limine pre-build guard is missing; nothing changed"
 fi
 for p in "${wanted[@]}"; do
   [[ $(basename "$p") =~ ^[A-Za-z0-9._-]+\.patch$ ]] || die "unexpected patch name: $p"
@@ -98,7 +101,7 @@ done
 install -m 644 "$HERE/omarchy-patches-lib.sh" "$SHARED"
 install -m 755 "$HERE/omarchy-patches-apply" "$APPLY"
 install -m 644 "$HERE/03-k114s-omarchy-patches.hook" "$HOOK"
-if [[ -f $DEST/$BOOT_PATCH ]]; then
+if "$needs_boot_guard"; then
   install -Dm755 "$HERE/${BOOT_GUARD##*/}" "$BOOT_GUARD"
 else
   rm -f "$BOOT_GUARD"

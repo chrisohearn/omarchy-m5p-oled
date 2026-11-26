@@ -1,0 +1,83 @@
+Initramfs input changes: rebuild only the K114s kernels' images on the K114s.
+
+Local change for this machine. The omarchy-settings post-transaction hook calls
+omarchy-boot-sync-initcpio, which runs a bare omarchy-boot-rebuild when the
+initramfs inputs change or the hash is missing. On Limine this rebuilds every
+installed kernel, including the held stock linux-aurora. On 2026-11-26 it put
+the 79 MB stock image back on the EFI partition and left 48 MB free.
+
+Follow 0006's rebuild rules on apple,k114s: require Limine alone, require the
+K114s pre-build hook, and rebuild the installed linux-k114s kernels one at a
+time. Pass the space guard's minimum plus the boot theme's size to the hook,
+which checks under Limine's lock. Save the hash only after every rebuild
+succeeds. Other machines keep the upstream behavior.
+
+Based on omarchy-dev 4.0.0.r8421.ga43cedd-1. Paths are relative to /usr.
+
+--- a/bin/omarchy-boot-sync-initcpio
++++ b/bin/omarchy-boot-sync-initcpio
+@@ -87,6 +87,39 @@
+   return 1
+ }
+ 
++# K114s local change: a bare rebuild puts the held linux-aurora image back on the EFI
++# partition. Rebuild only the K114s kernels and let Limine's pre-build hook check space
++# under its lock for each image, using the same budget as the boot screen rebuild.
++rebuild_k114s() {
++  local backend theme need kernel
++  local -a kernels=()
++  backend=$("$BACKEND_CMD" --managed 2>/dev/null | paste -sd' ') || backend=
++  if [[ $backend != limine ]]; then
++    echo "Omarchy manages '${backend:-no}' boot images here, not Limine alone; the boot images were not rebuilt (this Mac's change covers Limine only)." >&2
++    return 1
++  fi
++  mapfile -t kernels < <({ pacman -Qqo "$MODULES"/*/modules.builtin 2>/dev/null || true; } | sort -u | sed -n -E '/^linux-k114s(-|$)/p')
++  if (( ${#kernels[@]} == 0 )); then
++    echo "No linux-k114s kernel is installed; the boot images were not rebuilt." >&2
++    return 1
++  fi
++  local guard=$ROOT/etc/boot/hooks/pre.d/00-k114s-boot-rebuild-guard
++  if [[ ! -f $guard || ! -x $guard ]]; then
++    echo "The K114s Limine pre-build guard is missing or disabled. Reinstall the K114s Omarchy patches before rebuilding." >&2
++    return 1
++  fi
++  theme=$(du -sb "$ROOT/usr/share/plymouth/themes/omarchy" 2>/dev/null | cut -f1) || theme=
++  [[ $theme =~ ^[0-9]+$ ]] || theme=67108864
++  need=$(( ${K114S_ESP_MIN_FREE:-88080384} + theme ))
++  for kernel in "${kernels[@]}"; do
++    if ! K114S_PLYMOUTH_MIN_FREE="$need" "$REBUILD_CMD" "$kernel"; then
++      echo "Could not rebuild the $kernel boot image." >&2
++      echo "The initramfs changes take effect at the next rebuild; once there is room: sudo omarchy-boot-sync-initcpio --pacman-hook" >&2
++      return 1
++    fi
++  done
++}
++
+ write_state() {
+   local hash=$1 dir tmp
+   dir=$(dirname "$STATE")
+@@ -108,7 +141,10 @@
+   write_state "$(compute_hash)"
+   ;;
+ --pacman-hook | "")
+-  if ! has_managed_backend || ! has_installed_kernels; then
++  k114s=false
++  if grep -qx 'apple,k114s' < <(tr '\0' '\n' 2>/dev/null <"${K114S_DT_COMPATIBLE:-/proc/device-tree/compatible}"); then
++    k114s=true
++  elif ! has_managed_backend || ! has_installed_kernels; then
+     exit 0
+   fi
+ 
+@@ -123,7 +159,11 @@
+   fi
+ 
+   echo "Omarchy initramfs inputs changed; rebuilding boot images..."
+-  "$REBUILD_CMD"
++  if "$k114s"; then
++    rebuild_k114s
++  else
++    "$REBUILD_CMD"
++  fi
+   write_state "$current_hash"
+   ;;
+ *)

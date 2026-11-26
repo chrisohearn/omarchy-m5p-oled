@@ -294,7 +294,7 @@ r=$(mk); inst "$r" >/dev/null; orig "$r"; out=$(inst "$r" "$SRC" --undo); rc=$?
 ok "undo after an update: succeeds, files as shipped" "$rc:$(sumof "$r")" "0:$ORIG"
 r=$(mk); out=$(K114S_ROOT=$r bash "$INSTALL" bogus 2>&1); rc=$?; ok "unknown argument: refused" "$rc" 1
 
-# Patch 0006's Limine guard follows the patch's install, retirement and undo.
+# The Limine guard follows the install, retirement and undo of the patches that use it.
 r=$(mk); boot_src=$BASE/boot-src; mkdir "$boot_src"
 boot_patch=$(printf '%s\n' "$P"/0006-*.patch)
 cp "$SRC/0001-test.patch" "$boot_patch" "$boot_src/"
@@ -309,6 +309,20 @@ out=$(inst "$r"); rc=$?
 ok "0006: retiring the patch removes the guard" "$rc:$(test ! -e "$guard" && echo yes)" "0:yes"
 out=$(inst "$r" "$boot_src") && out=$(inst "$r" "$boot_src" --undo); rc=$?
 ok "0006: undo removes the guard" "$rc:$(test ! -e "$guard" && echo yes)" "0:yes"
+
+r=$(mk); initcpio_src=$BASE/initcpio-src; mkdir "$initcpio_src"
+initcpio_patch=$(printf '%s\n' "$P"/0007-*.patch)
+cp "$SRC/0001-test.patch" "$initcpio_patch" "$initcpio_src/"
+cp -r "${initcpio_patch%.patch}.base" "$initcpio_src/"
+cp "${initcpio_patch%.patch}.base/bin/omarchy-boot-sync-initcpio" "$r/usr/bin/"
+shipped "$r"
+guard=$r/etc/boot/hooks/pre.d/00-k114s-boot-rebuild-guard
+out=$(inst "$r" "$initcpio_src"); rc=$?
+ok "0007 without 0006: installs the executable Limine guard and applies the patch" \
+  "$rc:$(test -x "$guard" && cmp -s "$guard" "$L/${guard##*/}" && echo yes):$(grep -c '0007-.*: applied' <<<"$out")" "0:yes:1"
+out=$(inst "$r"); rc=$?
+ok "0007: retiring the patch removes the guard and restores the shipped script" \
+  "$rc:$(test ! -e "$guard" && cmp -s "$r/usr/bin/omarchy-boot-sync-initcpio" "${initcpio_patch%.patch}.base/bin/omarchy-boot-sync-initcpio" && echo yes)" "0:yes"
 
 # Without GNU patch: the hook writes nothing and says so; the installer refuses.
 nopatch=$BASE/nopatch; mkdir -p "$nopatch"
