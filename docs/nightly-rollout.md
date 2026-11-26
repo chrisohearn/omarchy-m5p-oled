@@ -73,7 +73,8 @@ changes, change this file through a PR.
    3. Stage 2: an `aura-try` trial, then promote.
 8. **One upstream PR head per night** (owner's decision, 2026-11-25: "Fold into nightly"). Our draft upstream PRs need a
    hardware result from a boot of their exact head before they leave draft. They are the `ledger/outgoing.json` rows
-   with these ids, while their state is `submitted`: `linux-k114s-nvram-2026-11-25` (#3103),
+   with these ids, while no `kind: "hardware result (PR head)"` row for that PR's current head is recorded (a posted
+   report stays `submitted`; a new head needs a new row): `linux-k114s-nvram-2026-11-25` (#3103),
    `linux-k114-macaudio-jack-2026-11-25` (#3104), `linux-k114s-brightness-floor-2026-11-25` (#3105),
    `linux-2115-sep-dt-rework-2026-11-25` (#2115) and `aura-k114s-camera-row-2026-11-25` (aura#515).
 

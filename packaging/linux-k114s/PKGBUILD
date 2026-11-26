@@ -35,7 +35,7 @@
 # -k114s-r3b-t1-ARCH release keep its boot names and module directory separate from r3b.
 #
 # This file does not compile anything. It packages a finished build:
-#   K114S_CAND  the candidate, r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d, r3e, r3e1, r3f   (default r3a, the one the runbook docs/r3-integration.md names;
+#   K114S_CAND  the candidate, r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d, r3e, r3e1, r3f, pr3104   (default r3a, the one the runbook docs/r3-integration.md names;
 #               r3b: docs/r3b-kernel.md, K114S_CAND=r3b makepkg ...; r3b-b1: D5a, K114S_CAND=r3b-b1 makepkg ...;
 #               r3b-c1: docs/r3-hdr.md, K114S_CAND=r3b-c1 makepkg ...; r3b-c2: docs/r3b-kernel.md,
 #               K114S_CAND=r3b-c2 makepkg ...; r3b-c3: docs/r3-vrr.md, K114S_CAND=r3b-c3 makepkg ...;
@@ -77,7 +77,9 @@ case $_cand in
   # (7.3.0.r3e-1 -> 7.3.0.r3f-1, vercmp: newer), so r3e1 stays Main and the way back while r3f is tried by a one-shot;
   # promotion points default_entry at Omarchy/linux-k114s-r3b
   r3f) pkgname=linux-k114s-r3b; _kcand=r3f; _ver=r3f; _rel=1 ;;
-  *) echo "K114S_CAND must be r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d, r3e, r3e1 or r3f" >&2; exit 1 ;;
+  # Attended #3104 trial in the r3e1 Backup slot. Main stays r3f.
+  pr3104) pkgname=linux-k114s; _kcand=pr3104; _ver=r3f.pr3104; _rel=1 ;;
+  *) echo "K114S_CAND must be r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d, r3e, r3e1, r3f or pr3104" >&2; exit 1 ;;
 esac
 pkgbase=$pkgname
 pkgver=7.3.0.$_ver
@@ -152,7 +154,7 @@ package() {
     grep -q 'fw27_panel_edr_max_nits = 500;' "$_src/drivers/gpu/drm/apple/dcp.c" ||
       { echo "$_src has no 500-nit EDR cap (patches/linux/r3e.series)" >&2; return 1; }
   fi
-  if [[ $_cand == r3f ]]; then
+  if [[ $_cand == r3f || $_cand == pr3104 ]]; then
     ! grep -q 'fw27_panel_edr_max_nits = 500;' "$_src/drivers/gpu/drm/apple/dcp.c" &&
       grep -q '^static unsigned int fw27_panel_edr_max_nits;' "$_src/drivers/gpu/drm/apple/dcp.c" &&
       grep -q '^bool dcp_panel_edr(struct platform_device \*pdev)' "$_src/drivers/gpu/drm/apple/dcp.c" &&
@@ -161,7 +163,7 @@ package() {
       grep -q 'after a counted dark wake' "$_src/drivers/mfd/macsmc.c" ||
       { echo "$_src lacks #2694's EDR code, or still has the 500-nit cap, or lacks #2559 (docs/r3f-kernel.md)" >&2; return 1; }
   fi
-  if [[ $_cand == r3e || $_cand == r3e1 || $_cand == r3f ]]; then
+  if [[ $_cand == r3e || $_cand == r3e1 || $_cand == r3f || $_cand == pr3104 ]]; then
     grep -q 'dcp_bl_set_minimum' "$_src/drivers/gpu/drm/apple/dcp_backlight.h" &&
       grep -q 'dcp_panel_color_target' "$_src/drivers/gpu/drm/apple/dcp-display-metadata.c" &&
       grep -q 'panel EDR off: cap %u nits set and the SDR maximum is unknown' "$_src/drivers/gpu/drm/apple/dcp.c" &&
@@ -170,7 +172,8 @@ package() {
       grep -q 'apple_pcie_adopted_links_ready' "$_src/drivers/pci/controller/pcie-apple.c" &&
       sed -n '/^static const struct hw_info t6050_hw = {/,/^};/p' "$_src/drivers/pci/controller/pcie-apple.c" | grep -q 'adopt_link[[:space:]]*= true' &&
       grep -q 'apple_qspi_find_part' "$_src/drivers/spi/spi-apple-qspi.c" &&
-      ! grep -q '0xc8, 0x83, 0x17' "$_src/drivers/spi/spi-apple-qspi-policy.h" &&
+      # pr3104's newer upstream base lists this Mac's flash part (GD25UF64E); there, read_only=true (checked below) keeps NVRAM closed
+      { [[ $_cand == pr3104 ]] || ! grep -q '0xc8, 0x83, 0x17' "$_src/drivers/spi/spi-apple-qspi-policy.h"; } &&
       ! grep -q 'apple,k114s' "$_src/drivers/spi/spi-apple-qspi.c" &&
       grep -q 'static bool read_only = true;' "$_src/drivers/spi/spi-apple-qspi.c" &&
       grep -q 'apple,camera-light-undescribed' "$_src/drivers/media/platform/apple/isp/isp-drv.c" &&
@@ -183,7 +186,7 @@ package() {
       { echo "$_src has the 26B8125 G17S firmware entry more than once" >&2; return 1; }
   fi
   # r3e1 adds r3e/0076: on apple,k114s the camera indicator is a solid 32x32 square under the notch (r3f keeps it)
-  if [[ $_cand == r3e1 || $_cand == r3f ]]; then
+  if [[ $_cand == r3e1 || $_cand == r3f || $_cand == pr3104 ]]; then
     grep -q 'IND_COMPACT_SIDE	32' "$_src/drivers/gpu/drm/apple/dcp-indicator.c" &&
       grep -q 'of_machine_is_compatible("apple,k114s")' "$_src/drivers/gpu/drm/apple/dcp-indicator.c" ||
       { echo "$_src lacks r3e/0076 (the small camera indicator)" >&2; return 1; }
@@ -221,6 +224,21 @@ package() {
     [[ -s "$_out/drivers/hid/hid-apple-mtp-kiwi.ko" ]] &&
       grep -Fxq 'drivers/hid/hid-apple-mtp-kiwi.o' "$_out/modules.order" ||
       { echo "$_out lacks the built Kiwi module (CONFIG_HID_APPLE_MTP_KIWI=m)" >&2; return 1; }
+  fi
+  if [[ $_cand == pr3104 ]]; then
+    local pr_head=9d3eeaa5d8ddd80c3868280ff5376425443c42c5
+    local -a audio_paths=(
+      Documentation/devicetree/bindings/sound/apple,macaudio.yaml
+      sound/soc/apple/macaudio.c
+      sound/soc/apple/macaudio-admission-test.h
+      sound/soc/apple/macaudio-amp-level-test.h
+    )
+    git -C "$_src" merge-base --is-ancestor "$pr_head" HEAD &&
+      git -C "$_src" diff --quiet "$pr_head" -- "${audio_paths[@]}" &&
+      grep -q 'static bool read_only = true;' "$_src/drivers/spi/spi-apple-qspi.c" &&
+      ! grep -q 'apple,k114s' "$_src/drivers/spi/spi-apple-qspi.c" &&
+      ! grep -rq 'label = "nvram"' "$_src"/arch/arm64/boot/dts/apple/t6050-k114s.dts "$_src"/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi ||
+      { echo "$_src lacks the #3104 head's macaudio files or the read-only K114s QSPI configuration" >&2; return 1; }
   fi
   modpath="$pkgdir/usr/lib/modules/$kernel_release"
 
