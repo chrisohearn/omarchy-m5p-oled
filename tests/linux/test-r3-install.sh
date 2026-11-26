@@ -90,6 +90,20 @@ out=$(inst "$r" --undo); ok "a second undo has nothing to do" "$? $(echo "$out" 
 out=$(inst "$r"); ok "install again after an undo" "$?" 0
 out=$(inst "$r" --undo); ok "and undo again: still exactly r2c" "$(snap "$r")" "$before"
 
+# Pre-existing commands outside r2c's own list survive install, refresh and undo.
+r=$(mk)
+mkdir -p "$r/usr/local/bin"
+printf '#!/bin/sh\necho original boot tool\n' > "$r/usr/local/bin/k114s-boot"
+chmod 751 "$r/usr/local/bin/k114s-boot"
+ln -s missing-release-tool "$(k "$r")/k114s-release"
+before=$(sha256sum < "$r/usr/local/bin/k114s-boot")
+out=$(inst "$r" --no-recovery-set)
+ok "install replaces the pre-existing command and dangling symlink" "$? $(cmp -s "$L/k114s-boot" "$r/usr/local/bin/k114s-boot"; status) $(test -L "$(k "$r")/k114s-release"; status)" "0 0 1"
+out=$(inst "$r" --refresh); ok "refresh succeeds without replacing the saved originals" "$?" 0
+out=$(inst "$r" --undo)
+ok "undo restores the original command's contents and mode" "$? $(sha256sum < "$r/usr/local/bin/k114s-boot") $(stat -c %a "$r/usr/local/bin/k114s-boot")" "0 $before 751"
+ok "undo restores the dangling symlink" "$(readlink "$(k "$r")/k114s-release")" "missing-release-tool"
+
 # use-packaged-dtb is r2c's marker, and r3 (stage2 --dtb) creates and removes it: undo puts back what r2c left
 r=$(mk); : > "$(k "$r")/use-packaged-dtb"; before=$(snap "$r"); inst "$r" --no-recovery-set >/dev/null; rm -f "$(k "$r")/use-packaged-dtb"
 out=$(inst "$r" --undo); ok "undo restores r2c's use-packaged-dtb marker that r3 later removed" "$? $(test -e "$(k "$r")/use-packaged-dtb"; status) $(snap "$r")" "0 0 $before"

@@ -18,6 +18,7 @@
 # k114s-boot-success (+ timer), k114s-holds.path, the keep list for linux-modules-cleanup, the
 # user hook post-update.d/k114s-release-check, /etc/omarchy-k114s/release.conf, data files, and the
 # command /usr/local/bin/k114s-boot (which kernel is Main, Backup or Test; read only).
+# Any existing command these tools replace is saved with the r2c originals for --undo.
 # It installs no package, changes no boot file on the ESP, does not touch the channel, and does
 # not reboot. The first thing it does after copying is record the running boot chain as proven
 # and (unless told not to) write a recovery set of every held package.
@@ -43,7 +44,7 @@ DATA=(release-criteria.conf kernel-config.required rivals.list protected.list no
   esp-audit-ignore.list holds.default)
 NEW_HOOKS=(00-k114s-guard-install.hook 00-k114s-guard-remove.hook 01-k114s-guard-esp.hook)
 OLD_HOOKS=(00-k114s-hold-guard.hook 01-k114s-esp-space.hook)
-OLD_TOOLS=(apply-holds hold-guard esp-space-guard update-boot-ctxr k114s-edge-check k114s-booted-esp holds.list use-packaged-dtb)
+OLD_TOOLS=(apply-holds hold-guard esp-space-guard update-boot-ctxr holds.list use-packaged-dtb)
 EARLIER_HOOKS=(11-k114s-guard-esp.hook)     # the space guard's name in an earlier draft of r3
 LOADERS=(m1n1-aurora uboot-aurora)
 UNIT_FILES=(k114s-boot-success.service k114s-boot-success.timer k114s-holds.path k114s-holds.service)
@@ -63,11 +64,11 @@ done
 [[ $(id -u) == 0 || -n ${K114S_ROOT:-} ]] || die "run with sudo"
 
 save() { # save FILE under KEY, once
-  [[ -e $SAVED/$2.orig || -e $SAVED/$2.absent ]] && return 0
-  if [[ -e $1 ]]; then cp -a "$1" "$SAVED/$2.orig"; else : > "$SAVED/$2.absent"; fi
+  [[ -e $SAVED/$2.orig || -L $SAVED/$2.orig || -e $SAVED/$2.absent ]] && return 0
+  if [[ -e $1 || -L $1 ]]; then cp -a "$1" "$SAVED/$2.orig"; else : > "$SAVED/$2.absent"; fi
 }
 restore() {
-  if [[ -e $SAVED/$2.orig ]]; then mkdir -p "$(dirname "$1")"; cp -a "$SAVED/$2.orig" "$1"
+  if [[ -e $SAVED/$2.orig || -L $SAVED/$2.orig ]]; then mkdir -p "$(dirname "$1")"; cp -aT --remove-destination "$SAVED/$2.orig" "$1"
   elif [[ -e $SAVED/$2.absent ]]; then rm -f "$1"; fi
 }
 loader_versions() { # the installed versions of the loader packages, one line
@@ -146,8 +147,11 @@ if [[ $mode == undo ]]; then
   for file in "${NEW_HOOKS[@]}" "${EARLIER_HOOKS[@]}"; do rm -f "$HOOKS/$file"; done
   for file in "${OLD_HOOKS[@]}"; do restore "$HOOKS/$file" "hook-$file"; done
   for file in "${TOOLS[@]}" "${DATA[@]}" released.list; do rm -f "$LIB/$file"; done
-  for file in "${BIN[@]}"; do rm -f "$BINDIR/$file"; done
-  for file in "${OLD_TOOLS[@]}"; do restore "$LIB/$file" "tool-$file"; done
+  for file in "${BIN[@]}"; do
+    rm -f "$BINDIR/$file"  # legacy installs have no saved bin entry
+    restore "$BINDIR/$file" "bin-$file"
+  done
+  for file in "${TOOLS[@]}" "${OLD_TOOLS[@]}"; do restore "$LIB/$file" "tool-$file"; done
   if [[ -n $USER_HOME ]]; then
     restore "$(user_hook pre-refresh-pacman.d/k114s-holds)" user-pre-refresh
     restore "$(user_hook post-update.d/k114s-release-check)" user-post-update
@@ -194,7 +198,8 @@ mkdir -p "$SAVED" "$LIB" "$ETC" "$HOOKS" "$UNITS"
 trap 'echo "k114s-tooling-install: stopped part-way. Put everything back with: sudo bash $HERE/k114s-tooling-install --undo" >&2' ERR
 cp -p "$ROOT/etc/pacman.conf" "$SAVED/pacman.conf.before"
 for file in "${OLD_HOOKS[@]}"; do save "$HOOKS/$file" "hook-$file"; done
-for file in "${OLD_TOOLS[@]}"; do save "$LIB/$file" "tool-$file"; done
+for file in "${TOOLS[@]}" "${OLD_TOOLS[@]}"; do save "$LIB/$file" "tool-$file"; done
+for file in "${BIN[@]}"; do save "$BINDIR/$file" "bin-$file"; done
 if [[ -n $USER_HOME ]]; then
   save "$(user_hook pre-refresh-pacman.d/k114s-holds)" user-pre-refresh
   save "$(user_hook post-update.d/k114s-release-check)" user-post-update
