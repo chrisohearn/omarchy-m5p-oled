@@ -18,6 +18,12 @@ Plymouth release commit. The package keeps the name `plymouth`. Pacman orders th
    local marker. Exit 1 means the installed package lacks it. Exit 2 means the installed package or its version
    could not be read.
 
+An Arch Plymouth upgrade replaces the local build. Its `usr/lib/initcpio/*` files trigger only the K114s image hook
+(`/etc/pacman.d/hooks/90-mkinitcpio-apple-install.hook`, `k114s-uki-install`: `linux-k114s` and `linux-k114s-r3b`); the generic
+`90-mkinitcpio-install.hook` is gated off on this Mac (`limine-apple-gate --not-mac`), so the upgrade does not rebuild the held
+`linux-aurora` image (the rebuild-all trap in `docs/r3-display-d5-d9.md` predates that hook). The only loss is the #262 fix until
+the rebuild below.
+
 When Arch Linux ARM ships a newer Plymouth in `extra`, the nightly rebuilds it from that release's recipe
 and pins the new source commit and checksum. Check whether the release already fixes #262 before carrying the
 patch forward. If it does, retire the local package. Otherwise, keep the `plymouth-k114s` marker and set the
