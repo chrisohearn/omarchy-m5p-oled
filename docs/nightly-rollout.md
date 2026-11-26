@@ -31,7 +31,8 @@ changes, change this file through a PR.
 ## Steps
 
 1. **Packages.** Run `omarchy update -y`, not a direct pacman upgrade, which Omarchy refuses. Then check:
-   - `checkupdates` is empty;
+   - Verify that `checkupdates` lists no packages after `omarchy update -y`. Record the UTC timestamp and result. This records the package state at that time.
+   - If a later `checkupdates` run lists packages, record its timestamp and list separately. It does not turn the earlier empty result into a failure. Run the package step again in the next nightly window.
    - count the boots since the local Plymouth went on with no `plymouth-start` core dump, and close #262 at six in a row
      ([Plymouth on K114s](plymouth-k114s.md#closing-262));
    - run `linux/plymouth-k114s-status` and rebuild the local Plymouth package when Arch Linux ARM ships a newer release, per [Plymouth on K114s](plymouth-k114s.md) (a `plymouth` line in the pre-update `checkupdates` means the update will replace the local build; record it in the report);
