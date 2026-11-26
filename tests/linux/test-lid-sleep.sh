@@ -171,6 +171,16 @@ has "trial boot: the gate closes it" "$out" "trial boot (one-shot kernel trial)"
 ok "trial boot: the gate spends the arming record" "$(cat $W/p/state/lid-sleep-trial-seen)" "boot1 Omarchy.linux-k114s boot2"
 ok "trial boot: status still says trial after the record is spent" "$(BOOT=boot2 ls_ p status | sed -n 1p)" "this boot: trial (one-shot kernel trial)"
 ok "trial boot: check still passes" "$(BOOT=boot2 ls_ p check >/dev/null; echo $?)" 0
+rm -f "$W/p/state/boot-once-armed"
+ok "clearing the arming record leaves this boot a trial" "$(BOOT=boot2 ls_ p status | sed -n 1p)" "this boot: trial (one-shot kernel trial)"
+ok "open still refuses after clear" "$(BOOT=boot2 ls_ p open >/dev/null; echo $?)" 1
+BOOT=boot2 ls_ p open --force >/dev/null
+out=$(BOOT=boot2 ls_ p check); rc=$?
+ok "both checks still refuse an opened trial after clear" "$rc$(BOOT=boot2 bo p >/dev/null; echo $?)" 11
+has "check reports the open drop-in after clear" "$out" "a 40 drop-in is in"
+BOOT=boot2 ls_ p gate >/dev/null
+ok "running the gate again after clear closes the same trial" "$(sysst p)" "masked-runtime masked masked masked "
+arm_rec p boot1 Omarchy.linux-k114s
 reboot p; BOOT=boot3 ls_ p gate >/dev/null            # the trial entry is now the default entry: LoaderEntrySelected still names it
 ok "later boot selecting the same entry (promoted to default): ordinary, open" "$(ls $W/p/run/systemd/sleep.conf.d) $(sysst p)" "40-k114s-lid-sleep.conf static masked masked masked "
 ok "later boot selecting the same entry: status says ordinary" "$(BOOT=boot3 ls_ p status | sed -n 1p)" "this boot: ordinary"
@@ -178,7 +188,15 @@ arm_rec p boot4 Omarchy.linux-k114s; reboot p; out=$(BOOT=boot5 ls_ p gate)
 has "a new arm of the same entry is a trial again" "$out" "trial boot (one-shot kernel trial)"
 ok "the new trial spends the new record" "$(cat $W/p/state/lid-sleep-trial-seen)" "boot4 Omarchy.linux-k114s boot5"
 mk q; inst q >/dev/null; reboot q; arm_rec q boot1 Omarchy.linux-k114s; rm -f $W/q/efivars/*; out=$(BOOT=boot2 ls_ q gate)
-has "unreadable boot entry: trial" "$out" "boot entry unreadable"; ok "unreadable boot entry spends nothing" "$(ls $W/q/state | grep -c lid-sleep-trial-seen)" 0
+has "unreadable boot entry: trial" "$out" "boot entry unreadable"; ok "unreadable boot entry still spends the record" "$(cat "$W/q/state/lid-sleep-trial-seen")" "boot1 Omarchy.linux-k114s boot2"
+reboot q; BOOT=boot3 ls_ q gate >/dev/null
+ok "next boot with the entry still unreadable is ordinary" "$(sysst q)" "static masked masked masked "
+mk mismatch; inst mismatch >/dev/null; reboot mismatch
+arm_rec mismatch boot1 Omarchy.linux-k114s; selected mismatch Omarchy.linux-k114s-r3b
+BOOT=boot2 ls_ mismatch gate >/dev/null
+ok "a different selected entry opens on the first boot after arming" "$(sysst mismatch)" "static masked masked masked "
+reboot mismatch; selected mismatch Omarchy.linux-k114s; BOOT=boot3 ls_ mismatch gate >/dev/null
+ok "a different entry on the first boot spends the record for later boots" "$(sysst mismatch)" "static masked masked masked "
 # a stale record that the gate never saw (it did not run on the trial boot): the first boot that selects the entry is closed once
 mk t; inst t >/dev/null; reboot t; arm_rec t boot1 Omarchy.linux-k114s; selected t Omarchy.linux-k114s; BOOT=boot3 ls_ t gate >/dev/null
 ok "a trial the gate missed: the next boot that selects the entry is closed once" "$(sysst t)" "masked-runtime masked masked masked "

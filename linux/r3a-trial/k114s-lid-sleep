@@ -15,8 +15,8 @@
 # allow suspend and set the lid action; /run is empty after every reboot. On a trial boot it runtime-masks suspend.target
 # instead. A trial is a boot with /proc/device-tree/chosen/aurora,trial, or the boot a k114s-boot-once arm targeted
 # (LoaderEntrySelected equals the id in boot-once-armed, armed in an earlier boot; unreadable counts as a trial).
-# The boot that ran `arm` is an ordinary boot and may sleep. The gate records the trial boot it closed in $STATE/lid-sleep-trial-seen,
-# which spends that arming record: a later boot that selects the same entry (the trial entry promoted to the default) is ordinary.
+# The gate spends the arming record on the first boot it sees after arming, even if the selected entry differs or
+# cannot be read. It remembers a trial in /run so clearing the arming record does not open this boot.
 #
 # Test hooks (environment): K114S_ROOT K114S_EFIVARS K114S_STATE K114S_BOOTID K114S_SYSTEMCTL.
 set -u
@@ -34,25 +34,43 @@ GATE=k114s-lid-sleep-gate.service
 SLEEP_OPEN=$RUN/sleep.conf.d/40-k114s-lid-sleep.conf
 LOGIND_OPEN=$RUN/logind.conf.d/40-k114s-lid-sleep.conf
 RT_MASK=$RUN/system/suspend.target
+ARMED=$STATE/boot-once-armed
 SEEN=$STATE/lid-sleep-trial-seen
+TRIAL=$RUN/k114s-lid-sleep-trial
 die() { echo "k114s-lid-sleep: $*" >&2; exit 1; }
 need_root() { [ "$(id -u)" = 0 ] || [ -n "${K114S_ROOT:-}${K114S_STATE:-}" ] || die "run as root"; }
 
-# Prints why this boot is a trial and returns 0, or returns 1 for an ordinary boot.
-trial_reason() {
-  [ -e "$ROOT/proc/device-tree/chosen/aurora,trial" ] && { echo "Stage 2 trial"; return 0; }
-  [ -e "$STATE/boot-once-armed" ] || return 1
-  read -r ab aid < "$STATE/boot-once-armed" 2>/dev/null || { echo "boot-once-armed unreadable"; return 0; }
-  [ "$ab" != "$BOOTID" ] || return 1
-  # A record the gate already spent (it closed the trial boot it named) is a trial only in that boot: otherwise it goes stale
-  # once the trial entry becomes the default, and then names every later boot.
-  if read -r sab said sboot < "$SEEN" 2>/dev/null && [ "$sab $said" = "$ab $aid" ]; then
-    [ "$sboot" = "$BOOTID" ] && { echo "one-shot kernel trial"; return 0; }
-    return 1
+# Set reason for a trial, and spend for a one-shot record from an earlier boot.
+classify_boot() {
+  reason= spend=
+  if [ -e "$ROOT/proc/device-tree/chosen/aurora,trial" ]; then
+    reason="Stage 2 trial"
+  elif [ -f "$TRIAL" ]; then
+    reason=$(cat "$TRIAL")
+    reason=${reason:-trial record unreadable}
   fi
+  [ -e "$ARMED" ] || return 0
+  if ! { read -r ab aid < "$ARMED"; } 2>/dev/null || [ -z "$ab" ] || [ -z "$aid" ]; then
+    reason=${reason:-boot-once-armed unreadable}
+    return 0
+  fi
+  [ "$ab" != "$BOOTID" ] || return 0
+  if { read -r sab said sboot < "$SEEN"; } 2>/dev/null && [ "$sab $said" = "$ab $aid" ]; then
+    # A same-boot marker also identifies a trial started under the old gate.
+    [ "$sboot" != "$BOOTID" ] || reason=${reason:-one-shot kernel trial}
+    return 0
+  fi
+  spend=1
+  [ -z "$reason" ] || return 0
   sel=$(tail -c +5 "$EFIVARS/LoaderEntrySelected-$BLI" 2>/dev/null | iconv -f UTF-16LE -t UTF-8 2>/dev/null | tr -d '\0')
-  if [ -z "$sel" ]; then echo "armed one-shot, boot entry unreadable"; return 0; fi
-  [ "$sel" = "$aid" ] && { echo "one-shot kernel trial"; return 0; }
+  if [ -z "$sel" ]; then reason="armed one-shot, boot entry unreadable"
+  elif [ "$sel" = "$aid" ]; then reason="one-shot kernel trial"; fi
+}
+
+write_record() {
+  tmp=$(mktemp "$1.XXXXXX") || return 1
+  if printf '%s\n' "$2" > "$tmp" && mv -f "$tmp" "$1"; then return 0; fi
+  rm -f -- "$tmp" </dev/null
   return 1
 }
 
@@ -61,7 +79,10 @@ reload_logind() { if $SYSTEMCTL is-active --quiet systemd-logind.service; then $
 
 cmd_open() {
   need_root
-  if [ "${1:-}" != --force ] && r=$(trial_reason); then die "this boot is a trial ($r): not opening it (open --force overrides)"; fi
+  if [ "${1:-}" != --force ]; then
+    classify_boot
+    [ -z "$reason" ] || die "this boot is a trial ($reason): not opening it (open --force overrides)"
+  fi
   mkdir -p "$RUN/sleep.conf.d" "$RUN/logind.conf.d" || die "cannot create $RUN"
   cp "$LIB/lid-sleep/sleep-40-k114s-lid-sleep.conf" "$SLEEP_OPEN" && cp "$LIB/lid-sleep/logind-40-k114s-lid-sleep.conf" "$LOGIND_OPEN" || { rm -f "$SLEEP_OPEN" "$LOGIND_OPEN"; die "the 40 drop-ins are not in $LIB/lid-sleep; nothing opened"; }
   if [ -L "$RT_MASK" ]; then rm -f "$RT_MASK"; $SYSTEMCTL daemon-reload; fi
@@ -74,13 +95,18 @@ cmd_close() {
   reload_logind; echo "k114s-lid-sleep: closed: suspend.target runtime-masked; AllowSuspend=no and the lid lock from /etc stay"
 }
 cmd_gate() {
-  if r=$(trial_reason); then
-    echo "k114s-lid-sleep: trial boot ($r)"
-    if [ "$r" = "one-shot kernel trial" ] && read -r ab aid < "$STATE/boot-once-armed"; then   # spend the arming record, see trial_reason
-      { mkdir -p "$STATE" && printf '%s %s %s\n' "$ab" "$aid" "$BOOTID" > "$SEEN"; } || echo "k114s-lid-sleep: cannot write $SEEN; the arming record stays until: k114s-boot-once clear" >&2
-    fi
-    cmd_close
-  else cmd_open --force; fi
+  need_root
+  classify_boot
+  seen_boot=-  # a spent record from an ordinary boot names no trial boot
+  if [ -n "$reason" ]; then
+    echo "k114s-lid-sleep: trial boot ($reason)"
+    write_record "$TRIAL" "$reason" || { cmd_close; die "cannot record this trial in $TRIAL"; }
+    seen_boot=$BOOTID
+  fi
+  if [ -n "$spend" ]; then
+    write_record "$SEEN" "$ab $aid $seen_boot" || echo "k114s-lid-sleep: cannot write $SEEN; the arming record stays until: k114s-boot-once clear" >&2
+  fi
+  if [ -n "$reason" ]; then cmd_close; else cmd_open --force; fi
 }
 
 cmd_check() {
@@ -99,9 +125,10 @@ cmd_check() {
     grep -qx 'HandleLidSwitch=lock' "$SYSD/logind.conf.d/30-k114s-r3a-trial.conf" 2>/dev/null || bad "suspend.target is '$s' and $SYSD/logind.conf.d/30-k114s-r3a-trial.conf (HandleLidSwitch=lock) is missing: no fail-closed lock"
     [ $rc = 0 ] && echo "ok    suspend.target is $s, held by $GATE (enabled) over the 30-k114s-r3a-trial locks"
   fi
-  if r=$(trial_reason); then
-    case $s in masked | masked-runtime) ;; *) bad "this boot is a trial ($r) and suspend.target is '$s': the gate did not close it" ;; esac
-    if [ -e "$SLEEP_OPEN" ] || [ -e "$LOGIND_OPEN" ]; then bad "this boot is a trial ($r) and a 40 drop-in is in $RUN"; fi
+  classify_boot
+  if [ -n "$reason" ]; then
+    case $s in masked | masked-runtime) ;; *) bad "this boot is a trial ($reason) and suspend.target is '$s': the gate did not close it" ;; esac
+    if [ -e "$SLEEP_OPEN" ] || [ -e "$LOGIND_OPEN" ]; then bad "this boot is a trial ($reason) and a 40 drop-in is in $RUN"; fi
   fi
   [ $rc = 0 ] && echo "ok    no trial boot could sleep"
   return $rc
@@ -109,7 +136,8 @@ cmd_check() {
 
 cmd_status() {
   need_root
-  if r=$(trial_reason); then echo "this boot: trial ($r)"; else echo "this boot: ordinary"; fi
+  classify_boot
+  if [ -n "$reason" ]; then echo "this boot: trial ($reason)"; else echo "this boot: ordinary"; fi
   for t in suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target; do echo "$t: $($SYSTEMCTL is-enabled $t 2>/dev/null)"; done
   echo "$GATE: $($SYSTEMCTL is-enabled $GATE 2>/dev/null)"
   for f in "$SLEEP_OPEN" "$LOGIND_OPEN"; do if [ -e "$f" ]; then echo "open: $f"; else echo "closed: $f absent"; fi; done
