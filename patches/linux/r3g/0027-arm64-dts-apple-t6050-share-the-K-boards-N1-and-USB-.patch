@@ -1,0 +1,1018 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <address-in-upstream-commit@localhost>
+Date: Thu, 19 Nov 2026 23:10:32 +1100
+Subject: [PATCH 27/37] arm64: dts: apple: t6050: share the K boards' N1 and
+ USB-C ports, add K114s and K116c
+
+The K114s and K116c had no USB, no Wi-Fi/Bluetooth and no PCIe: the
+shared t6050-k114-k116.dtsi disabled ATC1, nub-spmi-a0 and the PCIe host,
+and only the K114c and K116s described their N1 port and USB-C ports,
+each in its own copy.
+
+The boards' ADTs have the same apcie0 port 0 (registers, IRQ 1523, PERST#
+GPIO 80, N1 on dart-apcie0 streams 1-3), the same PD controllers (hpm1 at
+0xa on nub-spmi-a0, hpm2 at 0xc on nub-spmi-a1, SN201202x) and the same
+atc-phy, usb-drd and dart-usb nodes on all four boards. So:
+
+- t6050-k114-k116.dtsi now describes PCIe port 0 with the N1, its
+  wifi0/bluetooth0 aliases and PERST# pin 80. The board file defines the
+  N1's firmware name and its board-id before including it; the platform
+  ID is board-id << 16 | 0x6050.
+- The new t6050-k114-k116-usb.dtsi describes ATC1 (left-front) and ATC2
+  (right): PD controllers, combo PHYs, DWC3s, DARTs and the atcphy
+  aliases. Boards include it after t6050-peripherals.dtsi, which defines
+  nub-spmi-a1 for them.
+- K114c and K116s keep only their deltas: K114c the nub-spmi-a0 fault
+  queue window, the MagSafe PD controller and the ATC2 router; K116s the
+  SD reader on port 1 and the single nub-spmi-a1 window.
+- K114s (board-id 0x14) and K116c (board-id 0x06) include both.
+
+The K114c and K116s DTBs are byte-identical before and after, as are
+the other T6050 DTBs. The shared blocks are Joshua Warren's K114c and
+Jens Axboe's K116s descriptions.
+
+Signed-off-by: Ryan Murray <address-in-upstream-commit@localhost>
+
+[re-cut onto the K114s r3d tree]
+---
+ .../boot/dts/apple/t6050-k114-k116-usb.dtsi   | 182 +++++++++++++
+ .../arm64/boot/dts/apple/t6050-k114-k116.dtsi | 106 +++++---
+ arch/arm64/boot/dts/apple/t6050-k114c.dts     | 257 +-----------------
+ arch/arm64/boot/dts/apple/t6050-k114s.dts     |   7 +
+ arch/arm64/boot/dts/apple/t6050-k116c.dts     |   6 +
+ arch/arm64/boot/dts/apple/t6050-k116s.dts     | 235 +---------------
+ 6 files changed, 292 insertions(+), 501 deletions(-)
+ create mode 100644 arch/arm64/boot/dts/apple/t6050-k114-k116-usb.dtsi
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114-k116-usb.dtsi b/arch/arm64/boot/dts/apple/t6050-k114-k116-usb.dtsi
+new file mode 100644
+index 000000000000..c82d8c24e3ed
+--- /dev/null
++++ b/arch/arm64/boot/dts/apple/t6050-k114-k116-usb.dtsi
+@@ -0,0 +1,182 @@
++// SPDX-License-Identifier: GPL-2.0+ OR MIT
++/*
++ * The K114c, K114s, K116c and K116s USB-C ports ATC1 (left-front) and ATC2 (right):
++ * USB 2/3 and the PD controllers. A board file includes this after
++ * t6050-peripherals.dtsi, which describes nub-spmi-a1 for these boards.
++ *
++ * From the boards' ADT, the same on all four:
++ *   ATC0 usb-drd0 left-back  hpm0 nub-spmi-a0 0x0c (the boot link's debug port, not described)
++ *   ATC1 usb-drd1 left-front hpm1 nub-spmi-a0 0x0a, port-number 2, acio-parent acio1
++ *   ATC2 usb-drd2 right      hpm2 nub-spmi-a1 0x0c, port-number 3, acio-parent acio2
++ *   hpm5 nub-spmi-a0 0x08 (MagSafe, not a USB-C connector)
++ * The PD controllers are SN201202x. The USB4/Thunderbolt routers (acio1, acio2) and the
++ * DisplayPort routes are not described here; the PHYs run in USB mode. The combo PHY driver
++ * leaves ATC0 alone on purpose (apple,port-index 0).
++ *
++ * The boot loader fills the PHYs' tunables from the ADT through the atcphy aliases.
++ */
++/ {
++	aliases {
++		atcphy1 = &atc1_phy;
++		atcphy2 = &atc2_phy;
++	};
++};
++
++/* ==== The left-front USB-C port (ATC1) ==== */
++&nub_spmi_a0 {
++	status = "okay";
++
++	hpm1: usb-pd@a {
++		compatible = "apple,sn201202x";
++		reg = <0xa SPMI_USID>;
++
++		connector {
++			compatible = "usb-c-connector";
++			label = "USB-C Left-front";
++			power-role = "dual";
++			data-role = "dual";
++
++			ports {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				port@0 {
++					reg = <0>;
++					hpm1_hs: endpoint {
++						remote-endpoint = <&usb_drd1_hs>;
++					};
++				};
++
++				port@1 {
++					reg = <1>;
++					hpm1_ss: endpoint {
++						remote-endpoint = <&atc1_phy_ep>;
++					};
++				};
++			};
++		};
++	};
++};
++
++&atc1_phy_mbox {
++	status = "okay";
++};
++
++&atc1_phy {
++	status = "okay";
++
++	port {
++		atc1_phy_ep: endpoint {
++			remote-endpoint = <&hpm1_ss>;
++		};
++	};
++};
++
++&usb_drd1 {
++	status = "okay";
++
++	port {
++		usb_drd1_hs: endpoint {
++			remote-endpoint = <&hpm1_hs>;
++		};
++	};
++};
++
++&usb_drd1_dart_0 {
++	status = "okay";
++};
++
++&usb_drd1_dart_1 {
++	status = "okay";
++};
++
++/*
++ * ==== The right USB-C port (ATC2) ====
++ *
++ * The HPM is on its own bus, nub-spmi-a1, and nothing hands the port off, so the power
++ * domains, the PHY mailbox, the PHY, the DWC3 and its DARTs are enabled outright. The driver
++ * polls the generation 4 bus and refuses an interrupt on it.
++ */
++&ps_atc2_common {
++	status = "okay";
++};
++
++&ps_atc2_usb_aon {
++	status = "okay";
++};
++
++&ps_atc2_phymxwrap {
++	status = "okay";
++};
++
++&ps_atc2_usb {
++	status = "okay";
++};
++
++&atc2_phy_mbox {
++	status = "okay";
++};
++
++&atc2_phy {
++	status = "okay";
++
++	port {
++		atc2_phy_ep: endpoint {
++			remote-endpoint = <&hpm2_ss>;
++		};
++	};
++};
++
++&usb_drd2 {
++	status = "okay";
++
++	port {
++		usb_drd2_hs: endpoint {
++			remote-endpoint = <&hpm2_hs>;
++		};
++	};
++};
++
++&usb_drd2_dart_0 {
++	status = "okay";
++};
++
++&usb_drd2_dart_1 {
++	status = "okay";
++};
++
++&nub_spmi_a1 {
++	/delete-property/ interrupts;
++	status = "okay";
++
++	hpm2: usb-pd@c {
++		compatible = "apple,sn201202x";
++		reg = <0xc SPMI_USID>;
++
++		connector {
++			compatible = "usb-c-connector";
++			label = "USB-C Right";
++			power-role = "dual";
++			data-role = "dual";
++
++			ports {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				port@0 {
++					reg = <0>;
++					hpm2_hs: endpoint {
++						remote-endpoint = <&usb_drd2_hs>;
++					};
++				};
++
++				port@1 {
++					reg = <1>;
++					hpm2_ss: endpoint {
++						remote-endpoint = <&atc2_phy_ep>;
++					};
++				};
++			};
++		};
++	};
++};
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+index c5b7bce2355b..757df032c13d 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+@@ -35,6 +35,9 @@ / {
+ 
+ 	aliases {
+ 		serial0 = &dockchannel;
++		/* The boot loader fills the N1's factory addresses through these */
++		wifi0 = &n1_alpha;
++		bluetooth0 = &n1_beta;
+ 	};
+ 
+ 	chosen {
+@@ -79,35 +82,14 @@ led-1 {
+ 	};
+ };
+ 
+-/* ATC1, ATC3 and the PD controller buses nub-spmi-a0 and -a2: not yet described for these boards */
+-&nub_spmi_a0 {
+-	status = "disabled";
+-};
+-
++/*
++ * ATC3 and the PD controller bus nub-spmi-a2: not described for these boards. The
++ * USB-C ports ATC1 and ATC2 are in t6050-k114-k116-usb.dtsi.
++ */
+ &nub_spmi_a2 {
+ 	status = "disabled";
+ };
+ 
+-&atc1_phy_mbox {
+-	status = "disabled";
+-};
+-
+-&atc1_phy {
+-	status = "disabled";
+-};
+-
+-&usb_drd1 {
+-	status = "disabled";
+-};
+-
+-&usb_drd1_dart_0 {
+-	status = "disabled";
+-};
+-
+-&usb_drd1_dart_1 {
+-	status = "disabled";
+-};
+-
+ &atc3_phy_mbox {
+ 	status = "disabled";
+ };
+@@ -138,23 +120,81 @@ &i2c2 {
+ 
+ /*
+  * As on J716c, where reading pin 112 takes an SError, only the pins a node
+- * here names are exposed, and none is yet. The N1 on PCIe port 0 needs its
+- * board's platform ID, which the static ADT does not carry, so the port and
+- * its PERST# pin stay unused for now.
++ * names are exposed: here 80, PCIe port 0's PERST#. A board that names more
++ * pins replaces the list.
+  */
+ &pinctrl_ap {
+-	gpio-reserved-ranges = <0 221>;
++	gpio-reserved-ranges = <0 80>, <81 140>;
+ };
+ 
+ /*
+- * The K114s N1 needs its own platform ID (its ADT /chosen board-id << 16 | 0x6050)
+- * before the port can be described. aura's T6050 hand-off still wants the host's
+- * iommu-map to mark the ports as it found them, so carry it with the host disabled.
++ * PCIe port 0: the N1 (Wi-Fi and Bluetooth), the same on all four boards and
++ * laid out as on J716c: the boot loader trains the link and keeps power,
++ * clocks, the PHY and PERST; Linux owns the routing, MSI and the DART. The
++ * port stays disabled until the loader trains it. From the boards' ADT:
++ * apcie0 gives port 0's registers and IRQ 1523, pci-bridge0's PERST# is GPIO
++ * 80, and the N1's three functions are on DART streams 1-3.
++ *
++ * The board file defines, before including this file, the N1's personalized
++ * firmware (T6050_K_N1_FIRMWARE) and its ADT /chosen board-id
++ * (T6050_K_BOARD_ID). The N1's platform ID is board-id << 16 | chip 0x6050.
++ * aura's T6050 hand-off wants the host's iommu-map to mark the ports as it
++ * found them.
+  */
+ &pcie0 {
+ 	iommu-map = <0x100 &dart_apcie0 1 3>;
+ 	bus-range = <0 4>;
+-	status = "disabled";
++	status = "okay";
++	reg = <0x1c 0xb0000000 0x0 0x10000000>,
++	      <0x4 0x14000000 0x0 0x4000>,
++	      <0x4 0x10028000 0x0 0x8000>,
++	      <0x4 0x17010000 0x0 0x4000>,
++	      <0x4 0x10024000 0x0 0x4000>;
++	reg-names = "config", "rc", "port0", "phy0", "intr2axi0";
++	interrupts = <AIC_IRQ 0 1523 IRQ_TYPE_LEVEL_HIGH>;
++	interrupt-names = "port0";
++
++	port00: pci@0,0 {
++		device_type = "pci";
++		reg = <0x0 0 0 0 0>;
++		bus-range = <1 1>;
++		apple,link-trained-by-bootloader;
++		/* PERST#, driven only by the root-port reset after the N1's ROM stage */
++		reset-gpios = <&pinctrl_ap 80 GPIO_ACTIVE_LOW>;
++		status = "disabled";
++
++		#address-cells = <3>;
++		#size-cells = <2>;
++		ranges;
++
++		interrupt-controller;
++		#interrupt-cells = <1>;
++		interrupt-map-mask = <0 0 0 7>;
++		interrupt-map = <0 0 0 1 &port00 0 0 0 0>,
++				<0 0 0 2 &port00 0 0 0 1>,
++				<0 0 0 3 &port00 0 0 0 2>,
++				<0 0 0 4 &port00 0 0 0 3>;
++
++		n1_control: control@0,0 {
++			compatible = "pci106b,1900";
++			reg = <0x10000 0x0 0x0 0x0 0x0>;
++			firmware-name = T6050_K_N1_FIRMWARE;
++			apple,centauri-platform-id = <((T6050_K_BOARD_ID << 16) | 0x6050)>;
++			apple,centauri-protocol = <27>;
++		};
++
++		n1_alpha: wifi@0,1 {
++			compatible = "pci106b,1902";
++			reg = <0x10100 0x0 0x0 0x0 0x0>;
++			local-mac-address = [00 00 00 00 00 00];
++		};
++
++		n1_beta: bluetooth@0,2 {
++			compatible = "pci106b,1903";
++			reg = <0x10200 0x0 0x0 0x0 0x0>;
++			local-bd-address = [00 00 00 00 00 00];
++		};
++	};
+ };
+ 
+ /*
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114c.dts b/arch/arm64/boot/dts/apple/t6050-k114c.dts
+index a32f9f9bea5f..ef44f4bdbae3 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k114c.dts
+@@ -11,6 +11,9 @@
+ 
+ /* Defined before the includes: t6050-max.dtsi guards the ATC2 router on it. */
+ #define T6050_K114C
++/* The N1's firmware and this board's ADT board-id, for t6050-k114-k116.dtsi */
++#define T6050_K_N1_FIRMWARE	"apple/centauri/k114c-ftab.bin"
++#define T6050_K_BOARD_ID	0x04
+ #include "t6050-k114-k116.dtsi"
+ 
+ / {
+@@ -53,78 +56,10 @@ &ps_fab9_soc {
+ 
+ / {
+ 	aliases {
+-		/* kboot fills the N1's factory addresses from /chosen through these */
+-		wifi0 = &n1_alpha;
+-		bluetooth0 = &n1_beta;
+ 		nvram = &nvram;
+ 	};
+ };
+ 
+-/*
+- * PCIe port 0: the N1 (Wi-Fi and Bluetooth), laid out as on J716c: the boot
+- * loader trains the link and keeps power, clocks, the PHY and PERST; Linux owns
+- * the routing, MSI and the DART. The port stays disabled until the loader
+- * trains it.
+- */
+-&pcie0 {
+-	reg = <0x1c 0xb0000000 0x0 0x10000000>,
+-	      <0x4 0x14000000 0x0 0x4000>,
+-	      <0x4 0x10028000 0x0 0x8000>,
+-	      <0x4 0x17010000 0x0 0x4000>,
+-	      <0x4 0x10024000 0x0 0x4000>;
+-	reg-names = "config", "rc", "port0", "phy0", "intr2axi0";
+-	interrupts = <AIC_IRQ 0 1523 IRQ_TYPE_LEVEL_HIGH>;
+-	interrupt-names = "port0";
+-
+-	/* The N1's three functions are on DART streams 1-3 */
+-	iommu-map = <0x100 &dart_apcie0 1 3>;
+-	bus-range = <0 4>;
+-	status = "okay";
+-
+-	port00: pci@0,0 {
+-		device_type = "pci";
+-		reg = <0x0 0 0 0 0>;
+-		bus-range = <1 1>;
+-		apple,link-trained-by-bootloader;
+-		/* PERST#, driven only by the root-port reset after the N1's ROM stage */
+-		reset-gpios = <&pinctrl_ap 80 GPIO_ACTIVE_LOW>;
+-		status = "disabled";
+-
+-		#address-cells = <3>;
+-		#size-cells = <2>;
+-		ranges;
+-
+-		interrupt-controller;
+-		#interrupt-cells = <1>;
+-		interrupt-map-mask = <0 0 0 7>;
+-		interrupt-map = <0 0 0 1 &port00 0 0 0 0>,
+-				<0 0 0 2 &port00 0 0 0 1>,
+-				<0 0 0 3 &port00 0 0 0 2>,
+-				<0 0 0 4 &port00 0 0 0 3>;
+-
+-		/* platform ID (board 0x04 << 16) | chip 0x6050 */
+-		n1_control: control@0,0 {
+-			compatible = "pci106b,1900";
+-			reg = <0x10000 0x0 0x0 0x0 0x0>;
+-			firmware-name = "apple/centauri/k114c-ftab.bin";
+-			apple,centauri-platform-id = <0x00046050>;
+-			apple,centauri-protocol = <27>;
+-		};
+-
+-		n1_alpha: wifi@0,1 {
+-			compatible = "pci106b,1902";
+-			reg = <0x10100 0x0 0x0 0x0 0x0>;
+-			local-mac-address = [00 00 00 00 00 00];
+-		};
+-
+-		n1_beta: bluetooth@0,2 {
+-			compatible = "pci106b,1903";
+-			reg = <0x10200 0x0 0x0 0x0 0x0>;
+-			local-bd-address = [00 00 00 00 00 00];
+-		};
+-	};
+-};
+-
+ /*
+  * Pin 112's register takes an SError when read, so only the pins a node here
+  * names are exposed: 80 (PCIe port 0's PERST#); 106 and 107, the speaker amps'
+@@ -370,61 +305,16 @@ &aop_audio {
+ };
+ 
+ /*
+- * ==== The left-front USB-C port (ATC1) ====
+- *
+- * ADT /arm-io/nub-spmi-a0/hpm1 (SN201202x, SPMI address 0xa, port-number 2, port-location
+- * "left-front", acio-parent acio1), with atc-phy1, usb-drd1 and dart-usb1. The K114cAP ADT
+- * has the same hpm0, hpm1, hpm5, atc-phy and usb-drd nodes as the J714cAP one, so this is the
+- * J714c port block. The ATC1 template nodes of t6050-dieX.dtsi are enabled here; the boards
+- * sharing t6050-k114-k116.dtsi keep them disabled. The port's USB4/Thunderbolt router
+- * (/arm-io/acio1) and its DisplayPort routes are not described; the PHY runs in USB mode.
+- *
+- * The left-back port (ATC0, hpm0) is the boot link's debug port; the combo PHY driver
+- * excludes it on purpose (apple,port-index 0).
++ * The USB-C ports ATC1 and ATC2, as on the other K boards (t6050-k114-k116-usb.dtsi). This
++ * board also gives nub-spmi-a0 its generation 4 fault queue (reg[1], which macOS empties when
++ * the controller starts) and describes the MagSafe 3 port's PD controller.
+  */
+-/ {
+-	aliases {
+-		atcphy1 = &atc1_phy;
+-	};
+-};
++#include "t6050-k114-k116-usb.dtsi"
+ 
+ &nub_spmi_a0 {
+-	status = "okay";
+-	/* reg[1]: the generation 4 fault queue, which macOS empties when the controller starts */
+ 	reg = <0x2 0x8a188000 0x0 0x4000>,
+ 	      <0x2 0x8a184000 0x0 0x4000>;
+ 
+-	hpm1: usb-pd@a {
+-		compatible = "apple,sn201202x";
+-		reg = <0xa SPMI_USID>;
+-
+-		connector {
+-			compatible = "usb-c-connector";
+-			label = "USB-C Left-front";
+-			power-role = "dual";
+-			data-role = "dual";
+-
+-			ports {
+-				#address-cells = <1>;
+-				#size-cells = <0>;
+-
+-				port@0 {
+-					reg = <0>;
+-					hpm1_hs: endpoint {
+-						remote-endpoint = <&usb_drd1_hs>;
+-					};
+-				};
+-
+-				port@1 {
+-					reg = <1>;
+-					hpm1_ss: endpoint {
+-						remote-endpoint = <&atc1_phy_ep>;
+-					};
+-				};
+-			};
+-		};
+-	};
+-
+ 	/*
+ 	 * The MagSafe 3 port's PD controller (ADT hpm5, port-type 0x11). It has no USB data
+ 	 * path, so it gets no connector node; tipd registers a Type-C port and a power supply
+@@ -437,139 +327,10 @@ hpm5: usb-pd@8 {
+ 	};
+ };
+ 
+-&atc1_phy_mbox {
+-	status = "okay";
+-};
+-
+-&atc1_phy {
+-	status = "okay";
+-
+-	port {
+-		atc1_phy_ep: endpoint {
+-			remote-endpoint = <&hpm1_ss>;
+-		};
+-	};
+-};
+-
+-&usb_drd1 {
+-	status = "okay";
+-
+-	port {
+-		usb_drd1_hs: endpoint {
+-			remote-endpoint = <&hpm1_hs>;
+-		};
+-	};
+-};
+-
+-&usb_drd1_dart_0 {
+-	status = "okay";
+-};
+-
+-&usb_drd1_dart_1 {
+-	status = "okay";
+-};
+-
+ /*
+- * ==== The right USB-C port (ATC2) ====
+- *
+- * ADT /arm-io/nub-spmi-a1/hpm2 (SN201202x, SPMI address 0xc, port-number 3, port-location
+- * "right", acio-parent acio2), with atc-phy2, usb-drd2 and dart-usb2. The HPM is on its own
+- * bus, nub-spmi-a1, and nothing hands the port off, so the power domains, the PHY mailbox, the
+- * PHY, the DWC3 and its DARTs are enabled outright, as t6050-max-atc2.dtsi does for the J714c
+- * and J716c. Its USB4/Thunderbolt router (acio2) and PCIe tunnel are
+- * t6050-max-atc2-router.dtsi, included below; the DisplayPort route is not described.
++ * The right port's USB4/Thunderbolt router (acio2) and PCIe tunnel; the DisplayPort route
++ * is not described.
+  */
+-/ {
+-	aliases {
+-		atcphy2 = &atc2_phy;
+-	};
+-};
+-
+-&ps_atc2_common {
+-	status = "okay";
+-};
+-
+-&ps_atc2_usb_aon {
+-	status = "okay";
+-};
+-
+-&ps_atc2_phymxwrap {
+-	status = "okay";
+-};
+-
+-&ps_atc2_usb {
+-	status = "okay";
+-};
+-
+-&atc2_phy_mbox {
+-	status = "okay";
+-};
+-
+-&atc2_phy {
+-	status = "okay";
+-
+-	port {
+-		atc2_phy_ep: endpoint {
+-			remote-endpoint = <&hpm2_ss>;
+-		};
+-	};
+-};
+-
+-&usb_drd2 {
+-	status = "okay";
+-
+-	port {
+-		usb_drd2_hs: endpoint {
+-			remote-endpoint = <&hpm2_hs>;
+-		};
+-	};
+-};
+-
+-&usb_drd2_dart_0 {
+-	status = "okay";
+-};
+-
+-&usb_drd2_dart_1 {
+-	status = "okay";
+-};
+-
+-&nub_spmi_a1 {
+-	status = "okay";
+-	/* the driver polls the PD controllers and refuses an interrupt on this bus */
+-	/delete-property/ interrupts;
+-
+-	hpm2: usb-pd@c {
+-		compatible = "apple,sn201202x";
+-		reg = <0xc SPMI_USID>;
+-
+-		connector {
+-			compatible = "usb-c-connector";
+-			label = "USB-C Right";
+-			power-role = "dual";
+-			data-role = "dual";
+-
+-			ports {
+-				#address-cells = <1>;
+-				#size-cells = <0>;
+-
+-				port@0 {
+-					reg = <0>;
+-					hpm2_hs: endpoint {
+-						remote-endpoint = <&usb_drd2_hs>;
+-					};
+-				};
+-
+-				port@1 {
+-					reg = <1>;
+-					hpm2_ss: endpoint {
+-						remote-endpoint = <&atc2_phy_ep>;
+-					};
+-				};
+-			};
+-		};
+-	};
+-};
+-
+ #include "t6050-max-atc2-router.dtsi"
+ 
+ /* The host DROM from the K114cAP ADT (/arm-io/acio2 thunderbolt-drom); the boot loader replaces it */
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114s.dts b/arch/arm64/boot/dts/apple/t6050-k114s.dts
+index 9120fa44ee8d..acce65b0ac7d 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k114s.dts
+@@ -10,6 +10,9 @@
+  * Copyright The Asahi Linux Contributors
+  */
+ 
++/* The N1's firmware and this board's ADT board-id, for t6050-k114-k116.dtsi */
++#define T6050_K_N1_FIRMWARE	"apple/centauri/k114s-ftab.bin"
++#define T6050_K_BOARD_ID	0x14
+ #include "t6050-k114-k116.dtsi"
+ 
+ / {
+@@ -24,6 +27,9 @@ &mtp_multitouch {
+ #define T6050_K114S
+ #include "t6050-peripherals.dtsi"
+ 
++/* The USB-C ports ATC1 and ATC2, as on the other K boards */
++#include "t6050-k114-k116-usb.dtsi"
++
+ / {
+ 	aliases {
+ 		/* asahi-bless and the boot loader find the NVRAM partition by this alias */
+@@ -60,5 +66,6 @@ nvram: partition@700000 {
+ 		};
+ 	};
+ };
++
+ /* The GPU in the M5 Pro layout */
+ #include "t6050-gpu-g17s.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-k116c.dts b/arch/arm64/boot/dts/apple/t6050-k116c.dts
+index b1c009828404..1aba561c7fc4 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k116c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k116c.dts
+@@ -9,6 +9,9 @@
+  * Copyright The Asahi Linux Contributors
+  */
+ 
++/* The N1's firmware and this board's ADT board-id, for t6050-k114-k116.dtsi */
++#define T6050_K_N1_FIRMWARE	"apple/centauri/k116c-ftab.bin"
++#define T6050_K_BOARD_ID	0x06
+ #include "t6050-k114-k116.dtsi"
+ 
+ / {
+@@ -25,4 +28,7 @@ &mtp_multitouch {
+ #define T6050_GPU_BUS
+ #include "t6050-peripherals.dtsi"
+ 
++/* The USB-C ports ATC1 and ATC2, as on the other K boards */
++#include "t6050-k114-k116-usb.dtsi"
++
+ #include "t6050-gpu-g17c.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-k116s.dts b/arch/arm64/boot/dts/apple/t6050-k116s.dts
+index ed38b0950bd9..48d4091a2ea4 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k116s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k116s.dts
+@@ -9,6 +9,9 @@
+  * Copyright The Asahi Linux Contributors
+  */
+ 
++/* The N1's firmware and this board's ADT board-id, for t6050-k114-k116.dtsi */
++#define T6050_K_N1_FIRMWARE	"apple/centauri/k116s-ftab.bin"
++#define T6050_K_BOARD_ID	0x16
+ #include "t6050-k114-k116.dtsi"
+ 
+ / {
+@@ -25,9 +28,6 @@ &mtp_multitouch {
+ 
+ / {
+ 	aliases {
+-		/* The loader fills the N1's factory addresses through these */
+-		wifi0 = &n1_alpha;
+-		bluetooth0 = &n1_beta;
+ 		/* the boot loader reserves the SEP firmware and adds its manifests through this alias */
+ 		sep = &sep;
+ 	};
+@@ -44,10 +44,7 @@ &pinctrl_ap {
+ };
+ 
+ /*
+- * PCIe port 0: the N1 (Wi-Fi and Bluetooth), laid out as on J714s. ADT apcie0
+- * gives port 0's registers and IRQ 1523, pci-bridge0's PERST# is GPIO 80, and
+- * the N1's three functions are on DART streams 1-3. The platform ID is this
+- * board's ADT /chosen board-id (0x16) << 16 | chip 0x6050.
++ * PCIe port 0, the N1, is in t6050-k114-k116.dtsi.
+  *
+  * PCIe port 1: the SD card reader (ADT apcie0/pci-bridge1/pcie-sdreader, a
+  * GL9755), as on J714s. The boot loader leaves the port down, so the kernel
+@@ -86,52 +83,8 @@ &pcie0 {
+ 	interrupt-names = "port0", "port1";
+ 	iommu-map = <0x100 &dart_apcie0 1 3>,
+ 		    <0x200 &apcie1_dart 1 1>;
+-	bus-range = <0 4>;
+ 	/* apcie1_dart probes only once port 1 is up: the host must not wait for it */
+ 	post-init-providers = <&apcie1_dart>;
+-	status = "okay";
+-
+-	port00: pci@0,0 {
+-		device_type = "pci";
+-		reg = <0x0 0 0 0 0>;
+-		bus-range = <1 1>;
+-		apple,link-trained-by-bootloader;
+-		/* PERST#: ADT pci-bridge0 function-perst, GPIO 80 */
+-		reset-gpios = <&pinctrl_ap 80 GPIO_ACTIVE_LOW>;
+-		status = "disabled";
+-
+-		#address-cells = <3>;
+-		#size-cells = <2>;
+-		ranges;
+-
+-		interrupt-controller;
+-		#interrupt-cells = <1>;
+-		interrupt-map-mask = <0 0 0 7>;
+-		interrupt-map = <0 0 0 1 &port00 0 0 0 0>,
+-				<0 0 0 2 &port00 0 0 0 1>,
+-				<0 0 0 3 &port00 0 0 0 2>,
+-				<0 0 0 4 &port00 0 0 0 3>;
+-
+-		n1_control: control@0,0 {
+-			compatible = "pci106b,1900";
+-			reg = <0x10000 0x0 0x0 0x0 0x0>;
+-			firmware-name = "apple/centauri/k116s-ftab.bin";
+-			apple,centauri-platform-id = <0x00166050>;
+-			apple,centauri-protocol = <27>;
+-		};
+-
+-		n1_alpha: wifi@0,1 {
+-			compatible = "pci106b,1902";
+-			reg = <0x10100 0x0 0x0 0x0 0x0>;
+-			local-mac-address = [00 00 00 00 00 00];
+-		};
+-
+-		n1_beta: bluetooth@0,2 {
+-			compatible = "pci106b,1903";
+-			reg = <0x10200 0x0 0x0 0x0 0x0>;
+-			local-bd-address = [00 00 00 00 00 00];
+-		};
+-	};
+ 
+ 	port01: pci@1,0 {
+ 		device_type = "pci";
+@@ -193,172 +146,6 @@ &apcie1_dart {
+ 	status = "okay";
+ };
+ 
+-/*
+- * Type-C, from the ADT (as on J714s):
+- *   ATC0 usb-drd0 left-back  hpm0 nub-spmi-a0 0x0c (the debug port, not described)
+- *   ATC1 usb-drd1 left-front hpm1 nub-spmi-a0 0x0a
+- *   ATC2 usb-drd2 right      hpm2 nub-spmi-a1 0x0c
+- *   hpm5 nub-spmi-a0 0x08 (MagSafe, not a USB-C connector)
+- */
+-
+-/* Left-front port (ATC1): the SN201202x hpm1 and the connector graph */
+-&nub_spmi_a0 {
+-	status = "okay";
+-
+-	hpm1: usb-pd@a {
+-		compatible = "apple,sn201202x";
+-		reg = <0xa SPMI_USID>;
+-
+-		typec1: connector {
+-			compatible = "usb-c-connector";
+-			label = "USB-C Left-front";
+-			power-role = "dual";
+-			data-role = "dual";
+-
+-			ports {
+-				#address-cells = <1>;
+-				#size-cells = <0>;
+-
+-				port@0 {
+-					reg = <0>;
+-					typec1_hs: endpoint {
+-						remote-endpoint = <&usb_drd1_hs>;
+-					};
+-				};
+-
+-				port@1 {
+-					reg = <1>;
+-					typec1_ss: endpoint {
+-						remote-endpoint = <&atc1_phy_typec>;
+-					};
+-				};
+-			};
+-		};
+-	};
+-};
+-
+-&atc1_phy_mbox {
+-	status = "okay";
+-};
+-
+-&atc1_phy {
+-	status = "okay";
+-
+-	port {
+-		atc1_phy_typec: endpoint {
+-			remote-endpoint = <&typec1_ss>;
+-		};
+-	};
+-};
+-
+-&usb_drd1 {
+-	status = "okay";
+-
+-	port {
+-		usb_drd1_hs: endpoint {
+-			remote-endpoint = <&typec1_hs>;
+-		};
+-	};
+-};
+-
+-&usb_drd1_dart_0 {
+-	status = "okay";
+-};
+-
+-&usb_drd1_dart_1 {
+-	status = "okay";
+-};
+-
+-/*
+- * Right port (ATC2): hpm2 on nub-spmi-a1, USB only (dcpext0's DisplayPort route
+- * through ATC2 stays off). The driver polls the generation 4 bus and refuses an
+- * interrupt, so it takes the first register window only, as on J714s.
+- */
+-&nub_spmi_a1 {
+-	reg = <0x2 0x8a1a8000 0x0 0x4000>;
+-	/delete-property/ interrupts;
+-	status = "okay";
+-
+-	hpm2: usb-pd@c {
+-		compatible = "apple,sn201202x";
+-		reg = <0xc SPMI_USID>;
+-
+-		typec2: connector {
+-			compatible = "usb-c-connector";
+-			label = "USB-C Right";
+-			power-role = "dual";
+-			data-role = "dual";
+-
+-			ports {
+-				#address-cells = <1>;
+-				#size-cells = <0>;
+-
+-				port@0 {
+-					reg = <0>;
+-					typec2_hs: endpoint {
+-						remote-endpoint = <&usb_drd2_hs>;
+-					};
+-				};
+-
+-				port@1 {
+-					reg = <1>;
+-					typec2_ss: endpoint {
+-						remote-endpoint = <&atc2_phy_typec>;
+-					};
+-				};
+-			};
+-		};
+-	};
+-};
+-
+-&ps_atc2_common {
+-	status = "okay";
+-};
+-
+-&ps_atc2_usb_aon {
+-	status = "okay";
+-};
+-
+-&ps_atc2_phymxwrap {
+-	status = "okay";
+-};
+-
+-&ps_atc2_usb {
+-	status = "okay";
+-};
+-
+-&atc2_phy_mbox {
+-	status = "okay";
+-};
+-
+-&atc2_phy {
+-	status = "okay";
+-
+-	port {
+-		atc2_phy_typec: endpoint {
+-			remote-endpoint = <&typec2_ss>;
+-		};
+-	};
+-};
+-
+-&usb_drd2 {
+-	status = "okay";
+-
+-	port {
+-		usb_drd2_hs: endpoint {
+-			remote-endpoint = <&typec2_hs>;
+-		};
+-	};
+-};
+-
+-&usb_drd2_dart_0 {
+-	status = "okay";
+-};
+-
+-&usb_drd2_dart_1 {
+-	status = "okay";
+-};
+-
+ /*
+  * The internal panel and the display coprocessor, for the boot loader's display
+  * hand-off (aura, chosen.aurora,t6050-display=1). Everything stays disabled: the
+@@ -446,12 +233,20 @@ kiwi {
+ / {
+ 	aliases {
+ 		keyboard = &keyboard;
+-		/* The loader fills the PHYs' tunables from the ADT through these */
+-		atcphy1 = &atc1_phy;
+-		atcphy2 = &atc2_phy;
+ 	};
+ };
+ 
++/* The USB-C ports ATC1 and ATC2, as on the other K boards */
++#include "t6050-k114-k116-usb.dtsi"
++
++/*
++ * Right port (ATC2): nub-spmi-a1 takes the first register window only, as on
++ * J714s.
++ */
++&nub_spmi_a1 {
++	reg = <0x2 0x8a1a8000 0x0 0x4000>;
++};
++
+ /*
+  * The PMP (ADT pmp0, /chosen, /arm-io/pmgr), as on the J714s: iBoot loads its firmware and
+  * the driver starts it with these boot arguments and the firmware properties in the tunables

@@ -1,0 +1,148 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <address-in-upstream-commit@localhost>
+Date: Thu, 19 Nov 2026 22:55:03 +1100
+Subject: [PATCH 29/37] arm64: dts: apple: t6050: Share the camera, add J714c,
+ J716s, K114s, K116c
+
+The T6050 camera (ISP, its three DARTs and its power states) was
+described for J714s, J716c and K116s only, in t6050-j716c-isp.dtsi.
+Nothing in that file is J716c specific: each laptop's ADT has the same
+isp0, dart-isp0 and ISP power states (registers, interrupts, streams,
+power-state offsets). The only per-board value is the isp0 sensor-type,
+and the boot loader reads that from the ADT and passes it on as the
+platform ID.
+
+Rename the file to t6050-isp.dtsi and include it from J714c, J716s,
+K114s and K116c as well. Each board's include notes its sensor-type
+from that board's ADT. Every node stays disabled until the loader has
+reserved the camera firmware, so a loader without a row for the board
+leaves the camera off.
+
+The J714s, J716c and K116s DTBs are byte-identical. K114c is left out
+here: its camera is described in a separate open change. J775c, J775d
+and J873s have no camera and are unchanged.
+
+The original J716c description is by Erik Bourget.
+
+Signed-off-by: Ryan Murray <address-in-upstream-commit@localhost>
+
+[re-cut onto the K114s r3d tree]
+---
+ .../dts/apple/{t6050-j716c-isp.dtsi => t6050-isp.dtsi}    | 8 +++++++-
+ arch/arm64/boot/dts/apple/t6050-j714c.dts                 | 3 +++
+ arch/arm64/boot/dts/apple/t6050-j714s.dts                 | 2 +-
+ arch/arm64/boot/dts/apple/t6050-j716c.dts                 | 2 +-
+ arch/arm64/boot/dts/apple/t6050-j716s.dts                 | 3 +++
+ arch/arm64/boot/dts/apple/t6050-k114s.dts                 | 3 +++
+ arch/arm64/boot/dts/apple/t6050-k116c.dts                 | 3 +++
+ arch/arm64/boot/dts/apple/t6050-k116s.dts                 | 2 +-
+ 8 files changed, 22 insertions(+), 4 deletions(-)
+ rename arch/arm64/boot/dts/apple/{t6050-j716c-isp.dtsi => t6050-isp.dtsi} (90%)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-j716c-isp.dtsi b/arch/arm64/boot/dts/apple/t6050-isp.dtsi
+similarity index 90%
+rename from arch/arm64/boot/dts/apple/t6050-j716c-isp.dtsi
+rename to arch/arm64/boot/dts/apple/t6050-isp.dtsi
+index b6b1675d2602..1c0084fb9126 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j716c-isp.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-isp.dtsi
+@@ -1,5 +1,11 @@
+ // SPDX-License-Identifier: GPL-2.0+ OR MIT
+-/* J716c camera: enabled only after the loader reserves the current firmware. */
++/*
++ * The T6050 laptop camera (ISP, its three DARTs and power states). Every T6050
++ * laptop's ADT has the same isp0, dart-isp0 and ISP power states; only the
++ * sensor-type differs per board. The loader reads that sensor-type, reserves the
++ * firmware segments and enables the nodes; until then everything stays disabled.
++ * The sensor presets are a default a board may replace.
++ */
+ / {
+ 	aliases {
+ 		isp = &isp0;
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714c.dts b/arch/arm64/boot/dts/apple/t6050-j714c.dts
+index 7a72548b1b4e..80819af5c20b 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j714c.dts
+@@ -533,3 +533,6 @@ &avd_dart {
+ &avd {
+ 	status = "okay";
+ };
++
++/* The camera. The loader sets the platform ID from the ADT isp0 sensor-type (0x73). */
++#include "t6050-isp.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714s.dts b/arch/arm64/boot/dts/apple/t6050-j714s.dts
+index 5de41448e359..3b07d8abaa29 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j714s.dts
+@@ -653,7 +653,7 @@ fan-F1Ac {
+ };
+ 
+ /* The same T6050 camera as J716c (J714sAP ADT); the loader sets the J714s sensor type. */
+-#include "t6050-j716c-isp.dtsi"
++#include "t6050-isp.dtsi"
+ 
+ /*
+  * The J714s camera sizes: sensor config 8 (the 3040x2880 frame binned 2x2 to 1520x1440)
+diff --git a/arch/arm64/boot/dts/apple/t6050-j716c.dts b/arch/arm64/boot/dts/apple/t6050-j716c.dts
+index 34a5b69a7a25..d54487b0567c 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j716c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j716c.dts
+@@ -319,7 +319,7 @@ mesa: fingerprint@0 {
+ 	};
+ };
+ 
+-#include "t6050-j716c-isp.dtsi"
++#include "t6050-isp.dtsi"
+ #include "t6050-j716c-gpu-panel.dtsi"
+ 
+ #include "t6050-j716c-display.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-j716s.dts b/arch/arm64/boot/dts/apple/t6050-j716s.dts
+index c5a26bf32930..b10a24902eb9 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j716s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j716s.dts
+@@ -570,3 +570,6 @@ tp-accel {
+ 
+ #define T6050_J716S
+ #include "t6050-peripherals.dtsi"
++
++/* The camera. The loader sets the platform ID from the ADT isp0 sensor-type (0x76). */
++#include "t6050-isp.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114s.dts b/arch/arm64/boot/dts/apple/t6050-k114s.dts
+index acce65b0ac7d..624331283c41 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k114s.dts
+@@ -30,6 +30,9 @@ &mtp_multitouch {
+ /* The USB-C ports ATC1 and ATC2, as on the other K boards */
+ #include "t6050-k114-k116-usb.dtsi"
+ 
++/* The camera. The loader sets the platform ID from the ADT isp0 sensor-type (0xba). */
++#include "t6050-isp.dtsi"
++
+ / {
+ 	aliases {
+ 		/* asahi-bless and the boot loader find the NVRAM partition by this alias */
+diff --git a/arch/arm64/boot/dts/apple/t6050-k116c.dts b/arch/arm64/boot/dts/apple/t6050-k116c.dts
+index 1aba561c7fc4..65b6a517ef64 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k116c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k116c.dts
+@@ -31,4 +31,7 @@ &mtp_multitouch {
+ /* The USB-C ports ATC1 and ATC2, as on the other K boards */
+ #include "t6050-k114-k116-usb.dtsi"
+ 
++/* The camera. The loader sets the platform ID from the ADT isp0 sensor-type (0xbb). */
++#include "t6050-isp.dtsi"
++
+ #include "t6050-gpu-g17c.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-k116s.dts b/arch/arm64/boot/dts/apple/t6050-k116s.dts
+index 48d4091a2ea4..d40605db5e35 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k116s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k116s.dts
+@@ -602,7 +602,7 @@ &aop_audio {
+  * J714s's sensor. The sensor type is 0xbc and the connection scheme 0x10; the loader passes
+  * both. Everything stays disabled until the loader has reserved the firmware.
+  */
+-#include "t6050-j716c-isp.dtsi"
++#include "t6050-isp.dtsi"
+ 
+ /*
+  * The CPU PMU the shared T6050 files turn on for every board (t6050-base.dtsi, measured on
