@@ -93,7 +93,10 @@ changes, change this file through a PR.
      Boot it once by a Limine one-shot under the same gates as step 7.
    - **Device-tree PRs** (#3103, #2115): the tree comes from the Stage 2, not the kernel package, so build a Stage 2 test
      file whose tree is the K114s board file at the PR head (with the includes the head needs) and boot it once by
-     `aura-try`, with the running kernel. #2115 waits until #2631 merges.
+     `aura-try`, with the running kernel. The upstream board file has no Wi-Fi node, so the trial boot has no network
+     and the agent cannot reach it: the kit must reboot back to Main by itself once its check unit has written the
+     result (as the #3103 kit did). The #2115 kit on 2026-11-25 did not, and the Mac sat on the trial boot until the
+     owner rebooted it.
    - **Loader PRs** (aura#515): a Stage 2 test file built from the PR head, booted once by `aura-try`.
    - **Never promote a PR-head build**: Main and the configured Stage 2 stay as they were, and the next boot returns to
      them.
