@@ -206,9 +206,9 @@
         "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
       },
       "not_claimed": "any write",
-      "state": "submitted",
-      "read_back": "PR read back: state open, draft True, merged False (2026-11-25); marked ready for review after the head row, body Tested/Not yet updated, read back: draft False (2026-11-26)",
-      "follow_up": "hardware row at the head: linux-3103-hwrow-2026-11-26; watch for review",
+      "state": "merged",
+      "read_back": "PR read back: state open, draft True, merged False (2026-11-25); marked ready for review after the head row, body Tested/Not yet updated, read back: draft False (2026-11-26); merged 2026-11-26T00:53:55Z by DjDeveloperr as a4636356da68 (read back 2026-11-26)",
+      "follow_up": "none: merged",
       "acknowledged": null,
       "maintainer_feedback": []
     },
@@ -529,7 +529,7 @@
       "not_claimed": "the startup-disk write path; panel, sound and Wi-Fi (not in this board file); a second K114s",
       "state": "submitted",
       "read_back": "comment read back, author chrisohearn; PR draft False, head unchanged (2026-11-26)",
-      "follow_up": "watch for review",
+      "follow_up": "none: PR merged",
       "acknowledged": null,
       "maintainer_feedback": []
     },
