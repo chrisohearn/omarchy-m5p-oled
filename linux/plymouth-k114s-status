@@ -1,0 +1,26 @@
+#!/bin/bash
+# Query the installed package without refreshing or modifying pacman's databases.
+
+if ! info=$(LC_ALL=C pacman -Qi plymouth); then
+    printf 'Cannot read the installed Plymouth package.\n' >&2
+    exit 2
+fi
+
+version=$(awk '$1 == "Version" && $2 == ":" { print $3; exit }' <<< "$info")
+if [[ -z $version ]]; then
+    printf 'Cannot read the installed Plymouth version.\n' >&2
+    exit 2
+fi
+
+if awk '$1 == "Provides" && $2 == ":" {
+    for (i = 3; i <= NF; i++)
+        if ($i == "plymouth-k114s")
+            patched = 1
+}
+END { exit !patched }' <<< "$info"; then
+    printf 'Plymouth %s is the local K114s patched build.\n' "$version"
+    exit 0
+fi
+
+printf 'Plymouth %s has no local K114s patch marker.\n' "$version"
+exit 1
