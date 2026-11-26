@@ -79,7 +79,9 @@ changes, change this file through a PR.
    with these ids, while no `kind: "hardware result (PR head)"` row for that PR's current head is recorded (a posted
    report stays `submitted`; a new head needs a new row): `linux-k114s-nvram-2026-11-25` (#3103),
    `linux-k114-macaudio-jack-2026-11-25` (#3104), `linux-k114s-brightness-floor-2026-11-25` (#3105),
-   `linux-2115-sep-dt-rework-2026-11-25` (#2115) and `aura-k114s-camera-row-2026-11-25` (aura#515).
+   `linux-2115-sep-dt-rework-2026-11-25` (#2115), `aura-k114s-camera-row-2026-11-25` (aura#515) and
+   `linux-k114s-min-brightness-2026-11-26` (#3181, stacked on #2009 and #3105: it waits until a display hand-off lets
+   its exact head drive the panel, and is rebased when #2009 or #3105 changes).
 
    **The nightly run prepares; the boot is attended.** A PR head that hangs before userspace is not recovered by the
    Limine one-shot or `aura-try` alone: someone has to hold the power button (the loader's trial watchdog does not arm
