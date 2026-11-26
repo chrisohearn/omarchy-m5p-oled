@@ -294,6 +294,22 @@ r=$(mk); inst "$r" >/dev/null; orig "$r"; out=$(inst "$r" "$SRC" --undo); rc=$?
 ok "undo after an update: succeeds, files as shipped" "$rc:$(sumof "$r")" "0:$ORIG"
 r=$(mk); out=$(K114S_ROOT=$r bash "$INSTALL" bogus 2>&1); rc=$?; ok "unknown argument: refused" "$rc" 1
 
+# Patch 0006's Limine guard follows the patch's install, retirement and undo.
+r=$(mk); boot_src=$BASE/boot-src; mkdir "$boot_src"
+boot_patch=$(printf '%s\n' "$P"/0006-*.patch)
+cp "$SRC/0001-test.patch" "$boot_patch" "$boot_src/"
+cp -r "${boot_patch%.patch}.base" "$boot_src/"
+cp "${boot_patch%.patch}.base/bin/omarchy-plymouth-set" "$r/usr/bin/"
+shipped "$r"
+guard=$r/etc/boot/hooks/pre.d/00-k114s-boot-rebuild-guard
+out=$(inst "$r" "$boot_src"); rc=$?
+ok "0006: installs the executable Limine guard and applies the patch" \
+  "$rc:$(test -x "$guard" && cmp -s "$guard" "$L/${guard##*/}" && echo yes):$(grep -c '0006-.*: applied' <<<"$out")" "0:yes:1"
+out=$(inst "$r"); rc=$?
+ok "0006: retiring the patch removes the guard" "$rc:$(test ! -e "$guard" && echo yes)" "0:yes"
+out=$(inst "$r" "$boot_src") && out=$(inst "$r" "$boot_src" --undo); rc=$?
+ok "0006: undo removes the guard" "$rc:$(test ! -e "$guard" && echo yes)" "0:yes"
+
 # Without GNU patch: the hook writes nothing and says so; the installer refuses.
 nopatch=$BASE/nopatch; mkdir -p "$nopatch"
 for t in bash basename dirname cat cmp cut gzip zcat awk sed sort head id install mkdir rm sha256sum env tr; do ln -s "$(command -v $t)" "$nopatch/$t"; done

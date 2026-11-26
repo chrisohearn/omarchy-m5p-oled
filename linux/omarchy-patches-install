@@ -16,6 +16,8 @@ DEST=$LIB/omarchy-patches
 APPLY=$LIB/omarchy-patches-apply
 SHARED=$LIB/omarchy-patches-lib.sh
 HOOK=$ROOT/etc/pacman.d/hooks/03-k114s-omarchy-patches.hook
+BOOT_GUARD=$ROOT/etc/boot/hooks/pre.d/00-k114s-boot-rebuild-guard
+BOOT_PATCH=0006-boot-screen-rebuilds-only-k114s-images.patch
 die() { echo "omarchy-patches-install: $*" >&2; exit 1; }
 say() { echo "omarchy-patches-install: $*"; }
 
@@ -39,12 +41,15 @@ if [[ ${1:-} == --undo ]]; then
     rm -f "${installed[i]}"
   done
   rm -rf "$DEST"
-  rm -f "$APPLY" "$SHARED"
+  rm -f "$APPLY" "$SHARED" "$BOOT_GUARD"
   say "undone"
   exit 0
 fi
 wanted=("$SRC"/*.patch)
 (( ${#wanted[@]} )) || die "no patches in $SRC. To retire the last one, run: sudo bash $HERE/omarchy-patches-install --undo"
+if [[ -f $SRC/$BOOT_PATCH && ! -f $HERE/${BOOT_GUARD##*/} ]]; then
+  die "the Limine pre-build guard is missing; nothing changed"
+fi
 for p in "${wanted[@]}"; do
   [[ $(basename "$p") =~ ^[A-Za-z0-9._-]+\.patch$ ]] || die "unexpected patch name: $p"
   why=$(check_targets "$p") || die "$(basename "$p") $why; patches may only change files the Omarchy package installed. Nothing changed."
@@ -93,5 +98,10 @@ done
 install -m 644 "$HERE/omarchy-patches-lib.sh" "$SHARED"
 install -m 755 "$HERE/omarchy-patches-apply" "$APPLY"
 install -m 644 "$HERE/03-k114s-omarchy-patches.hook" "$HOOK"
+if [[ -f $DEST/$BOOT_PATCH ]]; then
+  install -Dm755 "$HERE/${BOOT_GUARD##*/}" "$BOOT_GUARD"
+else
+  rm -f "$BOOT_GUARD"
+fi
 say "installed ${#wanted[@]} patch(es) and $HOOK"
 K114S_ROOT=$ROOT "$APPLY"
