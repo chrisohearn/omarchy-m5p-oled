@@ -32,6 +32,8 @@ changes, change this file through a PR.
 
 1. **Packages.** Run `omarchy update -y`, not a direct pacman upgrade, which Omarchy refuses. Then check:
    - `checkupdates` is empty;
+   - count the boots since the local Plymouth went on with no `plymouth-start` core dump, and close #262 at six in a row
+     ([Plymouth on K114s](plymouth-k114s.md#closing-262));
    - run `linux/plymouth-k114s-status` and rebuild the local Plymouth package when Arch Linux ARM ships a newer release, per [Plymouth on K114s](plymouth-k114s.md) (a `plymouth` line in the pre-update `checkupdates` means the update will replace the local build; record it in the report);
    - `sudo -n /usr/local/lib/omarchy-k114s/omarchy-patches-apply` shows all patches in place, or refresh any that
      don't fit, as PR #248 did;
