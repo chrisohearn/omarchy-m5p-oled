@@ -1,0 +1,29 @@
+From a78786207672b9aab7880979da41df62e6e6fde8 Mon Sep 17 00:00:00 2001
+From: Chris O'Hearn <137103567+chrisohearn@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 22:50:28 -0700
+Subject: [PATCH] device-manager: Tell the daemon before freeing a renderer's
+ keyboard
+
+free_keyboards_for_renderer() frees each keyboard that belongs to a
+removed renderer, but never calls keyboard_removed_handler, so the
+daemon and the splash plugin keep a pointer to the freed keyboard. When
+the splash is hidden after that (for example plymouth quit right after
+simpledrm hands over to the real DRM driver), the script plugin calls
+ply_keyboard_remove_input_handler() on freed memory and plymouthd
+crashes with SIGSEGV.
+
+Call keyboard_removed_handler before ply_keyboard_free(), as
+keyboard_added_handler is called when the keyboard is created.
+
+Signed-off-by: Chris O'Hearn <137103567+chrisohearn@users.noreply.github.com>
+---
+diff --git i/src/libply-splash-core/ply-device-manager.c w/src/libply-splash-core/ply-device-manager.c
+index aacab4d3..58adbdf1 100644
+--- i/src/libply-splash-core/ply-device-manager.c
++++ w/src/libply-splash-core/ply-device-manager.c
+@@ -168,2 +168,5 @@ free_keyboards_for_renderer (ply_device_manager_t *manager,
+                 if (keyboard_renderer == renderer) {
++                        if (manager->keyboard_removed_handler != NULL)
++                                manager->keyboard_removed_handler (manager->event_handler_data, keyboard);
++
+                         ply_keyboard_free (keyboard);
