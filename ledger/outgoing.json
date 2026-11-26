@@ -227,8 +227,8 @@
       },
       "not_claimed": "booted at the PR head; macOS Touch ID after Linux enrolment",
       "state": "submitted",
-      "read_back": "PR read back: state open, draft True, merged False (2026-11-25); time is the force-push/draft event",
-      "follow_up": "watch for review",
+      "read_back": "PR read back: state open, draft True, merged False (2026-11-25); time is the force-push/draft event; reworked to DT-only after #2631 merged, force-pushed aee6ef0f9434 (lease on 2f5e9ebc2395), body updated, read back draft True (2026-11-26)",
+      "follow_up": "hardware row at the head: linux-2115-hwrow-2026-11-26; cold boot, enroll/match, deep sleep, macOS and second-Mac rows still open; watch for review",
       "acknowledged": null,
       "maintainer_feedback": []
     },
@@ -614,6 +614,26 @@
       "state": "submitted",
       "read_back": "comment read back, author chrisohearn (2026-11-26)",
       "follow_up": "watch for the author's reply; boot #2009's head when asked",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-2115-hwrow-2026-11-26",
+      "destination": "aurora-silicon/linux #2115",
+      "url": "https://github.com/aurora-silicon/linux/pull/2115#issuecomment-7202389313",
+      "posted": "2026-11-26T20:11:01Z",
+      "account": "chrisohearn",
+      "kind": "hardware result (PR head)",
+      "result": "PASS for SEP and sensor readiness at aee6ef0f9434: one agent reboot (not a cold boot) with the head's t6050-k114s.dtb as the tree (Stage 2 via aura-try); SEP T6050 profile, ready in 1444 ms, 13 endpoints, key store open; SEP DART bound; apple-mesa sensor bound; existing enrollment listed; nothing enrolled, deleted or verified; 0 failed units at ~7 s; no new distinct error-priority kernel lines; QSPI read_only=Y",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 (06b38fd0), one trial boot, Stage 2 test file 77035156",
+        "device_tree": "t6050-k114s.dtb built at PR head aee6ef0f9434 (e242f396)"
+      },
+      "not_claimed": "a cold boot; fresh enrollment, match and wrong-finger rejection; deep sleeps; macOS Touch ID and unlock after a Linux enrollment; a second T6050 Mac",
+      "state": "submitted",
+      "read_back": "comment read back, author chrisohearn, 1993 chars; PR draft True, head unchanged (2026-11-26)",
+      "follow_up": "watch for review; the trial tree has no Wi-Fi node, so the boot had no network and the owner rebooted it back to Main",
       "acknowledged": null,
       "maintainer_feedback": []
     }
