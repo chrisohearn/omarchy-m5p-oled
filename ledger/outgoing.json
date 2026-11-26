@@ -524,7 +524,7 @@
         "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
         "loader": "Aura v1.0.0b15 with the K114s camera row (override 06b38fd0), one attended trial boot",
         "device_tree": "t6050-k114s.dtb built at PR head 59c72f163caa (9bdf47b8)",
-        "firmware": "OS firmware 27.2, system firmware 27.3 beta (iBoot mBoot-20457.41.3)"
+        "firmware": "OS firmware 27.2 (mBoot-20457.41.3), system firmware 27.3 beta (mBoot-20457.60.65.0.1)"
       },
       "not_claimed": "the startup-disk write path; panel, sound and Wi-Fi (not in this board file); a second K114s",
       "state": "hardware_confirmed",
