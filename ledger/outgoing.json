@@ -246,9 +246,9 @@
         "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
       },
       "not_claimed": "a headphone or headset plugged in (plug detection, playback, headset mic); the DT",
-      "state": "submitted",
-      "read_back": "PR read back: state open, draft True, merged False (2026-11-25); marked ready after the head row (owner: wired jack tests not wanted), body Tested/Not yet updated, read back: draft False (2026-11-26)",
-      "follow_up": "hardware row at the head: linux-3104-hwrow-2026-11-26; watch for review",
+      "state": "merged",
+      "read_back": "PR read back: state open, draft True, merged False (2026-11-25); marked ready after the head row (owner: wired jack tests not wanted), body Tested/Not yet updated, read back: draft False (2026-11-26); merged 2026-11-26T05:29:44Z by DjDeveloperr as bdf931ca09aa (read back 2026-11-26)",
+      "follow_up": "none: merged",
       "acknowledged": null,
       "maintainer_feedback": []
     },
@@ -267,8 +267,8 @@
       },
       "not_claimed": "a write below the floor on hardware; a DT user",
       "state": "submitted",
-      "read_back": "PR read back: state open, draft True, merged False (2026-11-25); body Tested/Not yet updated after the head row, still draft (a device tree user open) (2026-11-26)",
-      "follow_up": "hardware row at the head: linux-3105-hwrow-2026-11-26; stays draft until a device tree user lands",
+      "read_back": "PR read back: state open, draft True, merged False (2026-11-25); body Tested/Not yet updated after the head row, still draft (a device tree user open) (2026-11-26); body updated to name #3181 as the DT user, marked ready for review after the maintainer sweep, read back draft False (2026-11-26)",
+      "follow_up": "watch for review; #3181 carries the K114s DT user",
       "acknowledged": null,
       "maintainer_feedback": []
     },
@@ -550,7 +550,7 @@
       "not_claimed": "a headphone or headset plugged in (owner decided not to test wired audio); a second K114s",
       "state": "submitted",
       "read_back": "comment read back, author chrisohearn; PR draft False, head unchanged (2026-11-26)",
-      "follow_up": "watch for review",
+      "follow_up": "none: PR merged",
       "acknowledged": null,
       "maintainer_feedback": []
     },
