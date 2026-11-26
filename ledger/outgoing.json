@@ -267,8 +267,8 @@
       },
       "not_claimed": "a write below the floor on hardware; a DT user",
       "state": "submitted",
-      "read_back": "PR read back: state open, draft True, merged False (2026-11-25)",
-      "follow_up": "watch for review",
+      "read_back": "PR read back: state open, draft True, merged False (2026-11-25); body Tested/Not yet updated after the head row, still draft (a device tree user open) (2026-11-26)",
+      "follow_up": "hardware row at the head: linux-3105-hwrow-2026-11-26; stays draft until a device tree user lands",
       "acknowledged": null,
       "maintainer_feedback": []
     },
@@ -551,6 +551,27 @@
       "state": "submitted",
       "read_back": "comment read back, author chrisohearn; PR draft False, head unchanged (2026-11-26)",
       "follow_up": "watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-3105-hwrow-2026-11-26",
+      "destination": "aurora-silicon/linux #3105",
+      "url": "https://github.com/aurora-silicon/linux/pull/3105#issuecomment-7180394507",
+      "posted": "2026-11-26T02:02:11Z",
+      "account": "chrisohearn",
+      "kind": "hardware result (PR head)",
+      "result": "PASS at 040c06ca5353: one boot of a kernel built from the head (Backup slot, one-shot); probe logged the 10-nit floor from the configured tree; writes of 1 and 9 read back 10 (sysfs), 500 restored; 0 failed units; no new kernel errors vs r3f; KUnit 31/31 (QEMU) and dt_binding_check pass",
+      "tested_revisions": {
+        "kernel": "linux-k114s 7.3.0.r3f.pr3105-1 (aurora-silicon/linux PR #3105 head 040c06ca5353 plus 70 r3f carries), one attended trial boot, Backup restored to r3e1 after",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (Stage 2 3e46007a)",
+        "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d), apple,min-brightness = <10>",
+        "firmware": "OS firmware 27.2 (mBoot-20457.41.3), system firmware 27.3 beta (mBoot-20457.60.65.0.1)"
+      },
+      "not_claimed": "a write of 0; presented luminance below the floor; suspend with the floor; a device tree user upstream; a second K114s",
+      "state": "submitted",
+      "read_back": "comment read back, author chrisohearn; PR still draft, head unchanged (2026-11-26)",
+      "follow_up": "stays draft until a device tree user lands",
       "acknowledged": null,
       "maintainer_feedback": []
     }
