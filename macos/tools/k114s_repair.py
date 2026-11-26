@@ -317,6 +317,31 @@ class Esp:
 
 # --- reading the live state --------------------------------------------------
 
+def known_entries(extra):
+    """The valid loader and trailer entries from a decoded known-loaders.json."""
+    raw_loaders, raw_trailers = extra.get("loaders", []), extra.get("trailers", [])
+    if not isinstance(raw_loaders, list) or not isinstance(raw_trailers, list):
+        raise TypeError("loaders and trailers must be lists")
+
+    def valid(entry, reserved_name):
+        if not isinstance(entry, dict):
+            return False
+        name, digest = entry.get("name"), entry.get("sha256")
+        return (isinstance(name, str) and 0 < len(name) <= 32 and name != reserved_name
+                and all(c.isalnum() or c in "._-" for c in name)
+                and isinstance(digest, str) and len(digest) == 64
+                and all(c in "0123456789abcdef" for c in digest))
+
+    loaders = []
+    for entry in raw_loaders:
+        if valid(entry, "installed"):
+            size = entry.get("bytes")
+            if type(size) is int and 0 < size <= 16 << 20:
+                loaders.append(entry)
+    trailers = [entry for entry in raw_trailers if valid(entry, "bundle")]
+    return loaders, trailers
+
+
 def known_sets(m, esp=None):
     """(loaders, trailers, json note): the built-in lists, the manifest's loader and U-Boot, and the entries of the ESP's
     KNOWN_JSON. A missing file adds nothing; a damaged one or an entry that is not well formed is ignored, never fatal."""
@@ -324,22 +349,14 @@ def known_sets(m, esp=None):
     trailers = [("bundle", m["uboot_trailer_sha256"])] + list(KNOWN_TRAILERS)
     if esp is None or not esp.has(KNOWN_JSON):
         return loaders, trailers, "absent"
-    name_ok = lambda v: isinstance(v, str) and 0 < len(v) <= 32 and all(c.isalnum() or c in "._-" for c in v)
-    sha_ok = lambda v: isinstance(v, str) and len(v) == 64 and all(c in "0123456789abcdef" for c in v)
     try:
         extra = json.loads(esp.get(KNOWN_JSON).decode("utf-8"))
-        raw_loaders, raw_trailers = extra.get("loaders", []), extra.get("trailers", [])
-        if not isinstance(raw_loaders, list) or not isinstance(raw_trailers, list):
-            raise TypeError("loaders and trailers must be lists")
+        add_loaders, add_trailers = known_entries(extra)
     except (ValueError, TypeError, AttributeError):
         return loaders, trailers, "damaged, ignored"
-    # each entry stands on its own: one that is not well formed is dropped, the others are kept
-    add_loaders = [(e.get("name"), e.get("bytes"), e.get("sha256")) for e in raw_loaders if isinstance(e, dict)]
-    add_trailers = [(e.get("name"), e.get("sha256")) for e in raw_trailers if isinstance(e, dict)]
-    loaders += [e for e in add_loaders if name_ok(e[0]) and e[0] != "installed" and sha_ok(e[2])
-                and isinstance(e[1], int) and not isinstance(e[1], bool) and 0 < e[1] <= 16 << 20]
-    trailers += [e for e in add_trailers if name_ok(e[0]) and e[0] != "bundle" and sha_ok(e[1])]
-    return loaders, trailers, "%d loaders, %d U-Boot tails" % (len(loaders) - 1 - len(KNOWN_LOADERS), len(trailers) - 1 - len(KNOWN_TRAILERS))
+    loaders.extend((e["name"], e["bytes"], e["sha256"]) for e in add_loaders)
+    trailers.extend((e["name"], e["sha256"]) for e in add_trailers)
+    return loaders, trailers, "%d loaders, %d U-Boot tails" % (len(add_loaders), len(add_trailers))
 
 
 def split_known(data, m, esp=None):
