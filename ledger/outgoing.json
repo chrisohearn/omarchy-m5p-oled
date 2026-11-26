@@ -206,8 +206,28 @@
         "device_tree": "dts/t6050-k114s-r3d-camera.dts (b7efcc0d)"
       },
       "not_claimed": "booted at the PR head; any write",
-      "state": "submitted",
-      "read_back": "PR read back: state open, draft True, merged False (2026-11-25)",
+      "state": "hardware_confirmed",
+      "read_back": "PR read back: state open, draft True, merged False (2026-11-25); marked ready for review after the head row, body Tested/Not yet updated, read back: draft False (2026-11-26)",
+      "follow_up": "hardware row at the head: linux-3103-hwrow-2026-11-26; watch for review",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-3103-hwrow-2026-11-26",
+      "destination": "aurora-silicon/linux #3103",
+      "url": "https://github.com/aurora-silicon/linux/pull/3103#issuecomment-7178795377",
+      "posted": "2026-11-26T00:28:32Z",
+      "account": "chrisohearn",
+      "kind": "hardware result (PR head)",
+      "result": "PASS at 59c72f163caa: one boot with the head's t6050-k114s.dtb as the tree (Stage 2 via aura-try); nvram partition read-only (MTD_WRITEABLE clear, read_only=Y), all 786432 bytes read, nothing written; 0 failed units, no new error-priority kernel lines",
+      "tested_revisions": {
+        "kernel": "linux-k114s-r3b 7.3.0.r3f-1 (aurora-silicon/linux main 4abf0f83c290 plus patches/linux/r3f.series)",
+        "loader": "Aura v1.0.0b15 with the K114s camera row (override 06b38fd0), one attended trial boot",
+        "device_tree": "t6050-k114s.dtb built at PR head 59c72f163caa (9bdf47b8)"
+      },
+      "not_claimed": "the startup-disk write path; panel, sound and Wi-Fi (not in this board file); a second K114s",
+      "state": "hardware_confirmed",
+      "read_back": "comment read back, author chrisohearn; PR draft False, head unchanged (2026-11-26)",
       "follow_up": "watch for review",
       "acknowledged": null,
       "maintainer_feedback": []
