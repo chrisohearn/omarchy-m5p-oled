@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <address-in-upstream-commit@localhost>
+Date: Sun, 15 Nov 2026 09:53:04 +0000
+Subject: [PATCH] soc: apple: aop: Send the 14-inch M5 Max sensor its 193-byte
+ calibration
+
+The 14-inch M5 Max firmware asks for a setup buffer on the ALS endpoint
+(0x21) and does not start the sensor until that endpoint has had its
+calibration. The driver only took T8140's 80-byte message, and the board
+named no calibration file, so the step was skipped ("the sensor stays
+off") and every illuminance read returned ENODATA.
+
+On that board the firmware accepts a 216-byte message instead: the
+operation code, the blob length 193, the sensor's 193-byte blob and
+zeros, answered with status 0. 56-byte bodies and a zero length were
+rejected with 0xc2. Build that message from the 193-byte file
+(als_calibration_message, a pure function) and name the file in the
+K114c device tree only: the M5 Pro firmware never asks for the endpoint.
+
+Test: tools/asahi/aop-als-calibration-tests.py checks the 80-byte
+pass-through, the 216-byte layout and the refused sizes; fourteen mutants
+of the builder are killed. On a 14-inch M5 Max booted with the driver change and the same
+firmware-name property in its device tree (a hand-built board DTB, not the
+tree's t6050-k114c.dtb), in_illuminance_input read 12.2 to 12.8 lux for
+36 seconds with no ENODATA and no warning-level aop lines.
+
+Signed-off-by: Joshua Warren <address-in-upstream-commit@localhost>
+(cherry picked from commit 242ce586c508bcdccc2a7031f02a72ca661e22f3)
+---
+ arch/arm64/boot/dts/apple/t6050-k114c.dts | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114c.dts b/arch/arm64/boot/dts/apple/t6050-k114c.dts
+index ed1f3ec3036a..a32f9f9bea5f 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k114c.dts
+@@ -339,6 +339,15 @@ &aop {
+ 	status = "okay";
+ };
+ 
++/*
++ * This board's AOP firmware asks for the sensor's setup buffer and starts the sensor only once the
++ * setup port has had its calibration: the 193-byte blob the driver sends again as the sensor's
++ * property later. Boards whose firmware never asks (the 14-inch M5 Pro) must not name one.
++ */
++&aop_als {
++	firmware-name = "apple/aop-als-cal.bin";
++};
++
+ /*
+  * The microphone array: ADT audio-hp-mic, three microphones on leap-s RX0 through the
+  * proxy ADMAC (Linux channel 1, as on J813), captured by the AOP audio service's own card.

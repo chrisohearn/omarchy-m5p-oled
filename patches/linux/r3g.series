@@ -1,0 +1,40 @@
+# r3f rebased onto aurora-silicon/linux 2094ccb2a03610eec4362ee3a47f8cf0aeba58e1.
+# The K114s keeps the r3f NOR write gates and CONFIG_APPLE_SOC_SLEEP stays disabled.
+# Patch dispositions and reproduction steps are in docs/r3g-kernel.md.
+r3g/0001-drm-apple-Name-the-firmware-27-adaptive-sync-paramet.patch
+r3g/0002-drm-apple-Refuse-panel-brightness-once-the-display-p.patch
+r3g/0003-media-apple-isp-Tune-the-J714c-IMX958-with-setfile-2.patch
+r3g/0004-media-apple-isp-Set-the-J714c-lens-shading-target-an.patch
+r3g/0005-media-apple-isp-Drive-the-J714c-camera-light-from-th.patch
+r3g/0006-media-apple-isp-Turn-the-J714c-camera-light-off-afte.patch
+r3g/0007-arm64-dts-apple-t6050-j714s-Describe-the-camera-ligh.patch
+r3g/0008-drm-apple-Offer-VRR-on-the-firmware-27-panel-and-app.patch
+r3g/0009-accel-ane-media-apple-ave-T6050-Neural-Engine-and-en.patch
+r3g/0010-arm64-dts-apple-t6050-j714s-Describe-the-HDMI-port.patch
+r3g/0011-drm-apple-T6050-HDMI-complete-flips-locally-while-th.patch
+r3g/0012-HID-dockchannel-hid-clamp-Report-Size-items-where-th.patch
+r3g/0013-HID-dockchannel-hid-pad-short-reports-to-the-clamped.patch
+r3g/0014-dt-bindings-display-apple-dcp-optional-panel-brightn.patch
+r3g/0015-drm-apple-hold-brightness-requests-at-the-panel-s-fl.patch
+r3g/0016-drm-apple-describe-an-internal-panel-without-a-known.patch
+r3g/0017-drm-apple-cap-the-panel-peak-a-firmware-27-panel-s-E.patch
+r3g/0018-drm-apple-no-EDR-when-a-cap-is-set-and-the-SDR-maxim.patch
+r3g/0019-soc-apple-aop-Send-the-14-inch-M5-Max-sensor-its-193.patch
+r3g/0020-arm64-dts-apple-t6050-share-the-keyboard-backlight-a.patch
+r3g/0021-arm64-dts-apple-t6050-k114-k116-SMC-fans-and-sensors.patch
+r3g/0022-arm64-dts-apple-t6050-share-the-G17S-GPU-description.patch
+r3g/0023-arm64-dts-apple-t6050-share-the-G17C-GPU-description.patch
+r3g/0024-arm64-dts-apple-t6050-describe-the-GPU-on-J714c-J873.patch
+r3g/0025-arm64-dts-apple-t6050-give-the-G17C-OPP-tables-schem.patch
+r3g/0026-drm-apple-T6050-refuse-deep-sleep-at-.prepare-where-.patch
+r3g/0027-arm64-dts-apple-t6050-share-the-K-boards-N1-and-USB-.patch
+r3g/0028-arm64-dts-apple-t6050-expose-the-K-boards-jack-pins-.patch
+r3g/0029-arm64-dts-apple-t6050-Share-the-camera-add-J714c-J71.patch
+r3g/0030-arm64-dts-apple-t6050-describe-the-AOP-on-every-MacB.patch
+r3g/0031-arm64-dts-apple-t6050-enable-the-media-engines-on-ev.patch
+r3g/0032-arm64-dts-apple-t6050-name-the-second-window-of-the-.patch
+r3g/0033-arm64-dts-apple-t6050-describe-the-Neural-Engine-in-.patch
+r3g/0034-arm64-dts-apple-t6050-enable-the-Neural-Engine-on-J7.patch
+r3g/0035-media-apple-isp-let-a-board-without-a-described-came.patch
+r3g/0036-drm-apple-show-the-K114s-camera-indicator-small-and-.patch
+r3g/0037-K114s-keep-the-r3f-boot-NOR-write-gates.patch

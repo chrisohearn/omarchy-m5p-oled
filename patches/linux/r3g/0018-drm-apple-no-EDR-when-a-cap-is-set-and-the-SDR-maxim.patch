@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: k114s-integration <integration@localhost>
+Date: Mon, 16 Nov 2026 13:27:23 -0700
+Subject: [PATCH 18/37] drm/apple: no EDR when a cap is set and the SDR maximum
+ is unknown
+
+Brings the carried EDR cap (hdr/0002) up to the version offered upstream
+in aurora-silicon/linux#2087 after its review: a cap cannot be compared
+with an unknown SDR maximum (no apple,max-brightness), so it gives no
+EDR, and the driver says so. The K114s has an SDR maximum of 1000 nits,
+so nothing changes on it.
+
+[re-cut onto integration/aurora 0bbe021a for the K114s]
+---
+ drivers/gpu/drm/apple/dcp-edr.h            | 10 ++++++----
+ drivers/gpu/drm/apple/dcp.c                |  4 ++++
+ drivers/gpu/drm/apple/dcp_backlight_test.c |  9 ++++++---
+ 3 files changed, 16 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/gpu/drm/apple/dcp-edr.h b/drivers/gpu/drm/apple/dcp-edr.h
+index 20e6e10d822c..3c86d06f168e 100644
+--- a/drivers/gpu/drm/apple/dcp-edr.h
++++ b/drivers/gpu/drm/apple/dcp-edr.h
+@@ -48,13 +48,15 @@ static inline u32 dcp_edr_ceiling(u32 fixed)
+ /*
+  * The peak a firmware 27 panel's EDR may use: the ADT's @peak nits, limited
+  * to @max_nits when that is set.  Only a peak above the SDR maximum
+- * @sdr_max leaves headroom; otherwise 0, and the panel offers no EDR.  With
+- * the peak at most P, a swap never asks for more than SDR white or P,
+- * whichever is higher (dcp_edr_target()).
++ * @sdr_max leaves headroom; otherwise 0, and the panel offers no EDR.  A
++ * cap with an unknown SDR maximum (0: no apple,max-brightness) cannot be
++ * compared with it, so it gives no EDR either.  With the peak at most P, a
++ * swap never asks for more than SDR white or P, whichever is higher
++ * (dcp_edr_target()).
+  */
+ static inline u32 dcp_edr_peak(u32 peak, u32 sdr_max, u32 max_nits)
+ {
+-	if (peak > 10000)
++	if (peak > 10000 || (max_nits && !sdr_max))
+ 		return 0;
+ 	if (max_nits)
+ 		peak = min(peak, max_nits);
+diff --git a/drivers/gpu/drm/apple/dcp.c b/drivers/gpu/drm/apple/dcp.c
+index eb85d357553d..8ded3d7e88ce 100644
+--- a/drivers/gpu/drm/apple/dcp.c
++++ b/drivers/gpu/drm/apple/dcp.c
+@@ -1537,6 +1537,10 @@ static void dcp_panel_read_adt(struct apple_dcp *dcp)
+ 			if (peak < adt_peak)
+ 				dev_info(dcp->dev, "panel EDR capped at %u nits\n", peak);
+ 			WRITE_ONCE(dcp->panel.peak_nits, peak);
++		} else if (cap && !dcp->brightness.maximum && adt_peak && adt_peak <= 10000) {
++			dev_info(dcp->dev,
++				 "panel EDR off: cap %u nits set and the SDR maximum is unknown\n",
++				 cap);
+ 		} else if (cap && dcp_edr_peak(adt_peak, dcp->brightness.maximum, 0)) {
+ 			dev_info(dcp->dev,
+ 				 "panel EDR off: cap %u nits is not above the SDR maximum %u nits\n",
+diff --git a/drivers/gpu/drm/apple/dcp_backlight_test.c b/drivers/gpu/drm/apple/dcp_backlight_test.c
+index 939cecbf8c17..b6f39297579d 100644
+--- a/drivers/gpu/drm/apple/dcp_backlight_test.c
++++ b/drivers/gpu/drm/apple/dcp_backlight_test.c
+@@ -887,8 +887,10 @@ static void edr_peak_test(struct kunit *test)
+ 	KUNIT_EXPECT_EQ(test, dcp_edr_peak(EDR_K114S_PEAK, 1000, 500), 0U);
+ 	/* A cap never makes an out-of-range ADT peak usable. */
+ 	KUNIT_EXPECT_EQ(test, dcp_edr_peak(20000, 1000, 500), 0U);
+-	/* Without an SDR maximum the cap is the peak. */
+-	KUNIT_EXPECT_EQ(test, dcp_edr_peak(EDR_K114S_PEAK, 0, 500), 500U);
++	/* An unknown SDR maximum: no cap, the ADT's peak; with a cap, no EDR. */
++	KUNIT_EXPECT_EQ(test, dcp_edr_peak(EDR_K114S_PEAK, 0, 0), 2000U);
++	KUNIT_EXPECT_EQ(test, dcp_edr_peak(EDR_K114S_PEAK, 0, 500), 0U);
++	KUNIT_EXPECT_EQ(test, dcp_edr_peak(EDR_K114S_PEAK, 0, 1600), 0U);
+ }
+ 
+ /*
+@@ -903,7 +905,8 @@ static void edr_peak_bound_test(struct kunit *test)
+ 
+ 	KUNIT_ASSERT_EQ(test, ceiling, 16000U);
+ 	for (unsigned int c = 0; c < ARRAY_SIZE(caps); c++) {
+-		u32 peak = dcp_edr_peak(EDR_K114S_PEAK, 0, caps[c]);
++		/* A panel whose SDR maximum is 400 nits, so every cap leaves headroom. */
++		u32 peak = dcp_edr_peak(EDR_K114S_PEAK, 400, caps[c]);
+ 
+ 		KUNIT_ASSERT_EQ(test, peak, caps[c]);
+ 		for (unsigned int i = 0; i < ARRAY_SIZE(sdr); i++) {

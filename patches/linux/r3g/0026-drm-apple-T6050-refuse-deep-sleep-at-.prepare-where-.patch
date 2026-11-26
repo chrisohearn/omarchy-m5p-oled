@@ -1,0 +1,164 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rolotrealanis98 <address-in-upstream-commit@localhost>
+Date: Mon, 16 Nov 2026 03:56:29 -0500
+Subject: [PATCH 26/37] drm/apple: T6050: refuse deep sleep at .prepare where
+ the firmware 27 display sleep is not known
+
+A pm_test=devices deep sleep on the J716s (firmware 27.3) crashed its DCP
+in the device suspend. dcp_platform_suspend() took dcp_v27_sleep_suspend():
+dcp_v27_sleep_selected() asks only for a T6050 DCP on firmware 27 under the
+T6050 sleep. Its "open" step found no endpoint in sleep_v27_ep, which
+afk_init() fills only for dcp->v27_j714s, so it ran afk_init() and
+afk_start() on the system endpoint 0x20 that systemep_init() had started at
+boot: START_EP (mgmt 0x0050002000000002), then RBEP_INIT
+(0x0080000000000000) on its running ring. The firmware asserted at
+afk_messenger_common.c:246 with that message, afk_start() timed out after
+1 s and the suspend returned -110. The display stayed dead until reboot.
+
+Past that step the sleep would send 27.0's tags (A484, A500, A414, A489,
+A487, A412, A115). 27.2 and 27.3 renumbered those methods: set_power_state
+is A534/A535 there and A500 is set_parameter_dcp. The 27.3 tags of the
+sleep's own calls are not known, so there is no 27.3 path to enable yet.
+
+- dcp->v27_sleep_known is set only where the sleep's calls are known: the
+  J714s with its 27.0 table copy (iomfb_v27_methods_j714s()).
+- dcp_platform_prepare() refuses a firmware-driven (deep) sleep on any
+  other T6050 firmware 27 processor with -EOPNOTSUPP, before any device
+  suspends, and logs one line. s2idle does not come here (no
+  pm_suspend_via_firmware()).
+- dcp_v27_sleep_prepare() refuses the same way if it is ever reached.
+- dcp_v27_sleep_endpoints_open() refuses with -EPROTO when an AFK ring
+  already runs on an endpoint it does not track, instead of starting it
+  again. On the J714s every AFK endpoint is tracked, so it never triggers
+  there.
+
+Tested on the J716s (27.3, aura stage 2 with the S2R mailbox):
+pm_test=devices with mem_sleep=deep now ends at prepare with -95 and the
+line "deep sleep refused: no display sleep known for firmware 27.3.0 on this
+machine (only the J714s on 27.0); s2idle is not affected"; no device
+suspended, the display stayed up. A pm_test=devices s2idle afterwards
+succeeded. Not run on a J714s.
+
+Co-Authored-By: Claude Opus 5.5 <address-in-upstream-commit@localhost>
+Claude-Session: https://claude.ai/code/session_01TYoPBXdNYTj12jEVptd1y7
+
+Re-cut on the K114s r3d tree: that tree already admits the sleep's transport
+by the build's method table (dcp->v27_sleep_transport, set only where the table
+has an ID for every call the sleep sends), so v27_sleep_known is not added.
+The same table decides "known": dcp_v27_sleep_known() passes where the
+transport is admitted and refuses with -EOPNOTSUPP at .prepare any other
+T6050 firmware 27 processor under the sleep (dcp_v27_sleep_firmware27(), the
+old selection without the transport). dcp_v27_sleep_selected() is unchanged
+in effect. The untracked-endpoint backstop (-EPROTO) is kept as written.
+
+[re-cut onto the K114s r3d tree]
+---
+ drivers/gpu/drm/apple/dcp-v27-sleep.inc | 39 +++++++++++++++++++++++--
+ drivers/gpu/drm/apple/dcp.c             |  7 +++--
+ 2 files changed, 42 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/drm/apple/dcp-v27-sleep.inc b/drivers/gpu/drm/apple/dcp-v27-sleep.inc
+index 6bbef61ae18d..55849902c8be 100644
+--- a/drivers/gpu/drm/apple/dcp-v27-sleep.inc
++++ b/drivers/gpu/drm/apple/dcp-v27-sleep.inc
+@@ -441,14 +441,19 @@ static int dcp_v27_rtkit_cycle(struct apple_dcp *dcp, unsigned int pause_ms)
+ 	return ret;
+ }
+ 
+-static bool dcp_v27_sleep_selected(struct apple_dcp *dcp)
++/* A T6050 display coprocessor on firmware 27 under a sleep that stops the displays late. */
++static bool dcp_v27_sleep_firmware27(struct apple_dcp *dcp)
+ {
+-	return apple_sleep_v27_late() && dcp->v27_sleep_transport &&
++	return apple_sleep_v27_late() &&
+ 		(of_device_is_compatible(dcp->dev->of_node, "apple,t6050-dcp") ||
+ 		 of_device_is_compatible(dcp->dev->of_node, "apple,t6050-dcpext")) &&
+ 		dcp->hw.adopt_live_session && dcp->fw_compat == DCP_FIRMWARE_V_27_0 &&
+ 		dcp->hw.iomfb_method_profile == DCP_IOMFB_METHODS_DEFAULT;
+ }
++static bool dcp_v27_sleep_selected(struct apple_dcp *dcp)
++{
++	return dcp_v27_sleep_firmware27(dcp) && dcp->v27_sleep_transport;
++}
+ static bool dcp_v27_external(struct apple_dcp *dcp)
+ {
+ 	/* dcp->external is a T6030 policy flag; a T6050 DCPEXT is known by its compatible. */
+@@ -460,6 +465,27 @@ static void dcp_v27_sleep_invalidate(struct apple_dcp *dcp)
+ 	apple_sleep_v27_prepared(dcp->dev, false);
+ }
+ 
++/*
++ * The deep sleep's display step runs only where the build's method table has an ID for every
++ * call it sends (dcp->v27_sleep_transport). Any other firmware 27 processor under the sleep is
++ * refused at the device .prepare, before any device suspends, with one line; s2idle never
++ * comes here (no pm_suspend_via_firmware()).
++ *
++ * Without the table's IDs the step would send another build's tags, which name other methods,
++ * and an endpoint no tracked ring owns would be started a second time on its running ring.
++ */
++static int dcp_v27_sleep_known(struct apple_dcp *dcp)
++{
++	char compat[DCP_FW_VERSION_STR_LEN];
++
++	if (dcp->v27_sleep_transport)
++		return 0;
++	dcp_read_fw_version(dcp->dev, "apple,firmware-compat", compat);
++	dev_warn(dcp->dev, "deep sleep refused: no display sleep known for firmware %s on this machine (its method table lacks an ID for a call the sleep sends); s2idle is not affected\n",
++		 compat);
++	return -EOPNOTSUPP;
++}
++
+ /* DCPEXT0..3, from the processors' DT index (the internal display's is 0). */
+ static unsigned int dcp_v27_ext_nr(struct apple_dcp *dcp)
+ {
+@@ -1062,6 +1088,13 @@ static int dcp_v27_sleep_endpoints_open(struct apple_dcp *dcp)
+ 		ep = READ_ONCE(dcp->sleep_v27_ep[id - 0x20]);
+ 		if (ep)
+ 			continue;
++		/*
++		 * An AFK ring already runs there without being tracked (the system endpoint on a
++		 * processor that never filled sleep_v27_ep): a second START_EP and RBEP_INIT on it
++		 * make the firmware assert. Refused before anything is sent.
++		 */
++		if (!IS_ERR_OR_NULL(dcp_afkep(dcp, id)))
++			return -EPROTO;
+ 		if (served && !s->ext_wq) {
+ 			/* Not ordered and not the endpoint's: a call waits for its reply. */
+ 			s->ext_wq = alloc_workqueue("apple-dcp-ext-av", WQ_UNBOUND, 0);
+@@ -1832,7 +1865,9 @@ static void dcp_v27_dark_replug_owed(struct apple_dcp *dcp)
+ }
+ #else
+ static void dcp_v27_dark_replug_owed(struct apple_dcp *dcp) { }
++static bool dcp_v27_sleep_firmware27(struct apple_dcp *dcp) { return false; }
+ static bool dcp_v27_sleep_selected(struct apple_dcp *dcp) { return false; }
++static int dcp_v27_sleep_known(struct apple_dcp *dcp) { return 0; }
+ static void dcp_v27_sleep_invalidate(struct apple_dcp *dcp) { }
+ static int dcp_v27_sleep_suspend(struct apple_dcp *dcp) { return -EOPNOTSUPP; }
+ static int dcp_v27_sleep_resume(struct apple_dcp *dcp) { return -EOPNOTSUPP; }
+diff --git a/drivers/gpu/drm/apple/dcp.c b/drivers/gpu/drm/apple/dcp.c
+index 8ded3d7e88ce..073b07be4e89 100644
+--- a/drivers/gpu/drm/apple/dcp.c
++++ b/drivers/gpu/drm/apple/dcp.c
+@@ -9574,17 +9574,20 @@ static const char *dcp_external_sleep_vetoed(struct apple_dcp *dcp)
+  * Veto early so Thunderbolt cannot tear down a working tunnel first. The
+  * same HPD lock serializes this gate against explicit firmware startup.
+  */
++static bool dcp_v27_sleep_firmware27(struct apple_dcp *dcp);
+ static bool dcp_v27_sleep_selected(struct apple_dcp *dcp);
+ static void dcp_v27_sleep_invalidate(struct apple_dcp *dcp);
++static int dcp_v27_sleep_known(struct apple_dcp *dcp);
+ 
+ static int dcp_platform_prepare(struct device *dev)
+ {
+ 	struct apple_dcp *dcp = dev_get_drvdata(dev);
+ 	const char *why;
+ 
+-	if (pm_suspend_via_firmware() && dcp_v27_sleep_selected(dcp)) {
++	/* A deep sleep whose display step is not known for this firmware is refused here. */
++	if (pm_suspend_via_firmware() && dcp_v27_sleep_firmware27(dcp)) {
+ 		dcp_v27_sleep_invalidate(dcp);
+-		return 0;
++		return dcp_v27_sleep_known(dcp);
+ 	}
+ 
+ 	if (dcp_is_ext26(dcp)) {
