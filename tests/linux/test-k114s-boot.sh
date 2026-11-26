@@ -44,6 +44,13 @@ u16() { printf '%s' "$1" | sed 's/./&\x00/g'; }
 mk "$t/f" 2; o=$(run "$t/f")
 want "$o" 'Main    Omarchy/linux-k114s ' "a numeric default resolves to its entry (index 2 = linux-k114s)"
 want "$o" 'note: default_entry is index 2, which is Omarchy/linux-k114s' "the index is explained"
+mk "$t/collapsed" 3
+sed -i '/^\/+Omarchy/i /Archive\n//+Nested\n///Old\ncomment: Kernel version: 7.3.0-archived' "$t/collapsed/esp/limine.conf"
+o=$(run "$t/collapsed")
+want "$o" 'Main    Omarchy/linux-k114s ' "an index skips all descendants of a collapsed directory"
+sed -i 's#^default_entry: 3#default_entry: Archive/Nested/Old#' "$t/collapsed/esp/limine.conf"
+o=$(run "$t/collapsed")
+want "$o" 'Main    Archive/Nested/Old ' "a path default can still name a descendant of a collapsed directory"
 mk "$t/g" X; sed -i '/^default_entry/d' "$t/g/esp/limine.conf"; o=$(run "$t/g"); rc=$?
 want "$o" 'WARNING: limine.conf has no default_entry' "a missing default_entry is reported, not a silent exit"
 want "rc=$rc" 'rc=0' "a missing default_entry exits 0"
