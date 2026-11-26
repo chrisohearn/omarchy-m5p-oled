@@ -2,7 +2,7 @@
 # Test of patches/omarchy/0006-boot-screen-rebuilds-only-k114s-images.patch against the installed
 # omarchy-plymouth-set (or the file named by $1). Nothing is rebuilt: only the script's last block
 # (from the plymouth-set-default-theme call on) runs, with sudo, pacman, df and the Omarchy helper
-# replaced by stubs that log what they were asked to do. It runs under the script's own set -euo pipefail.
+# replaced by stubs (omarchy-boot-backend among them) that log what they were asked to do. It runs under the script's own set -euo pipefail.
 #   usage: test-boot-screen-rebuild.sh [OMARCHY_PLYMOUTH_SET]
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
@@ -16,7 +16,7 @@ mkdir -p "$t/usr/bin" "$t/stub"; cp "$src" "$t/usr/bin/omarchy-plymouth-set"
 f=$t/usr/bin/omarchy-plymouth-set
 # A machine that already has a version of 0006 (perhaps an older one): test the forward patch on
 # the base file it was written for instead.
-grep -q 'K114s local change: a bare limine-mkinitcpio' "$f" &&
+grep -q 'K114s local change: ' "$f" &&
   cp "${patch_file%.patch}.base/bin/omarchy-plymouth-set" "$f"
 patch -p1 -d "$t/usr" -F0 -s --dry-run < "$patch_file" >/dev/null 2>&1; ok "patch fits the installed script without fuzz" "$?" 0
 patch -p1 -d "$t/usr" -F0 -s < "$patch_file"; ok "patch applies" "$?" 0
@@ -35,9 +35,11 @@ cat > "$t/stub/du" <<'S'
 #!/bin/bash
 printf '%s\t%s\n' "${THEME:-174225}" "$2"
 S
-cat > "$t/stub/omarchy-cmd-present" <<'S'
+cat > "$t/stub/omarchy-boot-backend" <<'S'
 #!/bin/bash
-[ "$1" != limine-mkinitcpio ] || [ "${LIMINE:-yes}" = yes ]
+# BACKEND is what --managed prints (space-separated); without --managed the first one, as upstream.
+set -- ${BACKEND-limine} "$@"
+if [ "${!#}" = --managed ]; then printf '%s\n' ${BACKEND-limine}; else echo "${1:-none}"; fi
 S
 cat > "$t/stub/mountpoint" <<'S'
 #!/bin/bash
@@ -59,36 +61,38 @@ S
 chmod +x "$t/stub/"*
 printf 'apple,k114s\0apple,t6050\0' > "$t/k114s"; printf 'apple,j714s\0apple,t6050\0' > "$t/other"
 run() { # dt packages free -> status; the log is $t/log
-  : > "$t/log"; env -i ${PACMAN_RC:+PACMAN_RC=$PACMAN_RC} ${MOUNTED:+MOUNTED=$MOUNTED} ${LIMINE:+LIMINE=$LIMINE} ${DF_RC:+DF_RC=$DF_RC} ${THEME:+THEME=$THEME} PATH="$t/stub:/usr/bin:/bin" LOG="$t/log" K114S_DT_COMPATIBLE=$1 PKGS="$2" FREE="$3" bash "$t/block" </dev/null 2>"$t/err"; }
+  : > "$t/log"; env -i ${PACMAN_RC:+PACMAN_RC=$PACMAN_RC} ${MOUNTED:+MOUNTED=$MOUNTED} ${BACKEND+BACKEND="$BACKEND"} ${DF_RC:+DF_RC=$DF_RC} ${THEME:+THEME=$THEME} PATH="$t/stub:/usr/bin:/bin" LOG="$t/log" K114S_DT_COMPATIBLE=$1 PKGS="$2" FREE="$3" bash "$t/block" </dev/null 2>"$t/err"; }
 all='linux-aurora linux-k114s linux-k114s-r3b linux-k114s-r3b'
 
 run "$t/k114s" "$all" 123527168; rc=$?
 ok "K114s: succeeds" "$rc" 0
-ok "K114s: rebuilds only the K114s kernels, one at a time, once each" "$(grep limine-mkinitcpio "$t/log" | paste -sd,)" "sudo limine-mkinitcpio linux-k114s,sudo limine-mkinitcpio linux-k114s-r3b"
+ok "K114s: rebuilds only the K114s kernels, one at a time, once each" "$(grep "mkinitcpio\|boot-rebuild" "$t/log" | paste -sd,)" "sudo omarchy-boot-rebuild linux-k114s,sudo omarchy-boot-rebuild linux-k114s-r3b"
 ok "K114s: still sets the theme first" "$(head -1 "$t/log")" "sudo plymouth-set-default-theme omarchy"
 ok "K114s: reads the free space under Limine's boot-partition lock, once per image" "$(grep -c '^sudo flock -w 60 /run/lock/boot-partition.lock df ' "$t/log")" 2
 run "$t/k114s" "$all" 44000000; rc=$?
-ok "K114s, low space: exit 1, nothing rebuilt" "$rc:$(grep -c limine-mkinitcpio "$t/log")" "1:0"
-ok "K114s, low space: prints the command for later" "$(grep -c 'sudo limine-mkinitcpio linux-k114s linux-k114s-r3b' "$t/err")" 1
+ok "K114s, low space: exit 1, nothing rebuilt" "$rc:$(grep -c "mkinitcpio\|boot-rebuild" "$t/log")" "1:0"
+ok "K114s, low space: prints the command for later" "$(grep -c 'sudo omarchy-boot-rebuild linux-k114s linux-k114s-r3b' "$t/err")" 1
 run "$t/k114s" "$all" ''; rc=$?
-ok "K114s, unreadable space: exit 1, nothing rebuilt" "$rc:$(grep -c limine-mkinitcpio "$t/log")" "1:0"
+ok "K114s, unreadable space: exit 1, nothing rebuilt" "$rc:$(grep -c "mkinitcpio\|boot-rebuild" "$t/log")" "1:0"
 run "$t/k114s" "linux-aurora" 123527168; rc=$?
-ok "K114s, no K114s kernel: exit 1 with its message, nothing rebuilt" "$rc:$(grep -c limine-mkinitcpio "$t/log"):$(grep -c "No linux-k114s kernel is installed" "$t/err")" "1:0:1"
+ok "K114s, no K114s kernel: exit 1 with its message, nothing rebuilt" "$rc:$(grep -c "mkinitcpio\|boot-rebuild" "$t/log"):$(grep -c "No linux-k114s kernel is installed" "$t/err")" "1:0:1"
 PACMAN_RC=1; export PACMAN_RC; run "$t/k114s" "$all" 123527168; rc=$?; unset PACMAN_RC
-ok "K114s, a module folder pacman does not own: still rebuilds the K114s kernels" "$rc:$(grep limine-mkinitcpio "$t/log" | paste -sd,)" "0:sudo limine-mkinitcpio linux-k114s,sudo limine-mkinitcpio linux-k114s-r3b"
+ok "K114s, a module folder pacman does not own: still rebuilds the K114s kernels" "$rc:$(grep "mkinitcpio\|boot-rebuild" "$t/log" | paste -sd,)" "0:sudo omarchy-boot-rebuild linux-k114s,sudo omarchy-boot-rebuild linux-k114s-r3b"
 run "$t/k114s" "$all" "123527168 44000000"; rc=$?
-ok "K114s, room for only the first image: rebuilds it, then refuses" "$rc:$(grep limine-mkinitcpio "$t/log" | paste -sd,)" "1:sudo limine-mkinitcpio linux-k114s"
+ok "K114s, room for only the first image: rebuilds it, then refuses" "$rc:$(grep "mkinitcpio\|boot-rebuild" "$t/log" | paste -sd,)" "1:sudo omarchy-boot-rebuild linux-k114s"
 DF_RC=1; run "$t/k114s" "$all" 123527168; rc=$?; unset DF_RC
-ok "K114s, df fails: exit 1 with the refusal, nothing rebuilt" "$rc:$(grep -c limine-mkinitcpio "$t/log"):$(grep -c 'unreadable, busy or too full' "$t/err")" "1:0:1"
+ok "K114s, df fails: exit 1 with the refusal, nothing rebuilt" "$rc:$(grep -c "mkinitcpio\|boot-rebuild" "$t/log"):$(grep -c 'unreadable, busy or too full' "$t/err")" "1:0:1"
 THEME=40000000; run "$t/k114s" "$all" 123527168; rc=$?; unset THEME
-ok "K114s, a 40 MB boot theme: needs the guard's minimum plus the theme, refuses at 123.5 MB" "$rc:$(grep -c limine-mkinitcpio "$t/log"):$(grep -c 'needs 128080384 bytes' "$t/err")" "1:0:1"
+ok "K114s, a 40 MB boot theme: needs the guard's minimum plus the theme, refuses at 123.5 MB" "$rc:$(grep -c "mkinitcpio\|boot-rebuild" "$t/log"):$(grep -c 'needs 128080384 bytes' "$t/err")" "1:0:1"
 MOUNTED=no; run "$t/k114s" "$all" 123527168; rc=$?; unset MOUNTED
-ok "K114s, EFI partition not mounted: exit 1, nothing rebuilt" "$rc:$(grep -c limine-mkinitcpio "$t/log"):$(grep -c 'not mounted' "$t/err")" "1:0:1"
-LIMINE=no; run "$t/k114s" "$all" 123527168; rc=$?; unset LIMINE
-ok "K114s, no limine-mkinitcpio: exit 1, no mkinitcpio -P" "$rc:$(grep -c mkinitcpio "$t/log"):$(grep -c 'limine-mkinitcpio is missing' "$t/err")" "1:0:1"
-LIMINE=no; run "$t/other" "$all" 44000000; rc=$?; unset LIMINE
-ok "other Mac, no limine-mkinitcpio: unchanged mkinitcpio -P" "$rc:$(grep mkinitcpio "$t/log")" "0:sudo mkinitcpio -P"
+ok "K114s, EFI partition not mounted: exit 1, nothing rebuilt" "$rc:$(grep -c "mkinitcpio\|boot-rebuild" "$t/log"):$(grep -c 'not mounted' "$t/err")" "1:0:1"
+BACKEND=none; export BACKEND; run "$t/k114s" "$all" 123527168; rc=$?; unset BACKEND
+ok "K114s, no boot backend: exit 1, no mkinitcpio -P" "$rc:$(grep -c 'mkinitcpio\|boot-rebuild' "$t/log"):$(grep -c 'not Limine alone' "$t/err")" "1:0:1"
+BACKEND='limine systemd-boot'; export BACKEND; run "$t/k114s" "$all" 123527168; rc=$?; unset BACKEND
+ok "K114s, Limine and systemd-boot both managed (a switch on trial): exit 1, nothing rebuilt" "$rc:$(grep -c 'mkinitcpio\|boot-rebuild' "$t/log"):$(grep -c 'not Limine alone' "$t/err")" "1:0:1"
+BACKEND=none; export BACKEND; run "$t/other" "$all" 44000000; rc=$?; unset BACKEND
+ok "other Mac, no boot backend: unchanged mkinitcpio -P" "$rc:$(grep 'mkinitcpio\|boot-rebuild' "$t/log")" "0:sudo mkinitcpio -P"
 run "$t/other" "$all" 44000000; rc=$?
-ok "other Mac: unchanged bare rebuild" "$rc:$(grep limine-mkinitcpio "$t/log")" "0:sudo limine-mkinitcpio"
+ok "other Mac: unchanged bare rebuild" "$rc:$(grep 'mkinitcpio\|boot-rebuild' "$t/log")" "0:sudo omarchy-boot-rebuild"
 
 echo "passed $pass, failed $fail"; [ "$fail" = 0 ]
