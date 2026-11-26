@@ -7,8 +7,8 @@ case ${HOOK_CALLER:-} in
   *) exit 0 ;;
 esac
 
-# Other Macs do not use the K114s guard. An explicit request from the
-# Plymouth setter still needs the check even if the device tree is unreadable.
+# Other Macs do not use the K114s guard. An explicit space budget from a
+# patched rebuild still needs the check even if the device tree is unreadable.
 if [[ ! -v K114S_PLYMOUTH_MIN_FREE ]] &&
    ! grep -qx 'apple,k114s' < <(tr '\0' '\n' 2>/dev/null </proc/device-tree/compatible); then
   exit 0
@@ -29,7 +29,7 @@ if [[ ! /proc/self/fd/200 -ef /run/lock/boot-partition.lock ]] || ! flock -n 200
   exit 100
 fi
 
-# The space budget applies only to the Plymouth rebuild, not normal updates.
+# Only rebuilds that pass an explicit budget need the EFI free-space check.
 [[ $HOOK_CALLER == limine-mkinitcpio-install && -v K114S_PLYMOUTH_MIN_FREE ]] || exit 0
 need=$K114S_PLYMOUTH_MIN_FREE
 free=
