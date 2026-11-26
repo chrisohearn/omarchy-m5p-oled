@@ -2,9 +2,16 @@
 
 r3g rebases [r3f](r3f-kernel.md) onto Aurora Silicon's main at
 [`2094ccb2a03610eec4362ee3a47f8cf0aeba58e1`](https://github.com/aurora-silicon/linux/commit/2094ccb2a03610eec4362ee3a47f8cf0aeba58e1).
-The candidate is `linux-k114s 7.3.0.r3g-1`, release `7.3.0-17.v272-18-k114s-r3g-ARCH`.
-It is intended for the r3e1 Backup slot. r3f remains the running Main kernel.
-See the [one-shot trial plan](r3g-trial-plan.md) for the hardware checks and restore.
+The candidate first ran as `linux-k114s 7.3.0.r3g-1` in the r3e1 Backup slot.
+The second one-shot passed on 2026-11-26 and restored the r3f Main and r3e1
+Backup layout. See the [one-shot trial plan](r3g-trial-plan.md) for the hardware checks.
+
+Promoted on 2026-11-26 (owner's go): r3g is Main as `linux-k114s-r3b 7.3.0.r3g-1` and r3f is Backup as
+`linux-k114s 7.3.0.r3f-1`. Both packages keep their tested kernel, modules, DTBs and config (byte-identical to the
+trial and r3f builds). The first ordinary r3g Main boot passed every r3f comparison (Wi-Fi, Bluetooth, compositor,
+GPU, 120 Hz panel, camera, ALS, SEP, Touch ID, trackpad, QSPI read-only, speaker gate, Tailscale; no new failed
+units, GPU events or kernel errors), and P9 with the new slot pins. The promotion kit keeps the r3f/r3e1 rollback set
+and the previous P9.
 
 ## Patch disposition
 
@@ -165,7 +172,7 @@ Image, modules and DTBs took 397.361 seconds. Packaging took 35.998 seconds.
 
 Clang produced upstream diagnostics, including thread-safety warnings in
 Apple NVMe and a missing prototype in the Type-C driver. The build completed.
-The Backup-slot boot and hardware checks are pending.
+The second Backup-slot boot passed, and so did the first ordinary Main boot after promotion.
 
 ## ESP estimate
 

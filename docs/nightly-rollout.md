@@ -28,6 +28,15 @@ changes, change this file through a PR.
 - Use `mktemp` for temp files. Keep anything needed after a reboot in `~/k114s-build` or `~/.local/state`; the scratchpad
   is wiped on reboot.
 
+## Kernel state
+
+Since 2026-11-26: r3g is Main (`linux-k114s-r3b 7.3.0.r3g-1`) and r3f is Backup (`linux-k114s 7.3.0.r3f-1`). P9's
+slot pins were changed with the promotion (the old guard is kept in the promotion kit's rollback set). The Limine menu's
+`Kernel version` comments still name the previous versions (r3f on Main, r3e1 on Backup) because the promotion
+rendered the menu from its saved copy, so `k114s-boot` notes a mismatch; the entries, hashes and default are correct.
+Leave the comments to Limine's own tools: the config may be hash-enrolled, so never hand-edit `limine.conf`. See the
+[r3g promotion record](r3g-kernel.md).
+
 ## Steps
 
 1. **Packages.** Run `omarchy update -y`, not a direct pacman upgrade, which Omarchy refuses. Then check:
