@@ -41,14 +41,12 @@ A boot is a trial when either holds:
 1. `/proc/device-tree/chosen/aurora,trial` exists (a Stage 2 trial through `aura-try`).
 2. `$STATE/boot-once-armed` (written by `k114s-boot-once arm`) names an entry and a boot id of an earlier boot, and
    `LoaderEntrySelected` (what Limine started this boot) equals that entry or cannot be read. The boot that ran `arm` is an ordinary
-   boot and may sleep; the one that follows it, which Limine sends to the trial entry, is the trial.
+   boot and may sleep. The boot that follows it is a trial if Limine selects the armed entry or its selection is unreadable.
 
-The arming record is not removed by a real trial, and the trial entry later becomes the default entry (`docs/r3a-promotion.md`),
-so a record that only compared names would then call every later boot a trial. The gate therefore spends the record: on the trial
-boot it writes `$STATE/lid-sleep-trial-seen` (arming boot, entry, this boot). A record with a matching seen file is a trial only
-in the boot it names; the next boot, whichever entry it selects, is ordinary, and a new `arm` (a new arming boot) starts afresh.
-If the gate never ran on the trial boot (so nothing was spent), the first later boot that selects the entry is closed once and
-spends it. `k114s-boot-once clear` also removes the record. An unreadable boot entry stays a trial and spends nothing.
+On the first boot the gate sees after arming, it spends the record by writing `$STATE/lid-sleep-trial-seen`. That boot can be
+an ordinary boot if Limine selected a different entry. On subsequent boots the spent record has no effect, even if the trial
+entry becomes the default or the selected entry stays unreadable. A new `arm` from another boot starts afresh. The gate keeps
+the trial reason in `/run` until reboot, so `k114s-boot-once clear` or completion of the self-test leaves the current trial closed.
 
 `k114s-lid-sleep open` by hand refuses on a trial boot, and `open --force` overrides that for an attended test.
 
