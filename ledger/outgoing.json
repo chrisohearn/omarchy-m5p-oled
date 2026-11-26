@@ -574,6 +574,48 @@
       "follow_up": "stays draft until a device tree user lands",
       "acknowledged": null,
       "maintainer_feedback": []
+    },
+    {
+      "id": "linux-k114s-min-brightness-2026-11-26",
+      "destination": "aurora-silicon/linux (new draft PR)",
+      "url": "https://github.com/aurora-silicon/linux/pull/3181",
+      "posted": "2026-11-26T02:15:21Z",
+      "account": "chrisohearn",
+      "kind": "draft PR",
+      "result": "K114s panel apple,min-brightness = <10>, the device tree user for #3105; stacked on #2009 and #3105",
+      "tested_revisions": {
+        "kernel": "none (device tree only; build-checked, not booted)",
+        "loader": "n/a",
+        "device_tree": "t6050-k114s.dts at 1b7a3bec5ba7 (on #2009 de86dd32b8b9 + #3105)",
+        "firmware": "n/a"
+      },
+      "not_claimed": "a boot at this head with the display hand-off; a write of 0; luminance at the floor; suspend",
+      "state": "submitted",
+      "read_back": "PR read back: draft True, 4 commits, head 1b7a3bec5ba7, author chrisohearn (2026-11-26)",
+      "follow_up": "rebase when #2009 or #3105 changes; attended boot at the head once the display hand-off is available",
+      "acknowledged": null,
+      "maintainer_feedback": []
+    },
+    {
+      "id": "linux-2009-hwtest-offer-2026-11-26",
+      "destination": "aurora-silicon/linux #2009",
+      "url": "https://github.com/aurora-silicon/linux/pull/2009#issuecomment-7180619951",
+      "posted": "2026-11-26T02:15:33Z",
+      "account": "chrisohearn",
+      "kind": "comment",
+      "result": "offered a K114s hardware row for #2009's head; noted #3181 stacks on it",
+      "tested_revisions": {
+        "kernel": "n/a",
+        "loader": "n/a",
+        "device_tree": "n/a",
+        "firmware": "n/a"
+      },
+      "not_claimed": "any test of #2009 yet",
+      "state": "submitted",
+      "read_back": "comment read back, author chrisohearn (2026-11-26)",
+      "follow_up": "watch for the author's reply; boot #2009's head when asked",
+      "acknowledged": null,
+      "maintainer_feedback": []
     }
   ]
 }

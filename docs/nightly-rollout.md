@@ -32,6 +32,8 @@ changes, change this file through a PR.
 
 1. **Packages.** Run `omarchy update -y`, not a direct pacman upgrade, which Omarchy refuses. Then check:
    - `checkupdates` is empty;
+   - count the boots since the local Plymouth went on with no `plymouth-start` core dump, and close #262 at six in a row
+     ([Plymouth on K114s](plymouth-k114s.md#closing-262));
    - run `linux/plymouth-k114s-status` and rebuild the local Plymouth package when Arch Linux ARM ships a newer release, per [Plymouth on K114s](plymouth-k114s.md) (a `plymouth` line in the pre-update `checkupdates` means the update will replace the local build; record it in the report);
    - `sudo -n /usr/local/lib/omarchy-k114s/omarchy-patches-apply` shows all patches in place, or refresh any that
      don't fit, as PR #248 did;
@@ -77,7 +79,9 @@ changes, change this file through a PR.
    with these ids, while no `kind: "hardware result (PR head)"` row for that PR's current head is recorded (a posted
    report stays `submitted`; a new head needs a new row): `linux-k114s-nvram-2026-11-25` (#3103),
    `linux-k114-macaudio-jack-2026-11-25` (#3104), `linux-k114s-brightness-floor-2026-11-25` (#3105),
-   `linux-2115-sep-dt-rework-2026-11-25` (#2115) and `aura-k114s-camera-row-2026-11-25` (aura#515).
+   `linux-2115-sep-dt-rework-2026-11-25` (#2115), `aura-k114s-camera-row-2026-11-25` (aura#515) and
+   `linux-k114s-min-brightness-2026-11-26` (#3181, stacked on #2009 and #3105: it waits until a display hand-off lets
+   its exact head drive the panel, and is rebased when #2009 or #3105 changes).
 
    **The nightly run prepares; the boot is attended.** A PR head that hangs before userspace is not recovered by the
    Limine one-shot or `aura-try` alone: someone has to hold the power button (the loader's trial watchdog does not arm
