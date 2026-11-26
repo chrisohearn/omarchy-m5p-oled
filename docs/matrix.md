@@ -8,12 +8,12 @@ repository's sources) → `built/tested` (builds, passes the software tests name
 apply-ready bundle) → `applied` (written to the Mac) → `hardware-verified` (seen working on a
 K114s). A software test is never recorded as hardware proof.
 
-**Base in use** (2026-11-26). Kernel r3f, `linux-k114s-r3b` 7.3.0.r3f-1
-(running `7.3.0-17.v272-18-k114s-r3f-ARCH`): aurora-silicon/linux `main`
-`4abf0f83` plus `patches/linux/r3f.series` ([docs/r3f-kernel.md](r3f-kernel.md)), as Main. r3e1 (`linux-k114s`
-7.3.0.r3e1-1) is Backup. Loader: the self-built Aura `v1.0.0b15` with the K114s camera row through the `m1n1-ctxr.bin`
+**Base in use** (2026-11-26). Kernel r3g, `linux-k114s-r3b` 7.3.0.r3g-1
+(running `7.3.0-17.v272-18-k114s-r3g-ARCH`): aurora-silicon/linux `main` `2094ccb2a036` plus
+`patches/linux/r3g.series` ([docs/r3g-kernel.md](r3g-kernel.md)), as Main since the 2026-11-26 promotion (its first
+ordinary boot passed the r3f comparison, P9 and Tailscale). r3f (`linux-k114s` 7.3.0.r3f-1) is Backup. Loader: the self-built Aura `v1.0.0b15` with the K114s camera row through the `m1n1-ctxr.bin`
 override. Configured Stage 2 `3e46007a`, with camera tree `b7efcc0d` ([docs/r3-camera.md](r3-camera.md)). Linux stub
-firmware 27.2 (26B8125). Desktop: Edge `omarchy-dev` 4.0.0.r8426.gc304e8c-1, with Mesa at aurora-wip `89472d5e832`
+firmware 27.2 (26B8125). Desktop: Edge `omarchy-dev` 4.0.0.r8431.g03e6707-1, with Mesa at aurora-wip `822cf58723a` (installed 2026-11-26: GL through Zink and Vulkan on the M5 Pro, the off-screen readback and the H.264 hardware decode test pass)
 ([docs/r3-package-batch.md](r3-package-batch.md)). Updated nightly ([docs/nightly-rollout.md](nightly-rollout.md)).
 The first image was aurora-silicon/linux `a34d26c2` + betizzel/omarchy-m5 `linux-j714s-27.2.patch` (v272-4), aura
 `22b71758` + `aura-j714s-27.2.patch`, image set `j714s-dev-runtime-7cd4572ff7ef` (betizzel release 3). The 27.2 Apple device trees of the
