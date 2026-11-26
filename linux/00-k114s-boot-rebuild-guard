@@ -1,0 +1,42 @@
+#!/bin/bash
+# Limine's pre-build hook, called after it opens the boot-partition lock.
+set -euo pipefail
+
+case ${HOOK_CALLER:-} in
+  limine-mkinitcpio-install | limine-snapper-sync) ;;
+  *) exit 0 ;;
+esac
+
+# Other Macs do not use the K114s guard. An explicit request from the
+# Plymouth setter still needs the check even if the device tree is unreadable.
+if [[ ! -v K114S_PLYMOUTH_MIN_FREE ]] &&
+   ! grep -qx 'apple,k114s' < <(tr '\0' '\n' 2>/dev/null </proc/device-tree/compatible); then
+  exit 0
+fi
+
+# Leave the snapshot restore path that explicitly disables the mutex alone.
+if [[ $HOOK_CALLER == limine-snapper-sync && ! -e /proc/self/fd/200 &&
+      " ${HOOK_CMDLINE:-} " == *" --no-mutex "* ]]; then
+  exit 0
+fi
+
+# These Limine versions can run pre hooks even after mutex_lock times out.
+# FD 200 is Limine's inherited open file description, so flock on that fd
+# either confirms or acquires the same lock without re-opening it. Limine
+# keeps it through the writes and releases it itself. Exit 100 stops the job.
+if [[ ! /proc/self/fd/200 -ef /run/lock/boot-partition.lock ]] || ! flock -n 200; then
+  echo "Limine's boot-partition lock is busy or unavailable. Try again after the other boot operation finishes." >&2
+  exit 100
+fi
+
+# The space budget applies only to the Plymouth rebuild, not normal updates.
+[[ $HOOK_CALLER == limine-mkinitcpio-install && -v K114S_PLYMOUTH_MIN_FREE ]] || exit 0
+need=$K114S_PLYMOUTH_MIN_FREE
+free=
+if mountpoint -q /boot/efi; then
+  free=$(df -B1 --output=avail /boot/efi 2>/dev/null | tail -n 1 | tr -d ' ') || free=
+fi
+if [[ ! $need =~ ^[0-9]{1,18}$ || ! $free =~ ^[0-9]{1,18}$ ]] || (( 10#$free < 10#$need )); then
+  echo "The EFI partition is not mounted, unreadable or too full to rebuild the image beside the old one (it needs $need bytes free)." >&2
+  exit 100
+fi
