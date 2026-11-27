@@ -39,7 +39,21 @@ Leave the comments to Limine's own tools: the config may be hash-enrolled, so ne
 
 ## Steps
 
-1. **Packages.** Run `omarchy update -y`, not a direct pacman upgrade, which Omarchy refuses. Then check:
+1. **Packages.** From a fresh checkout of the nightly runbook, create a temporary file with `mktemp` and keep its path
+   as `update_proof`. Run `tools/k114s-edge-update-check preflight > "$update_proof"` before `omarchy update -y`.
+   Preflight uses a private pacman database. It verifies the planned Edge archives against the repository digests and
+   trusted signatures, then applies the Omarchy patches in a disposable root. If a patch conflicts, refresh or retire
+   it through the [existing patch workflow](omarchy-patches.md#refreshing-without-asking-owners-standing-rule), then rerun
+   preflight. If preflight still fails, skip the package update and report the reason.
+
+   Run `omarchy update -y` as soon as preflight passes. Use `tools/k114s-edge-update-check report "$update_proof"` after
+   it returns. The report compares the installed package versions and manifests with preflight, runs P9, and prints the
+   verified Main, Backup and Stage 2 state and whether the new root snapshot has a Limine menu entry. Omarchy refreshes
+   its own package lists, so Edge can publish another build in the interval between the two commands. A mismatched build
+   or a failed P9 holds reboots. Diagnose it, qualify the installed build and rerun verification before proceeding. Use
+   `preflight --current` for the installed build when it is still available from Edge. If it has been superseded, verify
+   the live patch set and P9, and qualify the replacement before the next update. Remove the temporary proof file at the
+   end of the package step. Then check:
    - Verify that `checkupdates` lists no packages after `omarchy update -y`. Record the UTC timestamp and result. This records the package state at that time.
    - If a later `checkupdates` run lists packages, record its timestamp and list separately. It does not turn the earlier empty result into a failure. Run the package step again in the next nightly window.
    - count the boots since the local Plymouth went on with no `plymouth-start` core dump, and close #262 at six in a row
@@ -47,7 +61,6 @@ Leave the comments to Limine's own tools: the config may be hash-enrolled, so ne
    - run `linux/plymouth-k114s-status` and rebuild the local Plymouth package when Arch Linux ARM ships a newer release, per [Plymouth on K114s](plymouth-k114s.md) (a `plymouth` line in the pre-update `checkupdates` means the update will replace the local build; record it in the report);
    - `sudo -n /usr/local/lib/omarchy-k114s/omarchy-patches-apply` shows all patches in place, or refresh any that
      don't fit, as PR #248 did;
-   - P9 (`~/.local/state/k114s-recovery/owner-session-touchid/p9.sh`) holds;
    - the speaker gate passes and `systemctl --failed` is empty;
    - `/lib/firmware/apple/isp_2226_02XX.dat` is present. If it is gone, re-carve it as `docs/r3-camera.md` describes.
 2. **Upstream deltas** against what is running:
