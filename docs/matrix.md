@@ -21,6 +21,11 @@ K114s and the K116s (16-inch M5 Pro) are identical node for node, so K116s work 
 source; each device-tree piece still needs this board's identity (board-id 0x14, firmware names,
 panel).
 
+**Ordinary reboot evidence (2026-11-27).** Main r3g booted through configured Stage 2
+`3e46007a`, with r3f still configured as Backup. P9 and speaker readiness passed. Wi-Fi connected,
+Zink used the Apple M5 Pro GPU, and the built-in display reported 10-bit Display P3 at 120 Hz.
+The peer on the tailnet observed the remote T3 link return unaided in under a minute.
+
 | Subsystem | Upstream source (who tested it, on what) | K114s applicability and dependencies | State here | Gap / next step |
 | --- | --- | --- | --- | --- |
 | Boot chain: Stage 1, Aura Stage 2, U-Boot, Limine, UKI | betizzel/omarchy-m5 J714s 27.2 line, release 3 (TripleU, J714s) | Same SoC and stub route. The installer admits only J714s; two small patches admit `apple,k114s` (`installer/`) | **hardware-verified** (owner-observed 2026-11-14: boots to the Hyprland desktop) | Offer the admission upstream once the trackpad/Wi-Fi boot is confirmed |
