@@ -35,13 +35,13 @@
 # -k114s-r3b-t1-ARCH release keep its boot names and module directory separate from r3b.
 #
 # This file does not compile anything. It packages a finished build:
-#   K114S_CAND  the candidate, r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d, r3e, r3e1, r3f, r3g, pr3104, pr3105   (default r3a, the one the runbook docs/r3-integration.md names;
+#   K114S_CAND  the candidate, r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d, r3e, r3e1, r3f, r3g, r3h, pr3104, pr3105   (default r3a, the one the runbook docs/r3-integration.md names;
 #               r3b: docs/r3b-kernel.md, K114S_CAND=r3b makepkg ...; r3b-b1: D5a, K114S_CAND=r3b-b1 makepkg ...;
 #               r3b-c1: docs/r3-hdr.md, K114S_CAND=r3b-c1 makepkg ...; r3b-c2: docs/r3b-kernel.md,
 #               K114S_CAND=r3b-c2 makepkg ...; r3b-c3: docs/r3-vrr.md, K114S_CAND=r3b-c3 makepkg ...;
 #               r3b-c4: docs/r3-touchid.md, K114S_CAND=r3b-c4 makepkg ...; r3c: docs/r3c-kernel.md, K114S_CAND=r3c makepkg ...;
 #               r3d: docs/r3d-kernel.md, K114S_CAND=r3d makepkg ...; r3e: docs/r3e-kernel.md, K114S_CAND=r3e makepkg ...;
-#               r3f: docs/r3f-kernel.md; r3g: docs/r3g-kernel.md; pr3105: attended Backup trial)
+#               r3f: docs/r3f-kernel.md; r3g: docs/r3g-kernel.md; r3h: docs/r3h-kernel.md; pr3105: attended Backup trial)
 #   K114S_SRC   the kernel source tree      (default $K114S_BUILD_ROOT/src/<candidate>)
 #   K114S_OUT   its output directory        (default $K114S_BUILD_ROOT/build/<candidate>)
 # with the toolchain of $K114S_BUILD_ROOT (default ~/k114s-build; env.sh and bin/kmake there).
@@ -79,11 +79,13 @@ case $_cand in
   r3f) pkgname=linux-k114s-r3b; _kcand=r3f; _ver=r3f; _rel=1 ;;
   # r3g trial in the r3e1 Backup slot (docs/r3g-trial-plan.md).
   r3g) pkgname=linux-k114s; _kcand=r3g; _ver=r3g; _rel=1 ;;
+  # r3h replaces r3f in the Backup slot while r3g remains Main.
+  r3h) pkgname=linux-k114s; _kcand=r3h; _ver=r3h; _rel=1 ;;
   # Attended #3104 trial in the r3e1 Backup slot. Main stays r3f.
   pr3104) pkgname=linux-k114s; _kcand=pr3104; _ver=r3f.pr3104; _rel=1 ;;
   # Attended #3105 trial in the r3e1 Backup slot. Main stays r3f.
   pr3105) pkgname=linux-k114s; _kcand=pr3105; _ver=r3f.pr3105; _rel=1 ;;
-  *) echo "K114S_CAND must be r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d, r3e, r3e1, r3f, r3g, pr3104 or pr3105" >&2; exit 1 ;;
+  *) echo "K114S_CAND must be r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d, r3e, r3e1, r3f, r3g, r3h, pr3104 or pr3105" >&2; exit 1 ;;
 esac
 pkgbase=$pkgname
 pkgver=7.3.0.$_ver
@@ -158,7 +160,7 @@ package() {
     grep -q 'fw27_panel_edr_max_nits = 500;' "$_src/drivers/gpu/drm/apple/dcp.c" ||
       { echo "$_src has no 500-nit EDR cap (patches/linux/r3e.series)" >&2; return 1; }
   fi
-  if [[ $_cand == r3f || $_cand == r3g || $_cand == pr3104 || $_cand == pr3105 ]]; then
+  if [[ $_cand == r3f || $_cand == r3g || $_cand == r3h || $_cand == pr3104 || $_cand == pr3105 ]]; then
     ! grep -q 'fw27_panel_edr_max_nits = 500;' "$_src/drivers/gpu/drm/apple/dcp.c" &&
       grep -q '^static unsigned int fw27_panel_edr_max_nits;' "$_src/drivers/gpu/drm/apple/dcp.c" &&
       grep -q '^bool dcp_panel_edr(struct platform_device \*pdev)' "$_src/drivers/gpu/drm/apple/dcp.c" &&
@@ -190,7 +192,7 @@ package() {
       { echo "$_src has the 26B8125 G17S firmware entry more than once" >&2; return 1; }
   fi
   # r3e1 adds r3e/0076: on apple,k114s the camera indicator is a solid 32x32 square under the notch (also carried by r3f and r3g)
-  if [[ $_cand == r3e1 || $_cand == r3f || $_cand == r3g || $_cand == pr3104 || $_cand == pr3105 ]]; then
+  if [[ $_cand == r3e1 || $_cand == r3f || $_cand == r3g || $_cand == r3h || $_cand == pr3104 || $_cand == pr3105 ]]; then
     grep -q 'IND_COMPACT_SIDE	32' "$_src/drivers/gpu/drm/apple/dcp-indicator.c" &&
       grep -q 'of_machine_is_compatible("apple,k114s")' "$_src/drivers/gpu/drm/apple/dcp-indicator.c" ||
       { echo "$_src lacks r3e/0076 (the small camera indicator)" >&2; return 1; }
@@ -242,6 +244,33 @@ package() {
       python3 "$repo/build/validate-config.py" "$_out/.config" \
         "$repo/patches/linux/config/k114s-required.config" "$repo/patches/linux/config/k114s-r3.config" ||
       { echo "$_out/.config must satisfy the K114s requirements with Apple SoC sleep disabled" >&2; return 1; }
+  fi
+  if [[ $_cand == r3h ]]; then
+    # Pin the complete 34-patch replay on fresh upstream main. Keep the K114s QSPI path read-only,
+    # preserve the camera choices, and compile Apple SoC sleep out as in the proven r3g config.
+    local base=e070a17ceb8d9bf1b5e23718449988b7c5288722
+    local tree=9e74dda851ecc96bca4d295cc5dbc65d35667093
+    local repo="$startdir/../.."
+    [[ $(git -C "$_src" rev-parse 'HEAD^{tree}') == "$tree" ]] &&
+      git -C "$_src" merge-base --is-ancestor "$base" HEAD &&
+      git -C "$_src" diff --quiet HEAD -- &&
+      [[ $(<"$_src/localversion.10-pkgrel") == '-17.v272-19-k114s-r3h' ]] &&
+      grep -Fxq '# CONFIG_APPLE_SOC_SLEEP is not set' "$_out/.config" &&
+      python3 "$repo/build/validate-config.py" "$_out/.config" \
+        "$repo/patches/linux/config/k114s-required.config" "$repo/patches/linux/config/k114s-r3.config" &&
+      grep -q 'static bool read_only = true;' "$_src/drivers/spi/spi-apple-qspi.c" &&
+      ! grep -q 'apple,k114s' "$_src/drivers/spi/spi-apple-qspi.c" &&
+      ! grep -rq 'label = "nvram"' "$_src/arch/arm64/boot/dts/apple/t6050-k114s.dts" \
+        "$_src/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi" &&
+      grep -q 'dcp_bl_set_minimum' "$_src/drivers/gpu/drm/apple/dcp_backlight.h" &&
+      grep -q 'apple,camera-light-undescribed' "$_src/drivers/media/platform/apple/isp/isp-drv.c" &&
+      grep -q 'bool light_ctrl;' "$_src/drivers/media/platform/apple/isp/isp-drv.h" &&
+      grep -Fq '#include "t6050-k114-k116-gpu.dtsi"' "$_src/arch/arm64/boot/dts/apple/t6050-k114s.dts" &&
+      grep -q 'compatible = "apple,agx-g17s";' "$_src/arch/arm64/boot/dts/apple/t6050-k114-k116-gpu.dtsi" &&
+      grep -q $'IND_COMPACT_SIDE\t32' "$_src/drivers/gpu/drm/apple/dcp-indicator.c" &&
+      grep -q 'of_machine_is_compatible("apple,k114s")' "$_src/drivers/gpu/drm/apple/dcp-indicator.c" &&
+      grep -q 'apple,k114-macaudio' "$_src/sound/soc/apple/macaudio.c" ||
+      { echo "$_src differs from the pinned r3h source or violates a K114s safety/configuration invariant" >&2; return 1; }
   fi
   if [[ $_cand == pr3104 ]]; then
     local pr_head=9d3eeaa5d8ddd80c3868280ff5376425443c42c5

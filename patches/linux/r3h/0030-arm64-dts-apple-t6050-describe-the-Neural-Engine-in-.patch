@@ -1,0 +1,197 @@
+From 2da807cf41ff50e10f836fd9e3abf5f86f05e5a8 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <address-in-upstream-commit@localhost>
+Date: Thu, 19 Nov 2026 22:48:56 +1100
+Subject: [PATCH 30/34] arm64: dts: apple: t6050: describe the Neural Engine in
+ a SoC-level dtsi
+
+t6050-j714s-ane.dtsi has nothing J714s-specific in it: the ane0 node, its
+three DARTs and ANE_SYS are in t6050-peripherals.dtsi, and the two preload
+reservations are placeholders that the boot loader fills from the ADT of the
+machine it boots (aura matches the node by its "apple,t6050-ane"
+compatible, on any board). The accel/ane driver also matches only the
+compatible and refuses a hand-off whose preloaded firmware it does not
+know.
+
+Move the content to t6050-ane.dtsi. The new file also holds a vote on
+ANE_SYS's parents in the ADT power tree, FAB8_SOC and FAB9_SOC, and on
+FAB8_SOC's parent FAB0_PIOGW, as firmware-owned domains. Without them
+ANE_SYS cannot register on a board that does not describe its Secure
+Enclave or camera, which today are the only users that enable those
+fabrics. J714s already enables all three with the same properties.
+
+t6050-j714s-ane.dtsi stays as a one-line include for board files that
+still name it; t6050-ane.dtsi has an include guard, so a board that gets
+both is fine.
+
+The ANE description is DjDeveloperr's, from commit 648384409c69
+("arm64: dts: apple: t6050: Describe the ANE on the T8140 model, enable it
+on J714s"); this only changes where it lives.
+
+J714s now includes t6050-ane.dtsi directly. Its DTB is byte-identical
+before and after, and no other board changes in this commit.
+
+Signed-off-by: Ryan Murray <address-in-upstream-commit@localhost>
+
+[re-cut onto the K114s r3d tree]
+---
+ arch/arm64/boot/dts/apple/t6050-ane.dtsi      | 80 +++++++++++++++++++
+ .../arm64/boot/dts/apple/t6050-j714s-ane.dtsi | 47 +----------
+ arch/arm64/boot/dts/apple/t6050-j714s.dts     |  2 +-
+ 3 files changed, 84 insertions(+), 45 deletions(-)
+ create mode 100644 arch/arm64/boot/dts/apple/t6050-ane.dtsi
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-ane.dtsi b/arch/arm64/boot/dts/apple/t6050-ane.dtsi
+new file mode 100644
+index 000000000000..aaf2fb2d9a6d
+--- /dev/null
++++ b/arch/arm64/boot/dts/apple/t6050-ane.dtsi
+@@ -0,0 +1,80 @@
++// SPDX-License-Identifier: GPL-2.0+ OR MIT
++/*
++ * The T6050 Neural Engine (ane0 in t6050-peripherals.dtsi), for any board
++ * that includes this after t6050-peripherals.dtsi. iBoot preloads the
++ * personalized firmware (ADT ane0 segment-ranges, TEXT 0xc0000 and DATA
++ * 0x2ac000 bytes). The boot loader fills the two reservations from that
++ * boot's ADT, renames them to their physical addresses and enables them; a
++ * boot without that hand-off leaves ane0 disabled, and the ANE driver leaves
++ * the engine off unless the preloaded firmware is one it knows.
++ *
++ * This describes die 0's engine only. The second die of an M5 Ultra has its
++ * own engine, DARTs and power state, which are not described yet.
++ */
++
++#ifndef __T6050_ANE_DTSI__
++#define __T6050_ANE_DTSI__
++
++/ {
++	reserved-memory {
++		ane_fw_text: ane-firmware-text@0 {
++			compatible = "apple,asc-mem";
++			reg = <0 0 0 0>;
++			no-map;
++			status = "disabled";
++		};
++
++		ane_fw_data: ane-firmware-data@0 {
++			compatible = "apple,asc-mem";
++			reg = <0 0 0 0>;
++			no-map;
++			status = "disabled";
++		};
++	};
++};
++
++&ane0 {
++	memory-region = <&ane_fw_text>, <&ane_fw_data>;
++	memory-region-names = "firmware-text", "firmware-data";
++	status = "okay";
++};
++
++&ane0_dart {
++	status = "okay";
++};
++
++&ane0_dart1 {
++	status = "okay";
++};
++
++&ane0_dart2 {
++	status = "okay";
++};
++
++&ps_ane_sys {
++	status = "okay";
++};
++
++/*
++ * ANE_SYS's parents in the ADT power tree are FAB8_SOC and FAB9_SOC, and
++ * FAB8_SOC's is FAB0_PIOGW. The firmware keeps these fabrics up (the Secure
++ * Enclave and the camera sit behind them too), so Linux only holds a vote on
++ * them and never switches them. A board that already enables them for its
++ * Secure Enclave or camera ends up with the same nodes.
++ */
++&ps_fab0_piogw {
++	apple,firmware-owned;
++	status = "okay";
++};
++
++&ps_fab8_soc {
++	apple,firmware-owned;
++	status = "okay";
++};
++
++&ps_fab9_soc {
++	apple,firmware-owned;
++	status = "okay";
++};
++
++#endif /* __T6050_ANE_DTSI__ */
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714s-ane.dtsi b/arch/arm64/boot/dts/apple/t6050-j714s-ane.dtsi
+index fcad9b25534b..afed4c2477fe 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714s-ane.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-j714s-ane.dtsi
+@@ -1,48 +1,7 @@
+ // SPDX-License-Identifier: GPL-2.0+ OR MIT
+ /*
+- * The Neural Engine of the J714s and the J716c, which share its layout. iBoot
+- * preloads the personalized firmware (ADT ane0 segment-ranges, TEXT 0xc0000 and
+- * DATA 0x2ac000 bytes). The boot loader fills the two reservations from that
+- * boot's ADT, renames them to their physical addresses and enables them; until
+- * then the ANE driver leaves the engine off.
++ * The Neural Engine is described for every T6050 board in t6050-ane.dtsi.
++ * This name is kept for board files that still include it.
+  */
+ 
+-/ {
+-	reserved-memory {
+-		ane_fw_text: ane-firmware-text@0 {
+-			compatible = "apple,asc-mem";
+-			reg = <0 0 0 0>;
+-			no-map;
+-			status = "disabled";
+-		};
+-
+-		ane_fw_data: ane-firmware-data@0 {
+-			compatible = "apple,asc-mem";
+-			reg = <0 0 0 0>;
+-			no-map;
+-			status = "disabled";
+-		};
+-	};
+-};
+-
+-&ane0 {
+-	memory-region = <&ane_fw_text>, <&ane_fw_data>;
+-	memory-region-names = "firmware-text", "firmware-data";
+-	status = "okay";
+-};
+-
+-&ane0_dart {
+-	status = "okay";
+-};
+-
+-&ane0_dart1 {
+-	status = "okay";
+-};
+-
+-&ane0_dart2 {
+-	status = "okay";
+-};
+-
+-&ps_ane_sys {
+-	status = "okay";
+-};
++#include "t6050-ane.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714s.dts b/arch/arm64/boot/dts/apple/t6050-j714s.dts
+index 0cf422e1e10d..a7a4089d1305 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j714s.dts
+@@ -725,7 +725,7 @@ preset8 {
+ #include "t6050-j714s-dpaudio.dtsi"
+ 
+ /* The Neural Engine, started only after the boot loader's preload hand-off */
+-#include "t6050-j714s-ane.dtsi"
++#include "t6050-ane.dtsi"
+ /*
+  * The port controllers: the sleep's command rules, a reset and more probe tries after a failed
+  * probe, and for the USB-C ports LOCK's key, the board number reversed ("417J"; their debug mode

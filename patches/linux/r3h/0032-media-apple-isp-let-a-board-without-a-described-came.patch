@@ -1,0 +1,113 @@
+From 147bd63520c5b7eb7217e6a114b8212a518009e4 Mon Sep 17 00:00:00 2001
+From: "K114s (omarchy-m5p-oled)" <k114s@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 13:33:24 -0700
+Subject: [PATCH 32/34] media: apple: isp: let a board without a described
+ camera light run the camera
+
+The T6050 ISP refuses to probe unless the device tree describes the camera
+light (a "cil" register and "apple,cil-config"), so a stream can be refused
+when the light does not come on. The K114s ADT describes no light pin (eic
+"cil" without a "cil-gpio-offset", as on the K114c), so its camera never
+probes.
+
+Add an opt-in device-tree property, "apple,camera-light-undescribed". With it,
+the driver drives no light and runs the camera as on the ISPs that have none.
+The display's best-effort camera indicator (#2561) still shows while it
+streams. Boards without the property keep the gate unchanged. The K114s
+owner chose this over waiting for the light to be traced from macOS.
+---
+ drivers/media/platform/apple/isp/isp-cam.c | 10 +++++-----
+ drivers/media/platform/apple/isp/isp-drv.c | 13 ++++++++++++-
+ drivers/media/platform/apple/isp/isp-drv.h |  6 ++++++
+ 3 files changed, 23 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/media/platform/apple/isp/isp-cam.c b/drivers/media/platform/apple/isp/isp-cam.c
+index 56a711379834..eb9ed632b035 100644
+--- a/drivers/media/platform/apple/isp/isp-cam.c
++++ b/drivers/media/platform/apple/isp/isp-cam.c
+@@ -1225,7 +1225,7 @@ static enum hrtimer_restart apple_isp_wdt_timer(struct hrtimer *timer)
+ 	struct apple_isp *isp = container_of(timer, struct apple_isp,
+ 					     wdt_timer);
+ 
+-	if (isp->hw->camera_light && !isp->cil_lit)
++	if (isp->light_ctrl && !isp->cil_lit)
+ 		return HRTIMER_NORESTART;
+ 	apple_isp_wdt_kick(isp);
+ 	hrtimer_forward_now(timer, ns_to_ktime(ISP_WDT_PERIOD_NS));
+@@ -1243,7 +1243,7 @@ static void apple_isp_wdt_start(struct apple_isp *isp)
+ {
+ 	if (!isp->wdt || isp->wdt_running)
+ 		return;
+-	if (isp->hw->camera_light && !isp->cil_lit)
++	if (isp->light_ctrl && !isp->cil_lit)
+ 		return;
+ 
+ 	isp->wdt_running = true;
+@@ -1276,7 +1276,7 @@ static int apple_isp_light_on(struct apple_isp *isp)
+ {
+ 	u32 val, on = isp->cil_on_high ? ISP_GPIO_DATA : 0;
+ 
+-	if (!isp->hw->camera_light)
++	if (!isp->light_ctrl)
+ 		return 0;
+ 	val = (isp->cil_config & ~ISP_GPIO_DATA) | ISP_GPIO_INPUT_ENABLE | on;
+ 	writel(val, isp->cil);
+@@ -1297,7 +1297,7 @@ static int apple_isp_light_on(struct apple_isp *isp)
+  */
+ void apple_isp_light_off(struct apple_isp *isp)
+ {
+-	if (!isp->hw->camera_light || !isp->cil_lit)
++	if (!isp->light_ctrl || !isp->cil_lit)
+ 		return;
+ 	apple_isp_wdt_stop(isp);
+ 	isp->cil_lit = false;
+@@ -1311,7 +1311,7 @@ void apple_isp_light_off(struct apple_isp *isp)
+  */
+ void apple_isp_light_force_off(struct apple_isp *isp)
+ {
+-	if (!isp->hw->camera_light)
++	if (!isp->light_ctrl)
+ 		return;
+ 	apple_isp_light_off(isp);
+ 	writel((isp->cil_config & ~ISP_GPIO_DATA) | (isp->cil_on_high ? 0 : ISP_GPIO_DATA),
+diff --git a/drivers/media/platform/apple/isp/isp-drv.c b/drivers/media/platform/apple/isp/isp-drv.c
+index de45d9ca266e..6d404d4ded82 100644
+--- a/drivers/media/platform/apple/isp/isp-drv.c
++++ b/drivers/media/platform/apple/isp/isp-drv.c
+@@ -951,7 +951,18 @@ static int apple_isp_probe(struct platform_device *pdev)
+ 		apple_isp_wdt_init(isp);
+ 	}
+ 
+-	if (isp->hw->camera_light) {
++	isp->light_ctrl = isp->hw->camera_light;
++	if (isp->light_ctrl &&
++	    of_property_read_bool(dev->of_node, "apple,camera-light-undescribed")) {
++		/*
++		 * The board's ADT describes no camera-light pin (the K114s: eic cil
++		 * without a cil-gpio-offset). Its owner chose to run the camera with
++		 * the display's best-effort indicator instead of a verified light.
++		 */
++		dev_warn(dev, "no camera light described; the camera runs without one\n");
++		isp->light_ctrl = false;
++	}
++	if (isp->light_ctrl) {
+ 		res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "cil");
+ 		if (!res ||
+ 		    of_property_read_u32(dev->of_node, "apple,cil-config",
+diff --git a/drivers/media/platform/apple/isp/isp-drv.h b/drivers/media/platform/apple/isp/isp-drv.h
+index 58a26a44e531..d52d4cc511cb 100644
+--- a/drivers/media/platform/apple/isp/isp-drv.h
++++ b/drivers/media/platform/apple/isp/isp-drv.h
+@@ -432,6 +432,12 @@ struct apple_isp {
+ 	u32 cil_saved;
+ 	bool cil_on_high;
+ 	bool cil_lit;
++	/*
++	 * hw->camera_light, unless the device tree says this board has no described
++	 * light ("apple,camera-light-undescribed"): then nothing drives a light and
++	 * the camera runs as on the ISPs without one.
++	 */
++	bool light_ctrl;
+ 	void __iomem *dapf;
+ 	struct hrtimer wdt_timer;
+ 	bool wdt_running;

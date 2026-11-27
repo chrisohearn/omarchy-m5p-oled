@@ -1,0 +1,42 @@
+From a687d0ef26de31ccc717b8583edaea9f89178d25 Mon Sep 17 00:00:00 2001
+From: k114s-integration <integration@localhost>
+Date: Sat, 14 Nov 2026 15:51:55 -0700
+Subject: [PATCH 14/34] dt-bindings: display: apple,dcp: optional panel
+ brightness floor
+
+A panel node may carry apple,min-brightness: the lowest level, in the
+unit of apple,max-brightness, that a brightness request can reach where
+the firmware takes the level in nits. Turning the display off is not
+affected.
+
+K114s (MacBook Pro 14-inch OLED, M5 Pro) integration patch, not from
+upstream. Nobody has reported a brightness write on a K-board OLED
+panel, and what such a panel shows at 0 nits is not known, so the K114s
+tree names a floor.
+
+Hardware-untested: not booted on any machine.
+
+Co-Authored-By: Claude Fable 5.2 <address-in-upstream-commit@localhost>
+---
+ Documentation/devicetree/bindings/display/apple,dcp.yaml | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/display/apple,dcp.yaml b/Documentation/devicetree/bindings/display/apple,dcp.yaml
+index eba0a74ce678..e3ca81b5ff46 100644
+--- a/Documentation/devicetree/bindings/display/apple,dcp.yaml
++++ b/Documentation/devicetree/bindings/display/apple,dcp.yaml
+@@ -624,6 +624,14 @@ properties:
+       apple,max-brightness:
+         $ref: /schemas/types.yaml#/definitions/uint32
+         description: Maximum firmware backlight level.
++      apple,min-brightness:
++        $ref: /schemas/types.yaml#/definitions/uint32
++        description:
++          Lowest level a brightness request can reach, in the unit of
++          apple,max-brightness and below it, where the firmware takes the
++          level in nits. A lower request, zero included, is raised to this
++          level. Turning the display off (DPMS, blanking, suspend) is not
++          affected.
+     required:
+       - compatible
+     additionalProperties: false
