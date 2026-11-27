@@ -15,7 +15,7 @@
 #     (r3f: the Display P3 default and a cap parameter whose default is 0, as upstream's EDR value #2694 wants)
 #   - from r3b.c3, appledrm also has fw27_panel_vrr_min with its default of 24 (vrr 0001)
 #   - from r3b.c4, apple-sep admits the K114s to its T6050 profile (sep 0001, Touch ID)
-#   - r3g satisfies both K114s config fragments, keeps deep sleep off and supplies the K114 macaudio alias
+#   - r3g/r3h satisfy both K114s config fragments, keep deep sleep off and supply the K114 macaudio alias
 # usage: check-package.sh PACKAGE [OTHER-KERNEL-PACKAGE=linux-aurora] [Module.symvers]
 # Run it once per other kernel (linux-aurora, and linux-k114s for an r3b package): each must be installed.
 # The symbol check needs the build's Module.symvers (default $K114S_BUILD_ROOT/build/${K114S_CAND:-r3a}/Module.symvers); without it only plain depmod -a runs.
@@ -50,12 +50,13 @@ case $rel in
   *-k114s-r3e1-ARCH) want=linux-k114s ;;   # r3e1 takes the linux-k114s slot, the Backup beside r3e (docs/r3e-kernel.md)
   *-k114s-r3f-ARCH) want=linux-k114s-r3b ;;   # r3f takes the linux-k114s-r3b slot, the Backup beside r3e1 (docs/r3f-kernel.md)
   *-k114s-r3g-ARCH) want=linux-k114s ;;   # r3g trial in the r3e1 Backup slot
+  *-k114s-r3h-ARCH) want=linux-k114s ;;   # r3h replaces r3f in the Backup slot while r3g remains Main
   *-k114s-pr3104-ARCH) want=linux-k114s ;; # temporary #3104 trial in the r3e1 Backup slot
   *-k114s-pr3105-ARCH) want=linux-k114s ;; # attended #3105 trial in the r3e1 Backup slot
   *) want= ;;
 esac
 name=$(info pkgname); base=$(info pkgbase)
-[ -n "$want" ] && [ "$name" = "$want" ] && ok "package name $name fits release $rel" || no "package name '$name' for release $rel (want '${want:-a k114s r3a, r3b, r3b-t1, r3c, r3d, r3e, r3e1, r3f, r3g, pr3104 or pr3105 release}')"
+[ -n "$want" ] && [ "$name" = "$want" ] && ok "package name $name fits release $rel" || no "package name '$name' for release $rel (want '${want:-a k114s r3a, r3b, r3b-t1, r3c, r3d, r3e, r3e1, r3f, r3g, r3h, pr3104 or pr3105 release}')"
 [ "$base" = "$name" ] && ok "pkgbase $base equals the package name" || no "pkgbase '$base' is not the package name '$name'"
 [ "$(cat "$m/pkgbase" 2>/dev/null)" = "$name" ] && ok "module directory pkgbase file is $name" || no "module directory pkgbase file is '$(cat "$m/pkgbase" 2>/dev/null)', not '$name'"
 [ -f "$w/usr/share/$name/config-$rel" ] && [ "$(ls "$w/usr/share")" = "$name" ] && ok "config at usr/share/$name/config-$rel" || no "config not (only) at usr/share/$name/config-$rel"
@@ -64,6 +65,16 @@ name=$(info pkgname); base=$(info pkgbase)
 [ -z "$(find "$w" -type l)" ] && ok "no symbolic links (no build/source)" || { no "symbolic links:"; find "$w" -type l; }
 diff <(ls "$m/dtbs") "$here/dtbs.list" >/dev/null && ok "dtbs are exactly dtbs.list ($(wc -l < "$here/dtbs.list"))" || no "dtbs differ from dtbs.list"
 [ -s "$m/dtbs/t6050-k114s.dtb" ] && ok "t6050-k114s.dtb present" || no "t6050-k114s.dtb missing"
+if [[ $rel == *-k114s-r3h-ARCH ]]; then
+  if ! dtc -I dtb -O dts "$m/dtbs/t6050-k114s.dtb" > "$w/t6050-k114s.dts" 2>"$w/t6050-k114s.dtc.log"; then
+    no "r3h packaged K114s DTB did not decompile"
+    sed -n '1,20p' "$w/t6050-k114s.dtc.log"
+  elif grep -Eiq 'nvram|jedec,spi-nor' "$w/t6050-k114s.dts"; then
+    no "r3h packaged K114s DTB contains an NVRAM partition or SPI NOR device"
+  else
+    ok "r3h packaged K114s DTB contains no NVRAM partition or SPI NOR device"
+  fi
+fi
 # The packaged tree is the kernel tree's own preliminary t6050-k114s.dts, not a tree of dts/ (which the Stage 2 carries).
 # Printed so nobody takes it for an r3 tree: it lacks the N1, USB and SMC sensor nodes.
 echo "info packaged t6050-k114s.dtb sha256 $(sha256sum "$m/dtbs/t6050-k114s.dtb" | cut -c1-64) (the preliminary kernel tree, NOT an r3 tree from dts/)"
@@ -84,19 +95,19 @@ strings -a "$m/vmlinuz" | grep -q "Linux version $rel " && ok "vmlinuz banner na
 ver=$(info pkgver); drm=$(find "$m" -name appledrm.ko | head -1)
 if [ -n "$drm" ] && strings -a "$drm" | grep -q 'brightness requests below %u nits are raised to %u nits'; then floor=yes; else floor=no; fi
 case $ver in
-  *.b[0-9]*|*.c[0-9]*|*.r3c*|*.r3d*|*.r3e*|*.r3f*|*.r3g*) [ $floor = yes ] && ok "version $ver: appledrm carries the brightness floor (brightness 0006)" || no "version $ver: appledrm lacks the brightness floor (brightness 0006)" ;;
+  *.b[0-9]*|*.c[0-9]*|*.r3c*|*.r3d*|*.r3e*|*.r3f*|*.r3g*|*.r3h*) [ $floor = yes ] && ok "version $ver: appledrm carries the brightness floor (brightness 0006)" || no "version $ver: appledrm lacks the brightness floor (brightness 0006)" ;;
   *) echo "info version $ver: appledrm brightness floor $floor" ;;
 esac
 # The HDR build (version ...r3b.c<N>, docs/r3-hdr.md) must carry the Display P3 default and the EDR cap at 500 nits;
 # r3c (docs/r3c-kernel.md) carries the same series. r3f (docs/r3f-kernel.md) takes upstream's EDR value (#2694) and
 # drops the K114s cap: its parameter is still there, with a default of 0 (the panel's own peak).
 case $ver in
-  *.c[0-9]*|*.r3c*|*.r3d*|*.r3e*|*.r3f*|*.r3g*)
+  *.c[0-9]*|*.r3c*|*.r3d*|*.r3e*|*.r3f*|*.r3g*|*.r3h*)
     if [ -n "$drm" ] && strings -a "$drm" | grep -q 'EDID primaries default to Display P3'; then ok "version $ver: appledrm carries the Display P3 default (hdr 0001)"
     else no "version $ver: appledrm lacks the Display P3 default (hdr 0001)"; fi ;;
 esac
 case $ver in
-  *.r3f*|*.r3g*)
+  *.r3f*|*.r3g*|*.r3h*)
     if [ -n "$drm" ] && modinfo -F parm "$drm" | grep -q '^fw27_panel_edr_max_nits:.*(default: 0)'; then ok "version $ver: appledrm has no EDR cap by default (the parameter's default is 0; upstream's EDR value, #2694)"
     else no "version $ver: appledrm still caps panel EDR by default, or lacks the cap parameter"; fi ;;
   *.c[0-9]*|*.r3c*|*.r3d*|*.r3e*)
@@ -105,7 +116,7 @@ case $ver in
 esac
 # From r3b.c3 (docs/r3-hdr.md, hdr 0004) appledrm offers no EDR when a cap is set and the SDR maximum is unknown; r3c too.
 case $ver in
-  *.c[3-9]*|*.r3c*|*.r3d*|*.r3e*|*.r3f*|*.r3g*)
+  *.c[3-9]*|*.r3c*|*.r3d*|*.r3e*|*.r3f*|*.r3g*|*.r3h*)
     if [ -n "$drm" ] && strings -a "$drm" | grep -q 'panel EDR off: cap %u nits set and the SDR maximum is unknown'; then ok "version $ver: appledrm turns EDR off for a cap with an unknown SDR maximum (hdr 0004)"
     else no "version $ver: appledrm lacks the unknown-SDR EDR guard (hdr 0004)"; fi ;;
 esac
@@ -124,7 +135,7 @@ case $ver in
     else no "version $ver: apple-sep does not admit apple,k114s (sep 0001)"; fi ;;
   # r3d carries aurora-silicon/linux #2631: the T6050 profile is chosen by the SoC compatible, so every apple,t6050
   # board (the K114s too) gets it and the module no longer names the K114s
-  *.r3d*|*.r3e*|*.r3f*|*.r3g*)
+  *.r3d*|*.r3e*|*.r3f*|*.r3g*|*.r3h*)
     sep=$(find "$m" -name apple-sep.ko | head -1)
     if [ -n "$sep" ] && grep -a -q 'apple,t6050' "$sep"; then ok "version $ver: apple-sep picks the T6050 profile by SoC (#2631)"
     else no "version $ver: apple-sep has no T6050 SoC selection (#2631)"; fi ;;
@@ -141,31 +152,31 @@ esac
 # partition and a known flash part, and every refusal is logged. The K114s has neither, so it stays read-only and the
 # module names no K114s row (the PKGBUILD source guard checks the DT and the part table).
 case $ver in
-  *.r3e*|*.r3f*|*.r3g*)
+  *.r3e*|*.r3f*|*.r3g*|*.r3h*)
     q=$(find "$m" -name spi-apple-qspi.ko | head -1)
     if [ -n "$q" ] && strings -a "$q" | grep -q 'NVRAM denied: reason=' && ! strings -a "$q" | grep -q -x 'apple,k114s'; then ok "version $ver: spi-apple-qspi has #2817's fail-closed NVRAM policy and no K114s write row"
     else no "version $ver: spi-apple-qspi is not #2817's NVRAM policy without a K114s row"; fi ;;
 esac
 case $ver in
-  *.r3c*|*.r3d*|*.r3e*|*.r3f*|*.r3g*)
+  *.r3c*|*.r3d*|*.r3e*|*.r3f*|*.r3g*|*.r3h*)
     a=$(find "$m" -name 'aop.ko' -path '*soc/apple*' | head -1)
     if [ -n "$a" ] && strings -a "$a" | grep -q 'sensor blob'; then ok "version $ver: aop carries the 193-byte calibration message (r3c 0004)"
     else no "version $ver: aop lacks the 193-byte calibration message (r3c 0004)"; fi ;;
 esac
-if [[ $rel == *-k114s-r3g-ARCH ]]; then
+if [[ $rel == *-k114s-r3g-ARCH || $rel == *-k114s-r3h-ARCH ]]; then
   config="$w/usr/share/$name/config-$rel"
   if grep -Fxq '# CONFIG_APPLE_SOC_SLEEP is not set' "$config" &&
      python3 "$here/../../build/validate-config.py" "$config" \
        "$here/../../patches/linux/config/k114s-required.config" "$here/../../patches/linux/config/k114s-r3.config"; then
-    ok "r3g satisfies the K114s config requirements with Apple SoC sleep disabled"
+    ok "$ver satisfies the K114s config requirements with Apple SoC sleep disabled"
   else
-    no "r3g config requirements or Apple SoC sleep exclusion"
+    no "$ver config requirements or Apple SoC sleep exclusion"
   fi
   sound=$(find "$m" -name 'snd-soc-macaudio.ko' -print -quit)
   if [[ -n $sound ]] && modinfo -F alias "$sound" | grep -q 'Capple,k114-macaudio'; then
-    ok "r3g macaudio module matches apple,k114-macaudio"
+    ok "$ver macaudio module matches apple,k114-macaudio"
   else
-    no "r3g macaudio module has no apple,k114-macaudio alias"
+    no "$ver macaudio module has no apple,k114-macaudio alias"
   fi
 fi
 if [[ $rel == *-k114s-pr3104-ARCH ]]; then

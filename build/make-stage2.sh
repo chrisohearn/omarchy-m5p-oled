@@ -21,7 +21,7 @@ tmp=$(mktemp "$out.XXXXXX"); trap 'rm -f "$tmp"' EXIT
 total=$(stat -c %s "$tmp")
 [ "$total" -le 16777216 ] || { echo "make-stage2: $total bytes exceed Aura's 16 MiB slot" >&2; exit 1; }
 mv -f "$tmp" "$out"; trap - EXIT
-p=$(stat -c %s "$m1n1")
+p=$(stat -Lc %s "$m1n1")
 echo "stage2   $(sha256sum "$out" | cut -c1-64)  $total bytes  $out"
 echo "prefix   $(head -c "$p" "$out" | sha256sum | cut -c1-64)  ($p bytes, Aura)"
 echo "tree     $(sha256sum "$dtb" | cut -c1-64)  ($size bytes)"

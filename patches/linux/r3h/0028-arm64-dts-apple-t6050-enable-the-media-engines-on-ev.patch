@@ -1,0 +1,516 @@
+From 49cd4d0ddca399233065cdd5df56384ab7a3f42f Mon Sep 17 00:00:00 2001
+From: Ryan Murray <address-in-upstream-commit@localhost>
+Date: Thu, 19 Nov 2026 23:00:20 +1100
+Subject: [PATCH 28/34] arm64: dts: apple: t6050: enable the media engines on
+ every board
+
+The video encoder (ave0), the first ProRes engine (apr0) and both JPEG
+engines were enabled only on the J714s, and the video decoder (avd0) only
+on the J714c, J714s, J775d and K116s. Every T6050 board's ADT has these
+engines at the same addresses, with the same interrupts, DART streams and
+power states, so describe their enables once.
+
+Add t6050-media.dtsi with the J714s enables for the decoder, encoder,
+ProRes and JPEG engines, their DARTs and their power states, and include it
+from every T6050 board after t6050-peripherals.dtsi. The J714s, J714c and
+K116s lose their copies of these blocks. The J775d keeps the decoders that
+t6050-ultra.dtsi describes enabled; the shared file leaves them alone there.
+
+Every DART enabled here already carries its engine's power state
+(dart-ave0 both instances: VENC0_SYS, dart-apr0: SCODEC, dart-jpeg0: JPG,
+dart-avd0: AVD_SYS). The encoder's firmware preload is handed over by the
+boot loader by compatible, so it needs no per-board change.
+
+The second encoder (ave1) and the second ProRes engine (apr1) of the M5
+Max stay disabled: the boot loader hands over only the first encoder's
+preloaded firmware, which the AVE driver requires, and the ProRes driver's
+T6050 variant only describes the first engine's window layout.
+
+DTBs: the J714s is byte-identical. The J714c gains apple,always-on on
+FAB1_SOC, as the J714s, K116s and J775d already have. Every other board
+gains whichever of these engines it lacked, so all eleven now enable the
+same media nodes as the J714s.
+
+The J714s blocks were written by DjDeveloperr, the J714c decoder block by
+Eduard Moldovan and the K116s decoder block by Jens Axboe.
+
+Signed-off-by: Ryan Murray <address-in-upstream-commit@localhost>
+
+[re-cut onto the K114s r3d tree]
+---
+ arch/arm64/boot/dts/apple/t6050-j714c.dts  |  22 +---
+ arch/arm64/boot/dts/apple/t6050-j714s.dts  | 116 +----------------
+ arch/arm64/boot/dts/apple/t6050-j716c.dts  |   1 +
+ arch/arm64/boot/dts/apple/t6050-j716s.dts  |   1 +
+ arch/arm64/boot/dts/apple/t6050-j775c.dts  |   1 +
+ arch/arm64/boot/dts/apple/t6050-j775d.dts  |   1 +
+ arch/arm64/boot/dts/apple/t6050-j873s.dts  |   1 +
+ arch/arm64/boot/dts/apple/t6050-k114c.dts  |   1 +
+ arch/arm64/boot/dts/apple/t6050-k114s.dts  |   1 +
+ arch/arm64/boot/dts/apple/t6050-k116c.dts  |   1 +
+ arch/arm64/boot/dts/apple/t6050-k116s.dts  |  29 +----
+ arch/arm64/boot/dts/apple/t6050-media.dtsi | 142 +++++++++++++++++++++
+ 12 files changed, 153 insertions(+), 164 deletions(-)
+ create mode 100644 arch/arm64/boot/dts/apple/t6050-media.dtsi
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714c.dts b/arch/arm64/boot/dts/apple/t6050-j714c.dts
+index 0529e4ef54ad..7174550dacf4 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j714c.dts
+@@ -329,6 +329,7 @@ stm {
+ };
+ 
+ #include "t6050-peripherals.dtsi"
++#include "t6050-media.dtsi"
+ #include "t6050-gpu-g17c.dtsi"
+ 
+ /*
+@@ -515,27 +516,6 @@ &acio2_nhi {
+ 			63 2e 00 06 02 69 4f 53 00 00 00 00];
+ };
+ 
+-/* The video decoder, its DART and power states. */
+-&pmgr4 {
+-	status = "okay";
+-};
+-
+-&ps_fab1_soc {
+-	status = "okay";
+-};
+-
+-&ps_avd_sys {
+-	status = "okay";
+-};
+-
+-&avd_dart {
+-	status = "okay";
+-};
+-
+-&avd {
+-	status = "okay";
+-};
+-
+ /* The camera. The loader sets the platform ID from the ADT isp0 sensor-type (0x73). */
+ #include "t6050-isp.dtsi"
+ 
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714s.dts b/arch/arm64/boot/dts/apple/t6050-j714s.dts
+index f16e28ff2919..0cf422e1e10d 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j714s.dts
+@@ -571,47 +571,7 @@ mesa: fingerprint@0 {
+ 	};
+ };
+ 
+-/*
+- * The ProRes engine (apr0) and its DART, in the SCODEC power state. Its
+- * parent fab7-soc also feeds the display pipeline, so it is left to the
+- * firmware, as fab0-piogw is.
+- */
+-&ps_fab7_soc {
+-	apple,firmware-owned;
+-	status = "okay";
+-};
+-
+-&ps_scodec {
+-	status = "okay";
+-};
+-
+-&apr0_dart {
+-	status = "okay";
+-};
+-
+-&apr0 {
+-	status = "okay";
+-};
+-
+-/*
+- * Both JPEG engines and their shared DART, under the media fabric that the
+- * video encoder above already enables.
+- */
+-&ps_jpg {
+-	status = "okay";
+-};
+-
+-&jpeg0_dart {
+-	status = "okay";
+-};
+-
+-&jpeg0 {
+-	status = "okay";
+-};
+-
+-&jpeg1 {
+-	status = "okay";
+-};
++#include "t6050-media.dtsi"
+ 
+ #include "t6050-j714s-pmp-tunables.dtsi"
+ 
+@@ -1020,79 +980,5 @@ &aop_audio {
+ 
+ #include "t6050-aop.dtsi"
+ 
+-/* The video decoder (J714sAP ADT avd0, as on the J714c), its DART and power states. */
+-&pmgr4 {
+-	status = "okay";
+-};
+-
+-/* macOS turns FAB1_SOC on once at boot and never gates it. */
+-&ps_fab1_soc {
+-	apple,always-on;
+-	status = "okay";
+-};
+-
+-&ps_avd_sys {
+-	status = "okay";
+-};
+-
+-&avd_dart {
+-	status = "okay";
+-};
+-
+-&avd {
+-	status = "okay";
+-};
+-
+-/*
+- * The video encoder (J714sAP ADT ave0), its DARTs and the VENC0 power states. Like
+- * FAB1_SOC, macOS sets FAB0_SOC active once at boot and never gates it; the PIO
+- * gateway above it is left to the firmware.
+- */
+-&ps_fab1_piogw {
+-	apple,firmware-owned;
+-	status = "okay";
+-};
+-
+-&ps_fab0_soc {
+-	apple,always-on;
+-	status = "okay";
+-};
+-
+-&ps_venc0_sys {
+-	status = "okay";
+-};
+-
+-&ps_venc0_dma {
+-	status = "okay";
+-};
+-
+-&ps_venc0_pipe4 {
+-	status = "okay";
+-};
+-
+-&ps_venc0_pipe5 {
+-	status = "okay";
+-};
+-
+-&ps_venc0_me0 {
+-	status = "okay";
+-};
+-
+-&ps_venc0_me1 {
+-	status = "okay";
+-};
+-
+-&ave0_dart {
+-	status = "okay";
+-};
+-
+-&ave0_dart1 {
+-	status = "okay";
+-};
+-
+-&ave0 {
+-	status = "okay";
+-};
+-
+ /* HDMI, through ATC3 and the on-board DP-to-HDMI converter */
+ #include "t6050-j714s-hdmi.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-j716c.dts b/arch/arm64/boot/dts/apple/t6050-j716c.dts
+index 8563be46257e..2d9b48f6742e 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j716c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j716c.dts
+@@ -270,6 +270,7 @@ &smc_pcio {
+ };
+ 
+ #include "t6050-peripherals.dtsi"
++#include "t6050-media.dtsi"
+ 
+ #include "t6050-max-atc2.dtsi"
+ 
+diff --git a/arch/arm64/boot/dts/apple/t6050-j716s.dts b/arch/arm64/boot/dts/apple/t6050-j716s.dts
+index 9af9d4048209..acba6051d343 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j716s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j716s.dts
+@@ -570,6 +570,7 @@ tp-accel {
+ 
+ #define T6050_J716S
+ #include "t6050-peripherals.dtsi"
++#include "t6050-media.dtsi"
+ 
+ /* The AOP, its sensors and the microphone array (t6050-aop.dtsi) */
+ &aop_audio {
+diff --git a/arch/arm64/boot/dts/apple/t6050-j775c.dts b/arch/arm64/boot/dts/apple/t6050-j775c.dts
+index 0f38e351ad11..4864be8a4832 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j775c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j775c.dts
+@@ -44,3 +44,4 @@ &pcie0 {
+ 
+ #define T6050_J775C
+ #include "t6050-peripherals.dtsi"
++#include "t6050-media.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-j775d.dts b/arch/arm64/boot/dts/apple/t6050-j775d.dts
+index b136a0eed288..8bf18b442744 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j775d.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j775d.dts
+@@ -507,6 +507,7 @@ &dcpext0_die1 {
+ 
+ #define T6050_J775D
+ #include "t6050-peripherals.dtsi"
++#include "t6050-media.dtsi"
+ 
+ /*
+  * The other three die-0 external display engines (dcpext1..3). The shared
+diff --git a/arch/arm64/boot/dts/apple/t6050-j873s.dts b/arch/arm64/boot/dts/apple/t6050-j873s.dts
+index 14ee87d21c3f..b921d71a60f2 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j873s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j873s.dts
+@@ -139,6 +139,7 @@ n1_beta: bluetooth@0,2 {
+ 
+ #define T6050_J873S
+ #include "t6050-peripherals.dtsi"
++#include "t6050-media.dtsi"
+ 
+ /* The G17S GPU layout shared with the K114 and K116 Pro boards */
+ #include "t6050-k114-k116-gpu.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114c.dts b/arch/arm64/boot/dts/apple/t6050-k114c.dts
+index a6603e3d87d9..23e6ee640007 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k114c.dts
+@@ -29,6 +29,7 @@ &mtp_multitouch {
+ };
+ 
+ #include "t6050-peripherals.dtsi"
++#include "t6050-media.dtsi"
+ 
+ / {
+ 	aliases {
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114s.dts b/arch/arm64/boot/dts/apple/t6050-k114s.dts
+index fba66d446bb2..716b5af987dd 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k114s.dts
+@@ -29,6 +29,7 @@ &mtp_multitouch {
+ };
+ 
+ #include "t6050-peripherals.dtsi"
++#include "t6050-media.dtsi"
+ 
+ /* The 14-inch chassis: the Neural Engine, pins, the jack, the card and the AOP; no speakers */
+ #include "t6050-k114.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-k116c.dts b/arch/arm64/boot/dts/apple/t6050-k116c.dts
+index 12a8409de0d2..f114af535a28 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k116c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k116c.dts
+@@ -27,6 +27,7 @@ &mtp_multitouch {
+ /* The M5 Max GPU layout uses its own bus. */
+ #define T6050_GPU_BUS
+ #include "t6050-peripherals.dtsi"
++#include "t6050-media.dtsi"
+ 
+ #include "t6050-gpu-g17c.dtsi"
+ 
+diff --git a/arch/arm64/boot/dts/apple/t6050-k116s.dts b/arch/arm64/boot/dts/apple/t6050-k116s.dts
+index 127c0e50be12..26e818a16c00 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k116s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k116s.dts
+@@ -25,6 +25,7 @@ &mtp_multitouch {
+ 
+ #define T6050_K116S
+ #include "t6050-peripherals.dtsi"
++#include "t6050-media.dtsi"
+ 
+ / {
+ 	aliases {
+@@ -579,34 +580,6 @@ &clpc {
+ 	apple,high-power-mode;
+ };
+ 
+-/*
+- * The video decoder (K116sAP ADT avd0), its DART and power states, as on the J714s.
+- * ADT: avd0 reg[0] 0x2108000000 + 0x1404000, interrupts 2417/2418; dart-avd0 at
+- * 0x2109020000, interrupt 2424; FAB1_SOC at offset 0x1b0 and AVD_SYS at 0x1d8 of
+- * the pmgr's reg[46] (0x2180600000).
+- */
+-&pmgr4 {
+-	status = "okay";
+-};
+-
+-/* macOS turns FAB1_SOC on once at boot and never gates it. */
+-&ps_fab1_soc {
+-	apple,always-on;
+-	status = "okay";
+-};
+-
+-&ps_avd_sys {
+-	status = "okay";
+-};
+-
+-&avd_dart {
+-	status = "okay";
+-};
+-
+-&avd {
+-	status = "okay";
+-};
+-
+ /*
+  * Touch ID (ADT spi2/mesa): the Mesa sensor on spi2 at 8 MHz, chip select 0,
+  * powered by NUB GPIO 21 (function-mesa_pwr), data ready on AP GPIO 138, as
+diff --git a/arch/arm64/boot/dts/apple/t6050-media.dtsi b/arch/arm64/boot/dts/apple/t6050-media.dtsi
+new file mode 100644
+index 000000000000..4534c70284e9
+--- /dev/null
++++ b/arch/arm64/boot/dts/apple/t6050-media.dtsi
+@@ -0,0 +1,142 @@
++// SPDX-License-Identifier: GPL-2.0+ OR MIT
++/*
++ * T6050 media engines: the video decoder (avd0), the first video encoder
++ * (ave0), the first ProRes engine (apr0) and both JPEG engines, with their
++ * DARTs and power states. Every T6050 board's ADT has all of them at the same
++ * addresses, so every board includes this file after t6050-peripherals.dtsi.
++ * The nodes themselves are in t6050-peripherals.dtsi (t6050-ultra.dtsi for
++ * the J775D's decoders); this file only enables them.
++ *
++ * Not enabled here:
++ * - ave1, the second encoder. The encoder runs firmware that iBoot
++ *   preloads; the boot loader hands only the first T6050 encoder's preload
++ *   (ADT ave0) to the DT, and the driver refuses an encoder without its two
++ *   preloaded segments.
++ * - apr1, the M5 Max's second ProRes engine. The driver's T6050 variant
++ *   needs the first engine's named core, wrapper, aux and ctrl windows and
++ *   its SCODEC rows; the second engine sits in the PRORES power state with a
++ *   different window layout, which the driver does not describe.
++ */
++
++#ifndef T6050_J775D
++/* The video decoder. t6050-ultra.dtsi describes both J775D decoders enabled. */
++&pmgr4 {
++	status = "okay";
++};
++
++/* macOS turns FAB1_SOC on once at boot and never gates it. */
++&ps_fab1_soc {
++	apple,always-on;
++	status = "okay";
++};
++
++&ps_avd_sys {
++	status = "okay";
++};
++
++&avd_dart {
++	status = "okay";
++};
++
++&avd {
++	status = "okay";
++};
++#endif
++
++/*
++ * The ProRes engine (apr0) and its DART, in the SCODEC power state. Its
++ * parent fab7-soc also feeds the display pipeline, so it and fab0-piogw above
++ * it are left to the firmware.
++ */
++&ps_fab0_piogw {
++	apple,firmware-owned;
++	status = "okay";
++};
++
++&ps_fab7_soc {
++	apple,firmware-owned;
++	status = "okay";
++};
++
++&ps_scodec {
++	status = "okay";
++};
++
++&apr0_dart {
++	status = "okay";
++};
++
++&apr0 {
++	status = "okay";
++};
++
++/*
++ * The video encoder (ave0), its DARTs and the VENC0 power states. Like
++ * FAB1_SOC, macOS sets FAB0_SOC active once at boot and never gates it; the
++ * PIO gateway above it is left to the firmware.
++ */
++&ps_fab1_piogw {
++	apple,firmware-owned;
++	status = "okay";
++};
++
++&ps_fab0_soc {
++	apple,always-on;
++	status = "okay";
++};
++
++&ps_venc0_sys {
++	status = "okay";
++};
++
++&ps_venc0_dma {
++	status = "okay";
++};
++
++&ps_venc0_pipe4 {
++	status = "okay";
++};
++
++&ps_venc0_pipe5 {
++	status = "okay";
++};
++
++&ps_venc0_me0 {
++	status = "okay";
++};
++
++&ps_venc0_me1 {
++	status = "okay";
++};
++
++&ave0_dart {
++	status = "okay";
++};
++
++&ave0_dart1 {
++	status = "okay";
++};
++
++&ave0 {
++	status = "okay";
++};
++
++/*
++ * Both JPEG engines and their shared DART, under FAB0_SOC like the video
++ * encoder.
++ */
++&ps_jpg {
++	status = "okay";
++};
++
++&jpeg0_dart {
++	status = "okay";
++};
++
++&jpeg0 {
++	status = "okay";
++};
++
++&jpeg1 {
++	status = "okay";
++};

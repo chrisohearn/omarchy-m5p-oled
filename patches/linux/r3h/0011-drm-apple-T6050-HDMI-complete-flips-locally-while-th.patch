@@ -1,0 +1,174 @@
+From 1f3d29957638b1033f122404b76af8710689d299 Mon Sep 17 00:00:00 2001
+From: FatBoy721 <address-in-upstream-commit@localhost>
+Date: Fri, 13 Nov 2026 17:15:00 -0500
+Subject: [PATCH 11/34] drm/apple: T6050 HDMI: complete flips locally while the
+ output connects
+
+A monitor that wakes from standby when the HDMI link comes up drops HPD about
+2 s after the first mode set and raises it again ~0.3 s later. On the J714s
+(dcpext3, 27.3 firmware) with an HP E240c this happens at every boot with the
+monitor attached and asleep, and not when the monitor is already awake.
+
+While the controller is powered down for that HPD cycle, DCP swallows the
+compositor's presents ("swallowed swap ID n as fControllerPowerState is 0 for
+External Display") without completing them. dcp_swap_watchdog_arm() only
+watches Type-C outputs, desktop pipes and the fw27 VRR panel, so the dropped
+present holds the IOMFB queue until the 10 s transaction timeout marks the DCP
+crashed, and HDMI stays dead until the next boot ("wait for power timed out,
+connector will be broken").
+
+While a T6050 fixed HDMI output connects (sink at boot, power-on, HPD edge),
+complete its flips locally for 8 s, as if the compositor were idle. The
+reconnect after the monitor's HPD cycle then finds an empty queue and shows
+the desktop. The hold state is per DCP and only apple,t6050-dcpext outputs
+with an HDMI HPD GPIO use it; appledrm.hdmi_hold_presents=0 turns it off.
+
+Tested on the J714s: boot with the monitor asleep and awake, hotplug and
+replug all show the desktop; the internal panel and the shell are not delayed.
+Arming the swap watchdog for the fixed HDMI output alone did not help on the
+H17P queue path; gating presents on the controller power-on instead of a
+timer would be a cleaner follow-up.
+
+Signed-off-by: FatBoy721 <address-in-upstream-commit@localhost>
+[re-cut onto integration/aurora 0bbe021a for the K114s]
+---
+ drivers/gpu/drm/apple/dcp-fabric.c     |  1 +
+ drivers/gpu/drm/apple/dcp-internal.h   |  4 +++
+ drivers/gpu/drm/apple/dcp.c            |  6 ++++
+ drivers/gpu/drm/apple/iomfb.c          | 45 ++++++++++++++++++++++++++
+ drivers/gpu/drm/apple/iomfb_template.c |  1 +
+ 5 files changed, 57 insertions(+)
+
+diff --git a/drivers/gpu/drm/apple/dcp-fabric.c b/drivers/gpu/drm/apple/dcp-fabric.c
+index 22148f031868..1fbca40f16f3 100644
+--- a/drivers/gpu/drm/apple/dcp-fabric.c
++++ b/drivers/gpu/drm/apple/dcp-fabric.c
+@@ -5862,6 +5862,7 @@ irqreturn_t dcp_dp2hdmi_hpd(int irq, void *data)
+ 	if (dcp->fw_compat == DCP_FIRMWARE_V_26_6_DESKTOP)
+ 		return dcp_desktop_dp2hdmi_hpd(dcp);
+ 
++	dcp_hdmi_hold_presents(dcp, "HPD");
+ 	guard(mutex)(&dcp_typec_fabric_lock);
+ 	dcp_hdmi_update_locked(dcp);
+ 	/* The GPIO edge detector is off throughout an oneshot handler. */
+diff --git a/drivers/gpu/drm/apple/dcp-internal.h b/drivers/gpu/drm/apple/dcp-internal.h
+index 954ab315509e..a280279f2ffd 100644
+--- a/drivers/gpu/drm/apple/dcp-internal.h
++++ b/drivers/gpu/drm/apple/dcp-internal.h
+@@ -1308,6 +1308,9 @@ struct apple_dcp {
+ 	struct delayed_work hdmi_recheck_wq;
+ 	/* T6030 HDMI converter service requests, see dcp-hdmi.c */
+ 	struct dcp_hdmi *hdmi;
++	/* T6050 HDMI: complete flips locally until this time (jiffies), see iomfb.c */
++	unsigned long hdmi_hold_until;
++	bool hdmi_hold;
+ 
+ 	/*
+ 	 * Interrupts of a Thunderbolt DP tunnel's DP IN adapter, to pass to
+@@ -1415,6 +1418,7 @@ void iomfb_queue_crc_h17p(struct apple_dcp *dcp, u32 swap_id);
+ void dcp_drm_crtc_page_flip(struct apple_dcp *dcp, ktime_t now);
+ void dcp_handle_hotplug_actions(struct apple_dcp *dcp, unsigned int action);
+ bool dcp_external_hotplug(struct apple_dcp *dcp, bool connected);
++void dcp_hdmi_hold_presents(struct apple_dcp *dcp, const char *why);
+ void dcp_announce_arm(struct apple_dcp *dcp);
+ void dcp_announce_work(struct work_struct *work);
+ void dcp_external_crtc_released(struct apple_dcp *dcp);
+diff --git a/drivers/gpu/drm/apple/dcp.c b/drivers/gpu/drm/apple/dcp.c
+index 16bd701514b1..ed1315f2e3fa 100644
+--- a/drivers/gpu/drm/apple/dcp.c
++++ b/drivers/gpu/drm/apple/dcp.c
+@@ -5381,6 +5381,9 @@ static void dcp_fixed_hdmi_reconnect(struct apple_dcp *dcp, bool poweroff_unplug
+ 	connected = gpiod_get_value_cansleep(dcp->hdmi_hpd);
+ 	dev_info(dcp->dev, "%s: DP2HDMI HPD connected:%d\n", __func__, connected);
+ 
++	if (connected && poweroff_unplugged)
++		dcp_hdmi_hold_presents(dcp, "sink at boot");
++
+ 	if (connected && !READ_ONCE(dcp->hdmi_yielded)) {
+ 		ret = dcp_dptx_connect(dcp, 0);
+ 		if (ret)
+@@ -8889,6 +8892,9 @@ static int dcp_platform_probe_pipe(struct platform_device *pdev)
+ 		ret = dcp_hdmi_init(dcp);
+ 		if (ret)
+ 			return ret;
++		/* See dcp_hdmi_hold_presents() */
++		dcp->hdmi_hold = dcp->hdmi_hpd &&
++				 of_device_is_compatible(dev->of_node, "apple,t6050-dcpext");
+ 		if (dcp->hdmi_hpd) {
+ 			int irq = gpiod_to_irq(dcp->hdmi_hpd);
+ 			if (irq < 0 && dcp->external_native) {
+diff --git a/drivers/gpu/drm/apple/iomfb.c b/drivers/gpu/drm/apple/iomfb.c
+index a263ee39d2a0..f4bf62c43d91 100644
+--- a/drivers/gpu/drm/apple/iomfb.c
++++ b/drivers/gpu/drm/apple/iomfb.c
+@@ -4550,6 +4550,46 @@ static bool dcp_fw27_vrr_switch(struct apple_dcp *dcp, struct drm_crtc *crtc,
+ 	return false;
+ }
+ 
++/*
++ * T6050 HDMI (J714s): a monitor that wakes up when the link comes up drops HPD
++ * about 2 s after the first mode set and raises it again. The firmware
++ * swallows presents while its controller is powered down ("swallowed swap ID
++ * n as fControllerPowerState is 0") without completing them, and one such
++ * present blocks the IOMFB queue until the transaction timeout marks the DCP
++ * crashed. While the output connects (sink at boot, power-on, HPD edge),
++ * complete its flips locally, as if the compositor were idle, so that the
++ * reconnect after the monitor's HPD cycle finds an empty queue.
++ */
++#define DCP_HDMI_HOLD_MS 8000
++
++static bool hdmi_hold_presents = true;
++module_param(hdmi_hold_presents, bool, 0644);
++MODULE_PARM_DESC(hdmi_hold_presents,
++		 "T6050 HDMI: complete flips locally while the output connects (default: true)");
++
++static bool dcp_hdmi_hold_applies(struct apple_dcp *dcp)
++{
++	return READ_ONCE(hdmi_hold_presents) && dcp->hdmi_hold &&
++	       !dcp->main_display && !READ_ONCE(dcp->active_typec_route);
++}
++
++void dcp_hdmi_hold_presents(struct apple_dcp *dcp, const char *why)
++{
++	if (!dcp_hdmi_hold_applies(dcp))
++		return;
++	WRITE_ONCE(dcp->hdmi_hold_until,
++		   (jiffies + msecs_to_jiffies(DCP_HDMI_HOLD_MS)) ?: 1);
++	dev_dbg(dcp->dev, "HDMI: completing flips locally for %u ms (%s)\n",
++		DCP_HDMI_HOLD_MS, why);
++}
++
++static bool dcp_hdmi_presents_held(struct apple_dcp *dcp)
++{
++	unsigned long until = READ_ONCE(dcp->hdmi_hold_until);
++
++	return until && dcp_hdmi_hold_applies(dcp) && time_before(jiffies, until);
++}
++
+ void dcp_flush(struct drm_crtc *crtc, struct drm_atomic_commit *commit)
+ {
+ 	struct platform_device *pdev = to_apple_crtc(crtc)->dcp;
+@@ -4579,6 +4619,11 @@ void dcp_flush(struct drm_crtc *crtc, struct drm_atomic_commit *commit)
+ 		return;
+ 	}
+ 
++	if (dcp_hdmi_presents_held(dcp)) {
++		dcp_drm_crtc_vblank(to_apple_crtc(crtc));
++		return;
++	}
++
+ 	if (dcp->fw_compat == DCP_FIRMWARE_V_26_6) {
+ 		iomfb_v26_6_flush(dcp, crtc, commit);
+ 		return;
+diff --git a/drivers/gpu/drm/apple/iomfb_template.c b/drivers/gpu/drm/apple/iomfb_template.c
+index 5567278d27ae..6b345a98b98f 100644
+--- a/drivers/gpu/drm/apple/iomfb_template.c
++++ b/drivers/gpu/drm/apple/iomfb_template.c
+@@ -2597,6 +2597,7 @@ void DCP_FW_NAME(iomfb_poweron)(struct apple_dcp *dcp)
+ #endif
+ 	dev_info(dcp->dev, "dcp_poweron() starting\n");
+ 	WRITE_ONCE(dcp->pipe_off, false);
++	dcp_hdmi_hold_presents(dcp, "power on");
+ #if DCP_FW_H17(DCP_FW_VER)
+ 	if (dcp_is_ext26(dcp))
+ 		return; /* Native26 publishes A473 only after a successful A413. */

@@ -1,0 +1,196 @@
+From 7c416de7330f71f1850475eaf34b0e47bd6bee3a Mon Sep 17 00:00:00 2001
+From: k114s-integration <integration@localhost>
+Date: Mon, 16 Nov 2026 09:51:02 -0700
+Subject: [PATCH 17/34] drm/apple: cap the panel peak a firmware 27 panel's EDR
+ may use
+
+A firmware 27 panel shows PQ content as EDR: a swap asks the panel for
+SDR white times the headroom, up to the peak the ADT's LmaxProduct
+gives (dcp_edr_prepare_v27()). On the K114s (MacBook Pro 14-inch OLED,
+M5 Pro) that peak is 2000 nits with a potential headroom of 16, so the
+first PQ frame a compositor presents starts a ramp towards 2000 nits
+on an OLED panel. The path was validated on the J714s only.
+
+Add fw27_panel_edr_max_nits (read-only, read when the display
+processor binds). It lowers the peak the driver accepts from the ADT.
+A cap at or below the panel's SDR maximum leaves no headroom: the
+panel then has no peak, so its EDID advertises no PQ, PQ commits are
+refused (dcp_crtc_check_hdr()) and no swap carries an EDR step. The
+default, 0, keeps the panel's own peak, so nothing changes unless the
+parameter is set. dcp_edr_peak() takes the decision; an out-of-range
+ADT peak stays unusable whatever the cap.
+
+KUnit: edr_peak_test (the decision, K114s values) and
+edr_peak_bound_test (at every swap of a ramp to the headroom the
+capped peak leaves, the level asked for is at most SDR white or the
+capped peak, for caps of 500, 1001 and 1600 nits). Run on a build host
+through stand-in headers: 30 cases pass, and both new cases fail with
+the cap removed.
+
+K114s (MacBook Pro 14-inch OLED, M5 Pro) integration patch, offered
+upstream with the colour fix for aurora-silicon/linux#2060.
+Hardware-untested: compiled, not booted on any machine.
+
+Co-Authored-By: Claude Opus 5.5 <address-in-upstream-commit@localhost>
+
+[re-cut onto integration/aurora 0bbe021a for the K114s]
+---
+ drivers/gpu/drm/apple/dcp-edr.h            | 16 ++++++
+ drivers/gpu/drm/apple/dcp.c                | 28 ++++++++--
+ drivers/gpu/drm/apple/dcp_backlight_test.c | 59 ++++++++++++++++++++++
+ 3 files changed, 99 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/drm/apple/dcp-edr.h b/drivers/gpu/drm/apple/dcp-edr.h
+index fc5dc03e6f53..20e6e10d822c 100644
+--- a/drivers/gpu/drm/apple/dcp-edr.h
++++ b/drivers/gpu/drm/apple/dcp-edr.h
+@@ -45,6 +45,22 @@ static inline u32 dcp_edr_ceiling(u32 fixed)
+ 	return hm > DCP_EDR_UNITY && hm <= U32_MAX ? hm : 0;
+ }
+ 
++/*
++ * The peak a firmware 27 panel's EDR may use: the ADT's @peak nits, limited
++ * to @max_nits when that is set.  Only a peak above the SDR maximum
++ * @sdr_max leaves headroom; otherwise 0, and the panel offers no EDR.  With
++ * the peak at most P, a swap never asks for more than SDR white or P,
++ * whichever is higher (dcp_edr_target()).
++ */
++static inline u32 dcp_edr_peak(u32 peak, u32 sdr_max, u32 max_nits)
++{
++	if (peak > 10000)
++		return 0;
++	if (max_nits)
++		peak = min(peak, max_nits);
++	return peak > sdr_max ? peak : 0;
++}
++
+ /* The headroom the panel has above @sdr nits: peak / sdr, up to @ceiling. */
+ static inline u32 dcp_edr_target(u32 peak, u32 sdr, u32 ceiling)
+ {
+diff --git a/drivers/gpu/drm/apple/dcp.c b/drivers/gpu/drm/apple/dcp.c
+index 1b1d46921b5e..2d61033f5e63 100644
+--- a/drivers/gpu/drm/apple/dcp.c
++++ b/drivers/gpu/drm/apple/dcp.c
+@@ -1460,6 +1460,18 @@ static void dcp_panel_read_min_brightness(struct apple_dcp *dcp,
+  * keep per-display settings such as its brightness.  The identity state is
+  * allocated at probe (bind may fail and run again); bind fills it in.
+  */
++/*
++ * A firmware 27 panel shows PQ content as EDR: a swap asks the panel for SDR
++ * white times the headroom, up to the panel's peak (the ADT's LmaxProduct).
++ * This caps that peak.  A cap at or below the panel's SDR maximum leaves no
++ * headroom, so the panel offers no EDR at all: its EDID advertises no PQ and
++ * PQ commits are refused.  Read once, when the display processor binds.
++ */
++static unsigned int fw27_panel_edr_max_nits;
++module_param(fw27_panel_edr_max_nits, uint, 0444);
++MODULE_PARM_DESC(fw27_panel_edr_max_nits,
++		 "Firmware 27 panels: most nits an EDR swap may ask for, 0 for the panel's peak (default: 0)");
++
+ static void dcp_panel_read_adt(struct apple_dcp *dcp)
+ {
+ 	bool desktop = dcp->fw_compat == DCP_FIRMWARE_V_26_6_DESKTOP;
+@@ -1514,14 +1526,22 @@ static void dcp_panel_read_adt(struct apple_dcp *dcp)
+ 	/*
+ 	 * Firmware 27 reports no peak (desktop 26.x: res_max_panel_brightness()).
+ 	 * The ADT's LmaxProduct gives it (1600 nits on the M5 Pro).  Only a peak
+-	 * above the SDR range gives headroom.
++	 * above the SDR range gives headroom, and fw27_panel_edr_max_nits caps it.
+ 	 */
+ 	if (dcp->panel.edr_ceiling && dcp->fw_compat == DCP_FIRMWARE_V_27_0) {
+-		u32 peak = panel.lmax_product >> 16;
++		u32 adt_peak = panel.lmax_product >> 16;
++		u32 cap = READ_ONCE(fw27_panel_edr_max_nits);
++		u32 peak = dcp_edr_peak(adt_peak, dcp->brightness.maximum, cap);
+ 
+-		if (peak > dcp->brightness.maximum && peak <= 10000) {
+-			dev_info(dcp->dev, "panel peak luminance %u nits (ADT)\n", peak);
++		if (peak) {
++			dev_info(dcp->dev, "panel peak luminance %u nits (ADT)\n", adt_peak);
++			if (peak < adt_peak)
++				dev_info(dcp->dev, "panel EDR capped at %u nits\n", peak);
+ 			WRITE_ONCE(dcp->panel.peak_nits, peak);
++		} else if (cap && dcp_edr_peak(adt_peak, dcp->brightness.maximum, 0)) {
++			dev_info(dcp->dev,
++				 "panel EDR off: cap %u nits is not above the SDR maximum %u nits\n",
++				 cap, dcp->brightness.maximum);
+ 		}
+ 	}
+ 	dev_info(dcp->dev, "panel ADT: %s, panel node %s, dimensions %ux%u mm\n",
+diff --git a/drivers/gpu/drm/apple/dcp_backlight_test.c b/drivers/gpu/drm/apple/dcp_backlight_test.c
+index b9f888f44f46..939cecbf8c17 100644
+--- a/drivers/gpu/drm/apple/dcp_backlight_test.c
++++ b/drivers/gpu/drm/apple/dcp_backlight_test.c
+@@ -867,6 +867,63 @@ static void edr_timed_limits_test(struct kunit *test)
+ 	KUNIT_EXPECT_EQ(test, dcp_edr_next_timed(15000, 16000, 16000, 60, 30, 8333), 16000U);
+ }
+ 
++/* The K114s panel's ADT values: a 2000 nit peak, a potential headroom of 16. */
++#define EDR_K114S_PEAK		2000U
++#define EDR_K114S_CEILING	0x100000U
++
++static void edr_peak_test(struct kunit *test)
++{
++	/* No cap: the ADT's peak, when it is above the SDR maximum. */
++	KUNIT_EXPECT_EQ(test, dcp_edr_peak(EDR_K114S_PEAK, 1000, 0), 2000U);
++	KUNIT_EXPECT_EQ(test, dcp_edr_peak(1000, 1000, 0), 0U);
++	KUNIT_EXPECT_EQ(test, dcp_edr_peak(0, 1000, 0), 0U);
++	KUNIT_EXPECT_EQ(test, dcp_edr_peak(10000, 1000, 0), 10000U);
++	KUNIT_EXPECT_EQ(test, dcp_edr_peak(10001, 1000, 0), 0U);
++	/* A cap above the SDR maximum lowers the peak; one at or below it ends EDR. */
++	KUNIT_EXPECT_EQ(test, dcp_edr_peak(EDR_K114S_PEAK, 1000, 1600), 1600U);
++	KUNIT_EXPECT_EQ(test, dcp_edr_peak(EDR_K114S_PEAK, 1000, 4000), 2000U);
++	KUNIT_EXPECT_EQ(test, dcp_edr_peak(EDR_K114S_PEAK, 1000, 1001), 1001U);
++	KUNIT_EXPECT_EQ(test, dcp_edr_peak(EDR_K114S_PEAK, 1000, 1000), 0U);
++	KUNIT_EXPECT_EQ(test, dcp_edr_peak(EDR_K114S_PEAK, 1000, 500), 0U);
++	/* A cap never makes an out-of-range ADT peak usable. */
++	KUNIT_EXPECT_EQ(test, dcp_edr_peak(20000, 1000, 500), 0U);
++	/* Without an SDR maximum the cap is the peak. */
++	KUNIT_EXPECT_EQ(test, dcp_edr_peak(EDR_K114S_PEAK, 0, 500), 500U);
++}
++
++/*
++ * Whatever SDR white is, a ramp to the headroom the capped peak leaves asks
++ * the panel for at most SDR white or that peak, at every swap.
++ */
++static void edr_peak_bound_test(struct kunit *test)
++{
++	static const u32 sdr[] = { 1, 10, 100, 250, 400, 499, 500, 600, 1000 };
++	static const u32 caps[] = { 500, 1001, 1600 };
++	u32 ceiling = dcp_edr_ceiling(EDR_K114S_CEILING);
++
++	KUNIT_ASSERT_EQ(test, ceiling, 16000U);
++	for (unsigned int c = 0; c < ARRAY_SIZE(caps); c++) {
++		u32 peak = dcp_edr_peak(EDR_K114S_PEAK, 0, caps[c]);
++
++		KUNIT_ASSERT_EQ(test, peak, caps[c]);
++		for (unsigned int i = 0; i < ARRAY_SIZE(sdr); i++) {
++			u32 target = dcp_edr_target(peak, sdr[i], ceiling);
++			u32 hm = DCP_EDR_UNITY;
++			unsigned int swaps = 0;
++
++			do {
++				u64 bri;
++
++				hm = dcp_edr_next_timed(hm, target, target, sdr[i], sdr[i],
++							DCP_EDR_TICK_US);
++				bri = (u64)sdr[i] * hm / DCP_EDR_UNITY;
++				KUNIT_EXPECT_LE(test, bri, (u64)max(sdr[i], peak));
++				KUNIT_ASSERT_LT(test, ++swaps, 1000U);
++			} while (hm != target);
++		}
++	}
++}
++
+ /*
+  * DAC firmware after a boot with display power cycles (J414s, 13.5) and
+  * after a system sleep.  The report goes to 0 with the power-off present
+@@ -939,6 +996,8 @@ static struct kunit_case backlight_cases[] = {
+ 	KUNIT_CASE(edr_start_ramp_test),
+ 	KUNIT_CASE(edr_timed_ramp_test),
+ 	KUNIT_CASE(edr_timed_limits_test),
++	KUNIT_CASE(edr_peak_test),
++	KUNIT_CASE(edr_peak_bound_test),
+ 	{}
+ };
+ 

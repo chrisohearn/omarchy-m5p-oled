@@ -1,0 +1,191 @@
+From 8e847a2bcbb267ac80f0763415dea3d7eca8f3c8 Mon Sep 17 00:00:00 2001
+From: Joshua Warren <address-in-upstream-commit@localhost>
+Date: Wed, 11 Nov 2026 16:53:52 +0000
+Subject: [PATCH 12/34] HID: dockchannel-hid: clamp Report Size items where the
+ descriptor arrives
+
+The multi-touch interface of the 14-inch M5 Max MacBook Pro (t6050)
+declares its raw touch report as a single Report Size item of 0x80000
+bits. hid-core rejects any Report Size above 16384 with "invalid
+report_size 524288", so the interface cannot parse.
+
+hid-magicmouse consumes these reports in raw_event() and never uses the
+parsed field layout. Clamp each Report Size item in the copied descriptor
+to the hid-core limit, and log the clamp once per item.
+
+dchid_parse() already clamps a 4-byte Report Size of the K116s firmware
+(07687621d1). This clamp runs earlier, in dchid_handle_descriptor(), on
+Report Size items of 2 to 4 bytes, so that item is never left for the one
+in dchid_parse(). The next commit allocates its buffer for short reports
+here, when a clamp happens. The clamp in dchid_parse() can no longer change
+anything and is removed.
+
+A KUnit case feeds a descriptor with a long item whose data looks like a
+Report Size prefix, a normal Report Size and the oversized one, and checks
+that only the oversized item changes.
+
+Signed-off-by: Joshua Warren <address-in-upstream-commit@localhost>
+---
+ .../dockchannel-hid-parser-test.c             | 28 +++++++
+ drivers/hid/dockchannel-hid/dockchannel-hid.c | 84 ++++++++++---------
+ 2 files changed, 74 insertions(+), 38 deletions(-)
+
+diff --git a/drivers/hid/dockchannel-hid/dockchannel-hid-parser-test.c b/drivers/hid/dockchannel-hid/dockchannel-hid-parser-test.c
+index eeec7cbf0270..bcea638d8f3b 100644
+--- a/drivers/hid/dockchannel-hid/dockchannel-hid-parser-test.c
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid-parser-test.c
+@@ -206,6 +206,33 @@ static void dchid_init_descriptor_repeat_test(struct kunit *test)
+ 	KUNIT_EXPECT_EQ(test, list_count_nodes(&dev->devres_head), resources + 1);
+ }
+ 
++/* Only real Report Size items above the hid-core limit change. */
++static void dchid_report_size_clamp_test(struct kunit *test)
++{
++	struct dchid_iface *iface = test->priv;
++	static const u8 want[] = {
++		0xfe, 0x02, 0x00, 0x77, 0x00,	/* long item, data looks like Report Size */
++		0x75, 0x08,			/* Report Size (8) */
++		0x77, 0x00, 0x40, 0x00, 0x00,	/* Report Size (0x80000), now 16384 */
++		0x95, 0x01,			/* Report Count (1) */
++	};
++	struct {
++		struct dchid_init_hdr hdr;
++		struct dchid_init_block_hdr block;
++		u8 descriptor[sizeof(want)];
++	} __packed msg = {
++		.hdr = { .iface = 1, .more_packets = 1 },
++		.block = { .type = INIT_HID_DESCRIPTOR, .length = sizeof(want) },
++		.descriptor = { 0xfe, 0x02, 0x00, 0x77, 0x00, 0x75, 0x08,
++				0x77, 0x00, 0x00, 0x08, 0x00, 0x95, 0x01 },
++	};
++
++	dchid_handle_init(iface->dchid, &msg, sizeof(msg));
++	KUNIT_ASSERT_NOT_NULL(test, iface->hid_desc);
++	KUNIT_EXPECT_EQ(test, iface->hid_desc_len, sizeof(want));
++	KUNIT_EXPECT_MEMEQ(test, iface->hid_desc, want, sizeof(want));
++}
++
+ static void dchid_packet_checksum_test(struct kunit *test)
+ {
+ 	struct dchid_hdr hdr = { .hdr_len = sizeof(hdr), .length = 8 };
+@@ -302,6 +329,7 @@ static struct kunit_case dchid_parser_cases[] = {
+ 	KUNIT_CASE(dchid_short_input_test),
+ 	KUNIT_CASE(dchid_init_descriptor_test),
+ 	KUNIT_CASE(dchid_init_descriptor_repeat_test),
++	KUNIT_CASE(dchid_report_size_clamp_test),
+ 	KUNIT_CASE(dchid_packet_checksum_test),
+ 	KUNIT_CASE(dchid_ring_wrap_test),
+ 	KUNIT_CASE(dchid_ring_bad_header_test),
+diff --git a/drivers/hid/dockchannel-hid/dockchannel-hid.c b/drivers/hid/dockchannel-hid/dockchannel-hid.c
+index 4a622ceced57..b0fc954dc0d3 100644
+--- a/drivers/hid/dockchannel-hid/dockchannel-hid.c
++++ b/drivers/hid/dockchannel-hid/dockchannel-hid.c
+@@ -967,48 +967,10 @@ static void dchid_close(struct hid_device *hdev)
+ 	WRITE_ONCE(iface->open, false);
+ }
+ 
+-/*
+- * The K116s MTP firmware (AppleMTPFirmwareMac-6310.85.7) describes the
+- * multi-touch interface's one input report with a 4-byte Report Size of
+- * 0x80000 bits (64 KiB), which the HID core refuses (16384 bits at most), so
+- * no driver can bind and the firmware upload a bind triggers never happens.
+- * The report's size is not used by the transport: the MTP's reports arrive
+- * through raw_event with their own framing. Clamp any such item to the
+- * maximum the core accepts, in place, so the item layout stays the same.
+- */
+-static void dchid_clamp_report_size(struct hid_device *hdev, u8 *desc, size_t len)
+-{
+-	size_t i = 0;
+-
+-	while (i < len) {
+-		u8 hdr = desc[i], size = hdr & 3, type = (hdr >> 2) & 3, tag = hdr >> 4;
+-
+-		if (hdr == 0xfe) { /* long item */
+-			if (i + 2 >= len)
+-				return;
+-			i += 3 + desc[i + 1];
+-			continue;
+-		}
+-		if (size == 3)
+-			size = 4;
+-		/* Global item, Report Size, 4-byte value */
+-		if (type == 1 && tag == 7 && size == 4 && i + 4 < len) {
+-			u32 val = get_unaligned_le32(&desc[i + 1]);
+-
+-			if (val > 16384) {
+-				hid_info(hdev, "clamping report size %u to 16384 bits\n", val);
+-				put_unaligned_le32(16384, &desc[i + 1]);
+-			}
+-		}
+-		i += 1 + size;
+-	}
+-}
+-
+ static int dchid_parse(struct hid_device *hdev)
+ {
+ 	struct dchid_iface *iface = hdev->driver_data;
+ 
+-	dchid_clamp_report_size(hdev, iface->hid_desc, iface->hid_desc_len);
+ 	return hid_parse_report(hdev, iface->hid_desc, iface->hid_desc_len);
+ }
+ 
+@@ -1139,6 +1101,51 @@ static int dchid_create_interface(struct dchid_iface *iface)
+ 	return queue_work(iface->dchid->new_iface_wq, &iface->create_work);
+ }
+ 
++/* hid-core rejects any Report Size above this (see hid_parser_global()). */
++#define DCHID_MAX_REPORT_SIZE	16384
++
++/*
++ * The T6050 multi-touch firmware declares its raw touch report as one item of
++ * 0x80000 bits. The magicmouse driver reads those reports in raw_event() and
++ * never looks at the field layout, so clamp every Report Size item to what
++ * hid-core accepts instead of failing the whole interface.
++ */
++static void dchid_clamp_report_sizes(struct dchid_iface *iface, u8 *desc, size_t len)
++{
++	size_t i = 0;
++
++	while (i < len) {
++		u8 prefix = desc[i];
++		size_t n = prefix & 3;
++		u32 val = 0;
++		size_t j;
++
++		if (prefix == 0xfe) {
++			if (i + 1 >= len)
++				return;
++			i += 3 + desc[i + 1];
++			continue;
++		}
++		if (n == 3)
++			n = 4;
++		if (i + 1 + n > len)
++			return;
++
++		if ((prefix & 0xfc) == 0x74 && n >= 2) {
++			for (j = 0; j < n; j++)
++				val |= (u32)desc[i + 1 + j] << (8 * j);
++			if (val > DCHID_MAX_REPORT_SIZE) {
++				dev_info(iface->dchid->dev,
++					 "%s: clamping Report Size %u to %u\n",
++					 iface->name, val, DCHID_MAX_REPORT_SIZE);
++				for (j = 0; j < n; j++)
++					desc[i + 1 + j] = (DCHID_MAX_REPORT_SIZE >> (8 * j)) & 0xff;
++			}
++		}
++		i += 1 + n;
++	}
++}
++
+ static void dchid_handle_descriptor(struct dchid_iface *iface, void *hid_desc, size_t desc_len)
+ {
+ 	void *desc;
+@@ -1162,6 +1169,7 @@ static void dchid_handle_descriptor(struct dchid_iface *iface, void *hid_desc, s
+ 		devm_kfree(iface->dchid->dev, iface->hid_desc);
+ 	iface->hid_desc = desc;
+ 	iface->hid_desc_len = desc_len;
++	dchid_clamp_report_sizes(iface, iface->hid_desc, desc_len);
+ }
+ 
+ static void dchid_handle_ready(struct dockchannel_hid *dchid, void *data, size_t length)
