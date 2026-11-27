@@ -24,7 +24,8 @@ bash -n "$f"; ok "patched script parses" "$?" 0
 start=$(grep -n '^if \[\[ \$mode != "refresh-sddm" \]\]; then$' "$f" | tail -1 | cut -d: -f1)
 [ -n "$start" ] || { echo "FAIL the rebuild block was not found"; exit 1; }
 { echo 'set -euo pipefail'; echo 'mode=refresh-plymouth'; tail -n +"$start" "$f"; } |
-  sed 's#/etc/boot/hooks/pre.d/00-k114s-boot-rebuild-guard#"$GUARD"#g' > "$t/block"
+  sed -e 's#/etc/boot/hooks/pre.d/00-k114s-boot-rebuild-guard#"$GUARD"#g' \
+      -e 's/(( EUID == 0 ))/(( TEST_EUID == 0 ))/' > "$t/block"
 sed 's#/run/lock/boot-partition.lock#"$LOCK"#; s#/proc/device-tree/compatible#"$K114S_DT_COMPATIBLE"#' \
   "$here/../../linux/00-k114s-boot-rebuild-guard" > "$t/guard"
 chmod +x "$t/guard"
@@ -95,10 +96,14 @@ run() { # dt packages free -> status; the log is $t/log
   : > "$t/log"
   env -i ${PACMAN_RC:+PACMAN_RC=$PACMAN_RC} ${MOUNTED:+MOUNTED=$MOUNTED} ${BACKEND+BACKEND="$BACKEND"} \
     ${DF_RC:+DF_RC=$DF_RC} ${THEME:+THEME=$THEME} ${RACE:+RACE=$RACE} PATH="$t/stub:/usr/bin:/bin" \
-    LOG="$t/log" LOCK="$t/lock" GUARD="$t/guard" K114S_DT_COMPATIBLE="$1" PKGS="$2" FREE="$3" \
+    LOG="$t/log" LOCK="$t/lock" GUARD="$t/guard" K114S_DT_COMPATIBLE="$1" PKGS="$2" FREE="$3" TEST_EUID="${TEST_EUID:-1000}" \
     bash "$t/block" </dev/null 2>"$t/err"
 }
 all='linux-aurora linux-k114s linux-k114s-r3b linux-k114s-r3b'
+
+TEST_EUID=0 run "$t/k114s" "$all" 123527168 > "$t/root-out"; rc=$?
+ok "K114s root hardware setup: sets the theme and leaves the rebuild to its caller" \
+  "$rc:$(cat "$t/log"):$(grep -c 'Boot image not rebuilt' "$t/root-out")" "0:sudo plymouth-set-default-theme omarchy:1"
 
 RACE=yes run "$t/k114s" "$all" 123527168; rc=$?
 ok "K114s: succeeds" "$rc" 0

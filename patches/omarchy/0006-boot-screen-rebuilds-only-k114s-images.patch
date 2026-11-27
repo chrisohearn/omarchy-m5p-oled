@@ -16,27 +16,26 @@ from that check through the rebuild, so a snapshot sync or another rebuild using
 cannot take the space between the two. With any other backend or a missing hook, the
 K114s rebuild refuses. Other machines are unchanged.
 
-Refreshed 2026-11-26 for omarchy-dev 4.0.0.r8379, which replaced the bare limine-mkinitcpio with
-omarchy-boot-rebuild.
+Refreshed 2026-11-27 for omarchy-dev 4.0.0.r8491. Root-run hardware setup keeps Omarchy's
+no-rebuild path. The K114s guard covers the per-kernel rebuild from the desktop.
 
 Paths are relative to /usr.
 
 --- a/bin/omarchy-plymouth-set
 +++ b/bin/omarchy-plymouth-set
-@@ -373,7 +373,39 @@
- if [[ $mode != "refresh-sddm" ]]; then
-   sudo plymouth-set-default-theme omarchy
- 
--  if [[ $(omarchy-boot-backend) == none ]]; then
-+  # K114s local change: omarchy-boot-rebuild with no kernel named runs a bare limine-mkinitcpio, which
-+  # rebuilds the image of every installed kernel, including the held stock linux-aurora, whose 79 MB
-+  # image fills the EFI partition, adds a third boot menu entry and stops every later update
-+  # (docs/esp-space.md). On the K114s, while Limine is the only boot loader Omarchy manages, only the
-+  # linux-k114s* kernels' images are rebuilt, one kernel at a time through omarchy-boot-rebuild, each
-+  # only when the mounted EFI partition has room for one image beside the old one. The room needed is
-+  # the space guard's minimum plus the boot theme's size (a large custom logo grows every image).
-+  # The K114s pre-build hook checks space after limine-mkinitcpio takes its own lock.
-+  if grep -qx 'apple,k114s' < <(tr '\0' '\n' 2>/dev/null <"${K114S_DT_COMPATIBLE:-/proc/device-tree/compatible}"); then
+@@ -397,6 +397,38 @@
+   if (( EUID == 0 )); then
+     # Hardware setup builds the boot image itself, after its last step.
+     echo "Boot image not rebuilt: the unlock screen changes at the next omarchy-boot-rebuild"
++  elif grep -qx 'apple,k114s' < <(tr '\0' '\n' 2>/dev/null <"${K114S_DT_COMPATIBLE:-/proc/device-tree/compatible}"); then
++    # K114s local change: omarchy-boot-rebuild with no kernel named runs a bare limine-mkinitcpio, which
++    # rebuilds the image of every installed kernel, including the held stock linux-aurora, whose 79 MB
++    # image fills the EFI partition, adds a third boot menu entry and stops every later update
++    # (docs/esp-space.md). On the K114s, while Limine is the only boot loader Omarchy manages, only the
++    # linux-k114s* kernels' images are rebuilt, one kernel at a time through omarchy-boot-rebuild, each
++    # only when the mounted EFI partition has room for one image beside the old one. The room needed is
++    # the space guard's minimum plus the boot theme's size (a large custom logo grows every image).
++    # The K114s pre-build hook checks space after limine-mkinitcpio takes its own lock.
 +    k114s_kernels=($({ pacman -Qqo /usr/lib/modules/*/modules.builtin 2>/dev/null || true; } | sort -u | sed -n -E '/^linux-k114s(-|$)/p'))
 +    k114s_backend=$(omarchy-boot-backend --managed 2>/dev/null | paste -sd' ') || k114s_backend=
 +    if [[ $k114s_backend != limine ]]; then
@@ -60,7 +59,6 @@ Paths are relative to /usr.
 +        exit 1
 +      fi
 +    done
-+  elif [[ $(omarchy-boot-backend) == none ]]; then
+   elif [[ $(omarchy-boot-backend) == none ]]; then
      sudo mkinitcpio -P
    else
-     sudo omarchy-boot-rebuild
