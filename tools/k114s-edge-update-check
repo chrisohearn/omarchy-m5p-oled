@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# Read-only checks for the K114s nightly update. See docs/nightly-rollout.md.
+set -euo pipefail
+export LC_ALL=C
+repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+db=$(pacman-conf DBPath)
+db=${db%/}
+packages=(omarchy-dev omarchy-settings-dev)
+
+fail() { printf 'K114s update: %s\n' "$*" >&2; exit 1; }
+digest() { sha256sum | cut -d ' ' -f1; }
+
+snapshot_ids() {
+    local list
+    list=$(sudo -n snapper --csvout -c root list --columns number) ||
+        fail "cannot read root Snapper snapshots"
+    awk '/^[1-9][0-9]*$/ {print}' <<<"$list"
+}
+
+check_patches() {
+    local archive=$1 work=$2 path name output root patches base
+    local installed=/usr/local/lib/omarchy-k114s/omarchy-patches
+    root=$work/root
+    patches=$work/patches
+    mkdir -p "$root/usr" "$patches"
+    local candidates=() files=()
+    for path in "$repo"/patches/omarchy/*.patch; do
+        # These two patches belong to the held omarchy-mac package.
+        case ${path##*/} in 0003-*|0004-*) continue ;; esac
+        candidates+=("$path")
+        cmp -s "$path" "$installed/${path##*/}" ||
+            fail "${path##*/} differs from the installed patch. Install the reviewed patch set first."
+        cp -- "$path" "$patches/"
+        if [[ -d ${path%.patch}.base ]]; then
+            base=${path%.patch}.base
+            diff -qr -- "$base" "$installed/${base##*/}" >/dev/null ||
+                fail "${base##*/} differs from the installed patch base"
+            cp -r -- "$base" "$patches/"
+        fi
+    done
+    mapfile -t files < <(sed -n 's#^+++ b/\([^[:space:]]*\).*#usr/\1#p' "${candidates[@]}" | sort -u)
+    (( ${#files[@]} > 0 )) || fail "no Edge patch targets found"
+    bsdtar --no-same-owner -xf "$archive" -C "$root" -- "${files[@]}" ||
+        fail "the Edge archive is missing a patch target"
+    # The hook normally exits zero on conflicts. Require a positive result for each patch.
+    for path in omarchy-patches-apply omarchy-patches-lib.sh; do
+        cmp -s "$repo/linux/$path" "${installed%/*}/$path" ||
+            fail "$path differs from the installed patch applier"
+    done
+    output=$(K114S_ROOT="$root" K114S_OMARCHY_PATCHES="$patches" K114S_NOTIFY_CMD= \
+        bash "$repo/linux/omarchy-patches-apply")
+    printf '%s\n' "$output" >&2
+    for path in "${candidates[@]}"; do
+        name=${path##*/}; name=${name%.patch}
+        grep -Fxq -e "K114s Omarchy fixes: $name: applied" \
+            -e "K114s Omarchy fixes: $name: applied by a three-way merge with this Omarchy build's changes" \
+            -e "K114s Omarchy fixes: $name: Omarchy ships this change itself now; retire the patch (docs/omarchy-patches.md)" \
+            <<<"$output" || fail "$name did not pass the preflight"
+    done
+    for path in "${files[@]}"; do
+        case $(head -1 "$root/$path") in
+            '#!/bin/bash'|'#!/usr/bin/bash'|'#!/usr/bin/env bash') bash -n "$root/$path" ;;
+            '#!/usr/bin/python3'|'#!/usr/bin/env python3') python3 -m py_compile "$root/$path" ;;
+        esac
+    done
+}
+
+preflight() (
+    local work package name version hash url archive mtree installed pending plan snapshot
+    [[ $(omarchy-channel-current) == edge ]] || fail "the current Omarchy channel is not Edge"
+    work=$(mktemp -d "${TMPDIR:-/tmp}/k114s-edge-update.XXXXXX")
+    trap 'rm -r -- "$work" </dev/null' EXIT
+    mkdir -p "$work/db" "$work/cache"
+    ln -s "$db/local" "$work/db/local"
+    local opts=(--dbpath "$work/db" --cachedir "$work/cache" --logfile /dev/null)
+    # Refresh a private database as checkupdates does. The live package data stays read-only.
+    fakeroot -- pacman -Sy --disable-sandbox-filesystem "${opts[@]}" >/dev/null
+    plan=$(pacman -Sup "${opts[@]}" --print-format '%n %v %h %l')
+    snapshot=$(snapshot_ids | sort -n | tail -1)
+    printf 'snapshot %s\n' "${snapshot:-0}"
+    for package in "${packages[@]}"; do
+        installed=$(pacman -Q -- "$package")
+        [[ ${installed%% *} == "$package" ]] || fail "cannot identify installed $package"
+        pending=$(awk -v p="$package" '$1 == p {print}' <<<"$plan")
+        if [[ ${1:-} == --current ]]; then
+            pending=$(pacman -Sp --nodeps "${opts[@]}" --print-format '%n %v %h %l' "$package")
+            [[ $pending == "$installed "* ]] || fail "$package's Edge archive differs from the installed version"
+        fi
+        if [[ -z $pending ]]; then
+            version=${installed#* }
+            mtree=$(digest < "$db/local/$package-$version/mtree")
+            printf '%s %s %s\n' "$package" "$version" "$mtree"
+            continue
+        fi
+        read -r name version hash url <<<"$pending"
+        [[ $name == "$package" && $version =~ ^[A-Za-z0-9.+_:-]+$ && $hash =~ ^[a-f0-9]{64}$ &&
+            $url == "https://pkgs.omarchy.org/edge/aarch64/$package-$version-aarch64.pkg.tar.zst" ]] ||
+            fail "unexpected archive for $package in the Edge transaction"
+        archive=$work/${url##*/}
+        curl --fail --silent --show-error --proto '=https' --max-time 60 "$url" -o "$archive"
+        curl --fail --silent --show-error --proto '=https' --max-time 60 "$url.sig" -o "$archive.sig"
+        [[ $(digest < "$archive") == "$hash" ]] || fail "$package archive digest differs from pacman's plan"
+        sudo -n pacman-key --verify "$archive.sig" "$archive" >&2 ||
+            fail "$package archive has no trusted signature"
+        if [[ $package == omarchy-dev ]]; then check_patches "$archive" "$work"; fi
+        mtree=$(bsdtar -xOf "$archive" .MTREE | digest)
+        printf '%s %s %s\n' "$package" "$version" "$mtree"
+        printf 'K114s update: checked %s %s\n' "$package" "$version" >&2
+    done
+)
+
+report() {
+    local proof=$1 before package version mtree record boot package_versions menu snapshots new checks summary
+    local records=() names=() result=0
+    mapfile -t records < "$proof"
+    [[ ${#records[@]} == 3 && ${records[0]} =~ ^snapshot\ ([0-9]+)$ ]] || fail "invalid preflight proof"
+    before=${BASH_REMATCH[1]}
+    for record in "${records[@]:1}"; do
+        read -r package version mtree <<<"$record"
+        [[ ( $package == omarchy-dev || $package == omarchy-settings-dev ) &&
+            $version =~ ^[A-Za-z0-9.+_:-]+$ && $mtree =~ ^[a-f0-9]{64}$ ]] || fail "invalid package proof"
+        names+=("$package")
+        if [[ $(pacman -Q -- "$package") != "$package $version" ]] ||
+            [[ $(digest < "$db/local/$package-$version/mtree") != "$mtree" ]]; then
+            printf 'FAIL: %s differs from preflight. Check the installed build before rebooting.\n' "$package" >&2
+            result=1
+        fi
+    done
+    [[ ${names[*]} == "${packages[*]}" ]] || fail "incomplete package proof"
+
+    if checks=$(bash "$HOME/.local/state/k114s-recovery/owner-session-touchid/p9.sh" 2>&1); then
+        boot=$(k114s-boot status)
+        package_versions=$(pacman -Q -- linux-k114s linux-k114s-r3b)
+        # The menu's version comments may lag promotion. Use the verified package versions.
+        summary=$(awk -v versions="$package_versions" '
+            BEGIN { n=split(versions,v,"\n"); for(i=1;i<=n;i++) { split(v[i],p," "); ver[p[1]]=p[2] } }
+            $1=="Main" || $1=="Backup" {
+                n=split($2,path,"/")
+                if (path[n] in ver) {
+                    roles[$1]++
+                    printf "%s %s (%s), verified\n",$1,path[n],ver[path[n]]
+                }
+            }
+            $1=="Stage" && $2=="2:" { stage2++; print "Stage 2 verified", $NF }
+            END { exit !(roles["Main"]==1 && roles["Backup"]==1 && stage2==1) }
+        ' <<<"$boot") || fail "could not identify the verified Main, Backup and Stage 2 entries"
+        printf '%s\n' "$summary"
+    else
+        printf '%s\nFAIL: K114s boot verification failed. Review P9 before rebooting.\n' "$checks" >&2
+        result=1
+    fi
+    snapshots=$(snapshot_ids)
+    new=$(awk -v previous="$before" '$1 > previous' <<<"$snapshots")
+    if [[ -z $new ]]; then
+        printf 'Snapshot: no new root snapshot found\n'
+    elif [[ $new == *$'\n'* ]]; then
+        printf 'Snapshot: multiple new root snapshots; the update snapshot could not be identified\n'
+    elif menu=$(sudo -n limine-snapper-list); then
+        if awk -F '│' -v id="$new" 'NF>1 && ($1+0)==id {found=1} END {exit !found}' <<<"$menu"; then
+            printf 'Snapshot #%s: on disk and in the Limine menu\n' "$new"
+        else
+            printf 'Snapshot #%s: on disk; no Limine boot-menu entry\n' "$new"
+        fi
+    else
+        printf 'Snapshot #%s: on disk; Limine boot-menu status unavailable\n' "$new"
+    fi
+    return "$result"
+}
+
+case ${1:-} in
+    preflight)
+        shift
+        [[ $# == 0 || ( $# == 1 && $1 == --current ) ]] || fail "usage: $0 preflight [--current]"
+        preflight "$@"
+        ;;
+    report)
+        [[ $# == 2 ]] || fail "usage: $0 report PREFLIGHT_FILE"
+        report "$2"
+        ;;
+    *) fail "usage: $0 {preflight [--current]|report PREFLIGHT_FILE}" ;;
+esac
