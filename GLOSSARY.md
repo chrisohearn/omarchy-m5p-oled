@@ -1,6 +1,10 @@
 # Glossary
 
-The words these docs use for the K114s boot chain and its checks, with links to where each is described in full.
+The words these docs use for the K114s rollout, boot chain and checks.
+
+- **Daily-driver closeout**: acceptance of the owner's current workflows on a verified configuration,
+  including ordinary updates and a verified backup boot. Upstream adoption and features outside those
+  workflows retain their own release criteria.
 
 ## Boot roles
 

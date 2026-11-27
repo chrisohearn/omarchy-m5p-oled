@@ -8,7 +8,11 @@ has for this model and its siblings, adds the few K114s-specific pieces, and tur
 versioned bundles that are applied in place to an existing install. Scope is the whole machine:
 boot, input, radios, display, graphics, media, sound, power, updates.
 
-## Where it stands (2026-11-15)
+**Current boot pair.** Main is r3g and Backup is r3f. The November 27 ordinary reboot
+passed the boot checks and restored remote access automatically. See the
+[subsystem matrix](docs/matrix.md) for the current configuration and evidence.
+
+## Initial bring-up status (2026-11-15)
 
 Omarchy runs natively on this Mac from its encrypted NVMe, with the desktop composited on the
 Apple GPU. Evidence labels: *owner-observed* (seen by the owner on the Mac), *agent-run* (checked
