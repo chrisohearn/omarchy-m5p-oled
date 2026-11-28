@@ -168,12 +168,14 @@ the Linux disk (`/var/lib/k114s-recovery/uki/`) is on the encrypted root, which 
 - In P4b the owner copies the repair image (checked against sha256 `51148ff7...`) and the block into the bundle folder on
   macOS (`promotion/`, ignored by git), and runs `restore-repair --check`. That proves the image matches the ESP's own
   record (`k114s-repair/r2c/repair-uki.txt`, written by `apply`) and that the saved block is the live entry.
-- `sudo ./k114s-repair restore-repair` (new) puts them back: it removes `omarchy_linux-aurora.efi` and its entry when the
-  space needs it (about 111 MB free after P5b, and the image needs 111.8 MB plus the tool's 8 MiB reserve), writes the
-  image beside its final name and checks it, puts the saved block in as the first entry and writes `default_entry: 1`.
-  The result is the menu from before P5 with only the default line changed (tested on a synthetic ESP:
-  `tests/macos/test-promoted-esp.sh`). It refuses while a repair entry is still there, and it writes nothing unless
-  the image and the block check out. A run that stops half way is finished by running it again.
+- `sudo ./k114s-repair restore-repair` puts them back. Both modes count free space and the clusters freed by planned
+  deletions before any write. The budget covers the image, the full new menu beside the old one, and an 8 MiB reserve
+  for an image write. When recovery requires a new image, the tool removes `omarchy_linux-aurora.efi` and its entry
+  only if recovery fits with that deletion and needs the space. A verified repair image already on the ESP can
+  finish with space for the menu alone.
+  The tool verifies the image, puts the saved block first, and sets `default_entry: 1`.
+  Apply refuses while a repair entry is still there or if the image or block fails verification.
+  Rerun the command to finish recovery after an interrupted write.
 
 This keeps the owner's decision (the image is off the ESP) and a way back that does not depend on any hook-built image.
 The bundle may also still hold the original image from the 2026-11-14 `apply` (`work/*-apply-*/live/EFI/Linux/`, the
@@ -932,10 +934,11 @@ Each step's undo is next to it. When Linux does not come up, hold the power butt
   2. If the r3a image is the suspect, `sudo ./k114s-repair default aurora`. The default then names the hook-built
      `linux-aurora` image, which P6a booted (before P6a it is unproven).
   3. **If both images are the suspect** (a hang after an update that rebuilt them, or 2 also hangs):
-     `sudo ./k114s-repair restore-repair --check`, then `sudo ./k114s-repair restore-repair`. It removes
-     `omarchy_linux-aurora.efi` and its entry (the space needs it), writes the static repair image from `promotion/` and
-     checks it against the ESP's record (`51148ff7...`), puts the saved block back as entry 1 and writes
-     `default_entry: 1`. Expected: `Restored the repair entry as entry 1 and the default (default_entry: 1) ...`, then
+     Run `sudo ./k114s-repair restore-repair --check`. A space refusal exits with status 1 and reports the free,
+     reclaimable, and required byte counts. On a passing check, run `sudo ./k114s-repair restore-repair`. It writes the
+     static repair image from `promotion/` and checks it against the ESP's record (`51148ff7...`), puts the saved block
+     back as entry 1 and writes `default_entry: 1`.
+     Expected: `Restored the repair entry as entry 1 and the default (default_entry: 1) ...`, then
      `status` with `repair UKI on ESP:     r1; Limine repair entry: yes` and
      `Limine default entry:  1 -> Omarchy K114s repair r1 (trackpad fix B) (entry 1)`. Boot Linux: the static repair
      kernel on the configured Stage 2 (P1c proved it on the GPU file; add `stage2 r1` if in doubt). It does not depend on
