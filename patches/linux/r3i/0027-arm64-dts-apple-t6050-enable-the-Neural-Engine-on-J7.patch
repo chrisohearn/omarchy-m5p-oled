@@ -1,0 +1,142 @@
+From 15288d379685f90160b64cbbe53334aff72a1381 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <address-in-upstream-commit@localhost>
+Date: Thu, 19 Nov 2026 23:26:47 +1100
+Subject: [PATCH 27/31] arm64: dts: apple: t6050: enable the Neural Engine on
+ J714c, J716s, J873s, K114s, K116c and K116s
+
+The ADT of every one of these boards has the same ane0 as J714s: device
+type ane, compatible "ane,t8132exclave", ane-type 0x220, die 0,
+interrupts 954 and 967, clock ids 335, 334 and 381, and the dart-ane0
+DARTs on interrupt 955. That is the engine t6050-peripherals.dtsi
+describes, so enable it on them.
+
+A board opts in by defining T6050_ANE before it includes
+t6050-peripherals.dtsi, which then includes t6050-ane.dtsi at its end. This
+keeps the change to one line at the top of each board file, away from the
+lines other changes edit next to the peripherals include. The DTBs are the
+same as with a direct include after t6050-peripherals.dtsi.
+
+Nothing starts on its own. The boot loader enables ane0 and its
+reservations only when the ADT says the firmware is preloaded and its
+segments check out; otherwise it disables ane0. The driver then starts
+the engine only when the preloaded TEXT matches a firmware build it knows,
+and logs the digest and leaves the engine alone when it does not.
+
+Left out here:
+ - J716c, K114c and J775c, which have their own open changes for this.
+ - J775d (M5 Ultra): the second die has its own ane1, DARTs and power
+   state, none of which are described, and the boot loader fills only
+   /arm-io/ane0.
+
+Signed-off-by: Ryan Murray <address-in-upstream-commit@localhost>
+
+[re-cut onto the K114s r3d tree]
+---
+ arch/arm64/boot/dts/apple/t6050-j714c.dts        | 3 +++
+ arch/arm64/boot/dts/apple/t6050-j716s.dts        | 3 +++
+ arch/arm64/boot/dts/apple/t6050-j873s.dts        | 3 +++
+ arch/arm64/boot/dts/apple/t6050-k114s.dts        | 2 ++
+ arch/arm64/boot/dts/apple/t6050-k116c.dts        | 3 +++
+ arch/arm64/boot/dts/apple/t6050-k116s.dts        | 3 +++
+ arch/arm64/boot/dts/apple/t6050-peripherals.dtsi | 8 ++++++++
+ 7 files changed, 25 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-j714c.dts b/arch/arm64/boot/dts/apple/t6050-j714c.dts
+index d699d3bfd590..5856893c5aaa 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j714c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j714c.dts
+@@ -12,6 +12,9 @@
+  * Copyright The Asahi Linux Contributors
+  */
+ 
++/* The Neural Engine (t6050-ane.dtsi, through t6050-peripherals.dtsi) */
++#define T6050_ANE
++
+ /dts-v1/;
+ 
+ #define T6050_J714C
+diff --git a/arch/arm64/boot/dts/apple/t6050-j716s.dts b/arch/arm64/boot/dts/apple/t6050-j716s.dts
+index acba6051d343..e7b8f9e83485 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j716s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j716s.dts
+@@ -13,6 +13,9 @@
+  * Copyright The Asahi Linux Contributors
+  */
+ 
++/* The Neural Engine (t6050-ane.dtsi, through t6050-peripherals.dtsi) */
++#define T6050_ANE
++
+ /dts-v1/;
+ 
+ #include <dt-bindings/leds/common.h>
+diff --git a/arch/arm64/boot/dts/apple/t6050-j873s.dts b/arch/arm64/boot/dts/apple/t6050-j873s.dts
+index b921d71a60f2..4ac8b85a308a 100644
+--- a/arch/arm64/boot/dts/apple/t6050-j873s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-j873s.dts
+@@ -13,6 +13,9 @@
+  * Copyright The Asahi Linux Contributors
+  */
+ 
++/* The Neural Engine (t6050-ane.dtsi, through t6050-peripherals.dtsi) */
++#define T6050_ANE
++
+ /dts-v1/;
+ 
+ #include "t6050-max.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114s.dts b/arch/arm64/boot/dts/apple/t6050-k114s.dts
+index 9c78a232e94a..2774273eb0c4 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k114s.dts
+@@ -14,6 +14,8 @@
+ #define T6050_K114S
+ /* ADT /arm-io/acio2: the right port's USB4/Thunderbolt router */
+ #define T6050_ATC2_USB4_ROUTER
++/* The Neural Engine's firmware reservations and enables. */
++#define T6050_ANE
+ /* The N1's firmware and this board's ADT board-id, for t6050-k114-k116.dtsi */
+ #define T6050_K_N1_FIRMWARE	"apple/centauri/k114s-ftab.bin"
+ #define T6050_K_BOARD_ID	0x14
+diff --git a/arch/arm64/boot/dts/apple/t6050-k116c.dts b/arch/arm64/boot/dts/apple/t6050-k116c.dts
+index 6527496ad876..5c7e09e98546 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k116c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k116c.dts
+@@ -9,6 +9,9 @@
+  * Copyright The Asahi Linux Contributors
+  */
+ 
++/* The Neural Engine (t6050-ane.dtsi, through t6050-peripherals.dtsi) */
++#define T6050_ANE
++
+ /* The N1's firmware and this board's ADT board-id, for t6050-k114-k116.dtsi */
+ #define T6050_K_N1_FIRMWARE	"apple/centauri/k116c-ftab.bin"
+ #define T6050_K_BOARD_ID	0x06
+diff --git a/arch/arm64/boot/dts/apple/t6050-k116s.dts b/arch/arm64/boot/dts/apple/t6050-k116s.dts
+index aa718bffec3c..a231a7273c0e 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k116s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k116s.dts
+@@ -9,6 +9,9 @@
+  * Copyright The Asahi Linux Contributors
+  */
+ 
++/* The Neural Engine (t6050-ane.dtsi, through t6050-peripherals.dtsi) */
++#define T6050_ANE
++
+ /* The N1's firmware and this board's ADT board-id, for t6050-k114-k116.dtsi */
+ #define T6050_K_N1_FIRMWARE	"apple/centauri/k116s-ftab.bin"
+ #define T6050_K_BOARD_ID	0x16
+diff --git a/arch/arm64/boot/dts/apple/t6050-peripherals.dtsi b/arch/arm64/boot/dts/apple/t6050-peripherals.dtsi
+index 46e0b8f0ad14..b38dfce39f53 100644
+--- a/arch/arm64/boot/dts/apple/t6050-peripherals.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-peripherals.dtsi
+@@ -3781,3 +3781,11 @@ sep_dart: iommu@500b80000 {
+ 		status = "disabled";
+ 	};
+ };
++
++/*
++ * The Neural Engine's firmware reservations and enables. A board whose engine
++ * is described defines T6050_ANE before including this file.
++ */
++#ifdef T6050_ANE
++#include "t6050-ane.dtsi"
++#endif

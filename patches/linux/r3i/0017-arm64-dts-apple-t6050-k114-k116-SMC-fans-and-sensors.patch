@@ -1,0 +1,104 @@
+From 7c2460cbda4a1c5afc5b062afcac5730f0a862f2 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <address-in-upstream-commit@localhost>
+Date: Thu, 19 Nov 2026 22:56:37 +1100
+Subject: [PATCH 17/31] arm64: dts: apple: t6050-k114-k116: SMC fans and
+ sensors on all four boards
+
+The K114c, K114s and K116c leave the SMC hwmon node disabled; only the
+K116s turns it on, with the dual-fan, power, voltage and current keys and
+temperature discovery.
+
+Move the K116s block into t6050-k114-k116.dtsi so all four boards get it.
+The four boards' ADTs carry the same SMC node, and all four are dual-fan
+MacBook Pros like the J714s and J716s. The key set is the one the K116s,
+J714s and J716s already use; a key a board's SMC lacks only drops its
+channel.
+
+The K116s DTB is byte-identical. K114c, K114s and K116c gain the hwmon
+channels. No other T6050 board changes.
+
+The K116s block was written by Jens Axboe.
+
+Signed-off-by: Ryan Murray <address-in-upstream-commit@localhost>
+---
+ .../arm64/boot/dts/apple/t6050-k114-k116.dtsi | 30 +++++++++++++++++--
+ arch/arm64/boot/dts/apple/t6050-k116s.dts     | 24 ---------------
+ 2 files changed, 28 insertions(+), 26 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+index 8423ccbac7a0..f8384d036478 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi
+@@ -308,9 +308,35 @@ pmu_rtc: rtc {
+ 	};
+ };
+ 
+-/* These boards' SMC fan and power keys are not yet checked */
++/*
++ * SMC sensors, as on J714s: the shared fan, power, voltage and current keys,
++ * plus every readable float T* key through apple,discover-temperatures in
++ * t6050-die0.dtsi. A key this SMC lacks only drops its channel. Discovery
++ * refuses to run once any temperature channel exists, so the shared
++ * temperature nodes and apple,soc-die-keys go.
++ *
++ * The four boards' ADTs carry the same SMC node; all four are dual-fan
++ * MacBook Pros like J714s and J716s. The T6050 SMC spells the fan mode keys
++ * F0md/F1md and drives the fans itself (no apple,fan-manual-control). The
++ * keys are read on K116s; on K114c, K114s and K116c they are assumed the same.
++ */
++#include "hwmon-common.dtsi"
++#include "hwmon-fan-dual.dtsi"
++#include "hwmon-laptop.dtsi"
++
+ &smc_hwmon {
+-	status = "disabled";
++	status = "okay";
++	/delete-property/ apple,soc-die-keys;
++	/delete-node/ temperature-TH0x;
++	/delete-node/ temperature-TB0T;
++	/delete-node/ temperature-TCHP;
++	/delete-node/ temperature-TW0P;
++	fan-F0Ac {
++		apple,fan-mode = "F0md";
++	};
++	fan-F1Ac {
++		apple,fan-mode = "F1md";
++	};
+ };
+ 
+ /*
+diff --git a/arch/arm64/boot/dts/apple/t6050-k116s.dts b/arch/arm64/boot/dts/apple/t6050-k116s.dts
+index 54d0391b6fde..88b991ddf651 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k116s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k116s.dts
+@@ -44,30 +44,6 @@ &port01 {
+ 	pwren-gpios = <&smc_pcio 0 GPIO_ACTIVE_HIGH>;
+ };
+ 
+-/*
+- * SMC sensors, as on J714s: every readable float T* key is discovered through
+- * apple,discover-temperatures in t6050-die0.dtsi, so the shared temperature
+- * nodes and apple,soc-die-keys go. The T6050 SMC spells the fan mode keys
+- * F0md/F1md and drives the fans itself.
+- */
+-#include "hwmon-common.dtsi"
+-#include "hwmon-fan-dual.dtsi"
+-#include "hwmon-laptop.dtsi"
+-
+-&smc_hwmon {
+-	status = "okay";
+-	/delete-property/ apple,soc-die-keys;
+-	/delete-node/ temperature-TH0x;
+-	/delete-node/ temperature-TB0T;
+-	/delete-node/ temperature-TCHP;
+-	/delete-node/ temperature-TW0P;
+-	fan-F0Ac {
+-		apple,fan-mode = "F0md";
+-	};
+-	fan-F1Ac {
+-		apple,fan-mode = "F1md";
+-	};
+-};
+ 
+ /*
+  * The trackpad's AFE reset. The ADT names the SMC pcIO template (0x10000,

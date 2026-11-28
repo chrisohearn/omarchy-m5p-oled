@@ -1,0 +1,138 @@
+From 67bea3896a827ffc12c762370625475661b0cb15 Mon Sep 17 00:00:00 2001
+From: verify <verify@localhost>
+Date: Sat, 28 Nov 2026 02:54:12 -0700
+Subject: [PATCH 31/31] K114s: restore jack-only speaker protection gates
+
+---
+ arch/arm64/boot/dts/apple/t6050-k114.dtsi |  8 +++-----
+ arch/arm64/boot/dts/apple/t6050-k114c.dts |  6 ++++++
+ sound/soc/apple/macaudio-admission-test.h |  7 +++----
+ sound/soc/apple/macaudio-amp-level-test.h |  2 +-
+ sound/soc/apple/macaudio.c                | 25 +++++++++++++++++++++--
+ 5 files changed, 36 insertions(+), 12 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114.dtsi b/arch/arm64/boot/dts/apple/t6050-k114.dtsi
+index a3fe9ec53f39..a1ec166203ff 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-k114.dtsi
+@@ -4,9 +4,8 @@
+  * alike beyond what t6050-k114-k116.dtsi shares with the 16-inch boards. The live K114s ADT
+  * (27.2) and the K114c's have the same nodes and values here, phandles aside.
+  *
+- * The six speaker amps and the card's "Speaker" link are the J714s's
+- * (t6050-sn012776-speakers.dtsi): the K114s and K114c ADTs describe the same amps,
+- * wiring and slots.
++ * The speaker amps are left to the board: they need qualified speaker protection,
++ * which the K114s does not have. The K114c describes its own speaker link.
+  *
+  * Included after t6050-peripherals.dtsi.
+  */
+@@ -72,6 +71,7 @@ jack_codec: codec@4b {
+ 
+ / {
+ 	sound: sound {
++		/* The headphone jack only; K114s speakers remain unqualified and absent. */
+ 		compatible = "apple,k114-macaudio", "apple,macaudio";
+ 		model = "MacBook Pro K114";
+ 		/* ADT audio-speaker function-speaker-id0 and -id1 */
+@@ -95,8 +95,6 @@ codec {
+ 	};
+ };
+ 
+-#include "t6050-sn012776-speakers.dtsi"
+-
+ /* The AOP, booted through its setup port, with its sensor and audio services. */
+ &aop_mbox {
+ 	status = "okay";
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114c.dts b/arch/arm64/boot/dts/apple/t6050-k114c.dts
+index 4b08960bda4d..1dbc141c299c 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114c.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k114c.dts
+@@ -36,6 +36,12 @@ &mtp_multitouch {
+ /* The 14-inch chassis: the Neural Engine, pins, the jack, the card and the AOP */
+ #include "t6050-k114.dtsi"
+ 
++/* The K114c keeps J714's speaker path; the K114s stays jack-only. */
++#include "t6050-sn012776-speakers.dtsi"
++&{/sound} {
++	compatible = "apple,j714-macaudio", "apple,macaudio";
++};
++
+ /* This M5 Max AOP firmware requires its ALS setup calibration; the M5 Pro does not. */
+ &aop_als {
+ 	firmware-name = "apple/aop-als-cal.bin";
+diff --git a/sound/soc/apple/macaudio-admission-test.h b/sound/soc/apple/macaudio-admission-test.h
+index e83c4fc1ef2a..cde03a8d6076 100644
+--- a/sound/soc/apple/macaudio-admission-test.h
++++ b/sound/soc/apple/macaudio-admission-test.h
+@@ -11,11 +11,10 @@ static void macaudio_admission_needs_a_safe_level(struct kunit *test)
+ 	KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&macaudio_j45x_cfg));
+ 	KUNIT_EXPECT_TRUE(test, macaudio_speakers_allowed(&macaudio_j413_cfg));
+ 	KUNIT_EXPECT_TRUE(test, macaudio_speakers_allowed(&macaudio_j700_cfg));
+-	/*
+-	 * The AOP-fed machines: J714 (also K114 and K116) and J813 with their safe
+-	 * level, J873 and J704 without one
+-	 */
++	/* The AOP-fed machines with a safe level, J873 and J704 without one. */
+ 	KUNIT_EXPECT_TRUE(test, macaudio_speakers_allowed(&macaudio_j714_cfg));
++	/* K114s has no qualified speaker path. */
++	KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&macaudio_k114_cfg));
+ 	KUNIT_EXPECT_TRUE(test, macaudio_speakers_allowed(&macaudio_j813_cfg));
+ 	KUNIT_EXPECT_FALSE(test, macaudio_speakers_allowed(&macaudio_j873_cfg));
+ 	/* The Mac Studio M5: no sense and no protection owner yet, speaker off */
+diff --git a/sound/soc/apple/macaudio-amp-level-test.h b/sound/soc/apple/macaudio-amp-level-test.h
+index a684c616b4a6..b97939e10c67 100644
+--- a/sound/soc/apple/macaudio-amp-level-test.h
++++ b/sound/soc/apple/macaudio-amp-level-test.h
+@@ -96,7 +96,7 @@ static void macaudio_level_no_table(struct kunit *test)
+ 		&macaudio_j493_cfg, &macaudio_j575c_j773_cfg, &macaudio_j604_cfg,
+ 		&macaudio_j614_cfg, &macaudio_j616_cfg, &macaudio_j713_cfg,
+ 		&macaudio_j714_cfg, &macaudio_j715_cfg, &macaudio_j813_cfg,
+-		&macaudio_j775_cfg, &macaudio_j873_cfg,
++		&macaudio_j775_cfg, &macaudio_j873_cfg, &macaudio_k114_cfg,
+ 	};
+ 	unsigned int i;
+ 
+diff --git a/sound/soc/apple/macaudio.c b/sound/soc/apple/macaudio.c
+index eac6a17d5fbd..b3b805f659e3 100644
+--- a/sound/soc/apple/macaudio.c
++++ b/sound/soc/apple/macaudio.c
+@@ -4273,6 +4273,27 @@ struct macaudio_platform_cfg macaudio_j714_cfg = {
+ 	.tweeter_hpf_granted = true,
+ };
+ 
++/*
++ * K114s (T6050, MacBook Pro 14" M5 Pro): the J714s's AOP-fed card for the
++ * headphone jack only. Its ADT describes the same jack codec, AOP audio
++ * service and six SN012776 as the J714s's, but no speaker protection data
++ * exists for this chassis, so the speakers stay off as on the J873: no safe
++ * level and speakers disabled, so macaudio_speakers_allowed() refuses a
++ * speaker link however the DT is written. The jack frame is the J714s's.
++ */
++struct macaudio_platform_cfg macaudio_k114_cfg = {
++	.enable_speakers = false,
++	.amp = AMP_SN012776,
++	.speakers = SPKR_2W1T,
++	.stereo = true,
++	.safe_vol = 0,
++	.fe_dai_names = { "j873-pcm-0", "j873-pcm-1", "j873-pcm-2" },
++	.dai_fmt = SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_CBC_CFC | SND_SOC_DAIFMT_IB_NF,
++	.spk_dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBC_CFC |
++		       SND_SOC_DAIFMT_GATED | SND_SOC_DAIFMT_NB_IF,
++	.spk_secondary_only = true,
++};
++
+ /*
+  * J815 (T8142, MacBook Air M5 15"): J813's AOP-fed card with six SN012776,
+  * two woofers and a tweeter per side, in ADT speaker-config order (left
+@@ -4584,8 +4605,8 @@ static const struct of_device_id macaudio_snd_device_id[]  = {
+ 	{ .compatible = "apple,j714-macaudio", .data = &macaudio_j714_cfg },
+ 	/* k116    -       sn012776    15      2x 2W+1T (AOP-fed, V/I sense; the 16" PROLED chassis, J714's amps and frame) */
+ 	{ .compatible = "apple,k116-macaudio", .data = &macaudio_j714_cfg },
+-	/* k114    -       sn012776    15      2x 2W+1T (AOP-fed, V/I sense; the 14" PROLED chassis, J714's amps and frame) */
+-	{ .compatible = "apple,k114-macaudio", .data = &macaudio_j714_cfg },
++	/* k114    -       sn012776    -       2x 2W+1T (AOP-fed; jack only, speakers off) */
++	{ .compatible = "apple,k114-macaudio", .data = &macaudio_k114_cfg },
+ 	/* j713    -       sn012776    15      2x 1W+1T (AOP-fed, one serializer) */
+ 	{ .compatible = "apple,j713-macaudio", .data = &macaudio_j713_cfg },
+ 	/* The J713 jack runs on the AOP like the J616s one. */

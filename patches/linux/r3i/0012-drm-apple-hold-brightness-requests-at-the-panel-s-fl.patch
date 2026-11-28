@@ -1,0 +1,266 @@
+From 23d2a0aaee7ff9ca2acba5bf4c285b9c110ae6bf Mon Sep 17 00:00:00 2001
+From: k114s-integration <integration@localhost>
+Date: Sat, 14 Nov 2026 15:51:55 -0700
+Subject: [PATCH 12/31] drm/apple: hold brightness requests at the panel's
+ floor
+
+The nits backlight (H17P, firmware 27) accepts every level from 0 to
+apple,max-brightness, and a brightness-only present carries it to the
+firmware as written. 0 is presented as 0 nits. That is the level DPMS
+off uses to darken the panel, so a write of 0 to the backlight device
+looks like a display that turned itself off, with only another
+brightness write to bring it back.
+
+Read an optional apple,min-brightness from the panel node, in the same
+nits as apple,max-brightness. A request below it, zero included, is
+raised to it, and the backlight device reads the raised level back.
+Blanking, DPMS off and suspend are not requests and still present zero.
+A level reported by the loader below the floor stays until the first
+request. Without the property, or with one that is not below the
+ceiling, nothing changes. The DAC path of older firmware does not read
+it.
+
+KUnit: backlight_floor_test. Run on a build host through stand-in
+headers (28 cases pass, and the new case fails with the floor removed);
+not run under KUnit.
+
+K114s (MacBook Pro 14-inch OLED, M5 Pro) integration patch, not from
+upstream. Hardware-untested: compiled, not booted on any machine.
+
+Co-Authored-By: Claude Fable 5.2 <address-in-upstream-commit@localhost>
+
+(r3c: re-cut on integration/aurora 677be395; only the dcp_set_brightness() hunk moved, where the base now passes a local 'suspended' instead of the BL_CORE_SUSPENDED test.)
+---
+ drivers/gpu/drm/apple/dcp-internal.h       |  2 +
+ drivers/gpu/drm/apple/dcp.c                | 23 +++++++++
+ drivers/gpu/drm/apple/dcp_backlight.c      | 11 ++++
+ drivers/gpu/drm/apple/dcp_backlight.h      | 26 ++++++++++
+ drivers/gpu/drm/apple/dcp_backlight_test.c | 60 ++++++++++++++++++++++
+ 5 files changed, 122 insertions(+)
+
+diff --git a/drivers/gpu/drm/apple/dcp-internal.h b/drivers/gpu/drm/apple/dcp-internal.h
+index 7f115609b657..123e2e2844d6 100644
+--- a/drivers/gpu/drm/apple/dcp-internal.h
++++ b/drivers/gpu/drm/apple/dcp-internal.h
+@@ -194,6 +194,8 @@ struct dcp_fb_reference {
+ struct dcp_brightness {
+ 	struct backlight_device *bl_dev;
+ 	u32 maximum;
++	/* apple,min-brightness: lowest level a request reaches, 0 for none. */
++	u32 minimum;
+ 	u32 dac;
+ 	int nits;
+ 	int scale;
+diff --git a/drivers/gpu/drm/apple/dcp.c b/drivers/gpu/drm/apple/dcp.c
+index cd1318a21f4a..15d3bef05a27 100644
+--- a/drivers/gpu/drm/apple/dcp.c
++++ b/drivers/gpu/drm/apple/dcp.c
+@@ -1432,6 +1432,28 @@ void dcp_panel_read_dimensions(struct apple_dcp *dcp, struct device_node *panel_
+ 		of_property_read_u32(panel_np, "adj-height-mm", &dcp->panel.height_mm);
+ }
+ 
++/*
++ * Optional floor for brightness requests, in the nits of apple,max-brightness
++ * (read first).  Only a floor below the ceiling is one.
++ */
++static void dcp_panel_read_min_brightness(struct apple_dcp *dcp,
++					  struct device_node *panel_np)
++{
++	u32 minimum;
++
++	if (of_property_read_u32(panel_np, "apple,min-brightness", &minimum) || !minimum)
++		return;
++	if (minimum >= dcp->brightness.maximum) {
++		dev_warn(dcp->dev,
++			 "ignoring 'apple,min-brightness' %u: not below the maximum %u\n",
++			 minimum, dcp->brightness.maximum);
++		return;
++	}
++	dcp->brightness.minimum = minimum;
++	dev_info(dcp->dev, "brightness requests below %u nits are raised to %u nits\n",
++		 minimum, minimum);
++}
++
+ /*
+  * Every internal panel gets an identity, so userspace can tell it apart and
+  * keep per-display settings such as its brightness.  The identity state is
+@@ -7439,6 +7461,7 @@ static int dcp_comp_bind_pipe(struct device *dev, struct device *main, void *dat
+ 						   &dcp->brightness.maximum);
+ 			if (ret)
+ 				dev_err(dev, "Missing property 'apple,max-brightness'\n");
++			dcp_panel_read_min_brightness(dcp, panel_np);
+ 		}
+ 
+ 		dcp_panel_read_dimensions(dcp, panel_np);
+diff --git a/drivers/gpu/drm/apple/dcp_backlight.c b/drivers/gpu/drm/apple/dcp_backlight.c
+index 5746c318e54c..40e2f32933ab 100644
+--- a/drivers/gpu/drm/apple/dcp_backlight.c
++++ b/drivers/gpu/drm/apple/dcp_backlight.c
+@@ -298,6 +298,7 @@ int dcp_backlight_configure(struct apple_dcp *dcp, u32 maximum,
+ 			    void (*kick)(struct apple_dcp *dcp))
+ {
+ 	unsigned long flags;
++	int floor_ret = 0;
+ 	int ret;
+ 
+ 	if ((dcp->fw_compat != DCP_FIRMWARE_H17P && dcp->fw_compat != DCP_FIRMWARE_V_27_0 &&
+@@ -313,6 +314,10 @@ int dcp_backlight_configure(struct apple_dcp *dcp, u32 maximum,
+ 		ret = dcp_bl_init(&dcp->backlight.state, maximum,
+ 				  inherited_valid, inherited,
+ 				  default_valid, default_nits);
++		/* The probe accepted the panel's floor against its own ceiling. */
++		if (!ret && dcp->brightness.minimum)
++			floor_ret = dcp_bl_set_minimum(&dcp->backlight.state,
++						       dcp->brightness.minimum);
+ 		if (!ret && iomfb_is_m4(dcp)) {
+ 			/*
+ 			 * The J713 panel jumps to new levels, and its first
+@@ -327,6 +332,9 @@ int dcp_backlight_configure(struct apple_dcp *dcp, u32 maximum,
+ 	}
+ 	spin_unlock_irqrestore(&dcp->backlight.lock, flags);
+ 	mutex_unlock(&dcp->bl_register_mutex);
++	if (floor_ret)
++		dev_warn(dcp->dev, "brightness floor %u ignored for a ceiling of %u\n",
++			 dcp->brightness.minimum, maximum);
+ 	if (!ret)
+ 		schedule_work(&dcp->bl_register_wq);
+ 	return ret;
+@@ -908,6 +916,9 @@ static int dcp_set_brightness(struct backlight_device *bd)
+ 		old = state->target;
+ 		ret = dcp_bl_request(state, bd->props.brightness,
+ 				     backlight_is_blank(bd), suspended);
++		/* Read back the level the panel's floor made of the request. */
++		if (!ret)
++			bd->props.brightness = dcp_bl_floor(state, bd->props.brightness);
+ 		/* A new level restarts the fade from the level presented last. */
+ 		fade = !ret && state->fading && state->target != old;
+ 		if (fade)
+diff --git a/drivers/gpu/drm/apple/dcp_backlight.h b/drivers/gpu/drm/apple/dcp_backlight.h
+index bb200ace9025..d68ee8127e4e 100644
+--- a/drivers/gpu/drm/apple/dcp_backlight.h
++++ b/drivers/gpu/drm/apple/dcp_backlight.h
+@@ -17,6 +17,8 @@
+  */
+ struct dcp_backlight_state {
+ 	u32 maximum;
++	/* Lowest level a request can reach, 0 for none: dcp_bl_set_minimum(). */
++	u32 minimum;
+ 	u32 target;
+ 	u32 level;
+ 	u32 fade_from;
+@@ -99,6 +101,29 @@ static inline int dcp_bl_init(struct dcp_backlight_state *state, u32 maximum,
+ 	return 0;
+ }
+ 
++/*
++ * A panel node may name the lowest level a brightness request can reach
++ * (apple,min-brightness, in nits).  A request below it, zero included, is
++ * raised to it, so a brightness write alone cannot darken such a panel.
++ * Blanking, DPMS off and suspend are not requests and still present zero.
++ * A loader level below the floor stays until the first request.
++ */
++static inline int dcp_bl_set_minimum(struct dcp_backlight_state *state, u32 minimum)
++{
++	if (!state->ready)
++		return -ENODATA;
++	if (minimum >= state->maximum)
++		return -ERANGE;
++	state->minimum = minimum;
++	return 0;
++}
++
++/* The level a request for @nits reaches on this panel. */
++static inline u32 dcp_bl_floor(const struct dcp_backlight_state *state, u32 nits)
++{
++	return max(nits, state->minimum);
++}
++
+ /*
+  * A decoded powerlog sample can seed takeover only before Linux control.
+  * It reports the level the panel shows, so the level is then known.
+@@ -170,6 +195,7 @@ static inline int dcp_bl_request(struct dcp_backlight_state *state, u32 nits,
+ 		return -ENODATA;
+ 	if (nits > state->maximum)
+ 		return -ERANGE;
++	nits = dcp_bl_floor(state, nits);
+ 	/* Save/restore clients may echo the reporting default without a change. */
+ 	if (state->preserve_inherited && !state->controlled && !state->level_known &&
+ 	    state->target == nits) {
+diff --git a/drivers/gpu/drm/apple/dcp_backlight_test.c b/drivers/gpu/drm/apple/dcp_backlight_test.c
+index e31fa370b3b4..b9f888f44f46 100644
+--- a/drivers/gpu/drm/apple/dcp_backlight_test.c
++++ b/drivers/gpu/drm/apple/dcp_backlight_test.c
+@@ -84,6 +84,65 @@ static void backlight_range_test(struct kunit *test)
+ 	KUNIT_EXPECT_EQ(test, dcp_bl_effective(&state), 600U);
+ }
+ 
++static void backlight_floor_test(struct kunit *test)
++{
++	struct dcp_backlight_state state = {};
++	struct dcp_backlight_present present;
++
++	KUNIT_EXPECT_EQ(test, dcp_bl_set_minimum(&state, 10), -ENODATA);
++	KUNIT_ASSERT_EQ(test, dcp_bl_init(&state, 1000, false, 0, true, 500), 0);
++	KUNIT_EXPECT_EQ(test, dcp_bl_set_minimum(&state, 1000), -ERANGE);
++	KUNIT_EXPECT_EQ(test, state.minimum, 0U);
++	/* Without a floor zero is a level like any other. */
++	state.controlled = true;
++	KUNIT_ASSERT_EQ(test, dcp_bl_request(&state, 0, false, false), 0);
++	KUNIT_EXPECT_EQ(test, state.target, 0U);
++
++	/* With one, zero and every level below it become the floor. */
++	KUNIT_ASSERT_EQ(test, dcp_bl_init(&state, 1000, false, 0, true, 500), 0);
++	KUNIT_ASSERT_EQ(test, dcp_bl_set_minimum(&state, 10), 0);
++	state.controlled = true;
++	KUNIT_ASSERT_EQ(test, dcp_bl_request(&state, 0, false, false), 0);
++	KUNIT_EXPECT_EQ(test, state.target, 10U);
++	KUNIT_ASSERT_EQ(test, dcp_bl_prepare(&state, true, &present), 0);
++	KUNIT_EXPECT_EQ(test, present.nits, 10U);
++	KUNIT_EXPECT_TRUE(test, dcp_bl_complete(&state, present.sequence, true));
++	KUNIT_EXPECT_EQ(test, state.actual, 10U);
++	KUNIT_ASSERT_EQ(test, dcp_bl_request(&state, 9, false, false), 0);
++	KUNIT_EXPECT_EQ(test, state.target, 10U);
++	KUNIT_EXPECT_EQ(test, dcp_bl_prepare(&state, true, &present), -EALREADY);
++	KUNIT_ASSERT_EQ(test, dcp_bl_request(&state, 11, false, false), 0);
++	KUNIT_EXPECT_EQ(test, state.target, 11U);
++	KUNIT_EXPECT_EQ(test, dcp_bl_request(&state, 1001, false, false), -ERANGE);
++	KUNIT_ASSERT_EQ(test, dcp_bl_request(&state, 1000, false, false), 0);
++	KUNIT_EXPECT_EQ(test, state.target, 1000U);
++
++	/* Display off is not a request: it presents zero and wakes at the floor. */
++	KUNIT_ASSERT_EQ(test, dcp_bl_request(&state, 0, false, false), 0);
++	KUNIT_ASSERT_EQ(test, dcp_bl_dpms(&state, false), 0);
++	KUNIT_ASSERT_EQ(test, dcp_bl_prepare(&state, true, &present), 0);
++	KUNIT_EXPECT_EQ(test, present.nits, 0U);
++	KUNIT_EXPECT_TRUE(test, dcp_bl_complete(&state, present.sequence, true));
++	KUNIT_ASSERT_EQ(test, dcp_bl_dpms(&state, true), 0);
++	KUNIT_ASSERT_EQ(test, dcp_bl_prepare(&state, true, &present), 0);
++	KUNIT_EXPECT_EQ(test, present.nits, 10U);
++	KUNIT_EXPECT_TRUE(test, dcp_bl_complete(&state, present.sequence, true));
++
++	/* So is a core blank, whatever level comes with it. */
++	KUNIT_ASSERT_EQ(test, dcp_bl_request(&state, 0, true, false), 0);
++	KUNIT_EXPECT_EQ(test, dcp_bl_effective(&state), 0U);
++	KUNIT_EXPECT_EQ(test, state.target, 10U);
++	KUNIT_ASSERT_EQ(test, dcp_bl_request(&state, 0, false, false), 0);
++	KUNIT_EXPECT_EQ(test, dcp_bl_effective(&state), 10U);
++
++	/* A loader level below the floor stays until the first request. */
++	KUNIT_ASSERT_EQ(test, dcp_bl_init(&state, 1000, true, 4, false, 0), 0);
++	KUNIT_ASSERT_EQ(test, dcp_bl_set_minimum(&state, 10), 0);
++	KUNIT_EXPECT_EQ(test, dcp_bl_effective(&state), 4U);
++	KUNIT_ASSERT_EQ(test, dcp_bl_request(&state, 4, false, false), 0);
++	KUNIT_EXPECT_EQ(test, state.target, 10U);
++}
++
+ static void backlight_dpms_cycles_test(struct kunit *test)
+ {
+ 	struct dcp_backlight_state state;
+@@ -856,6 +915,7 @@ static struct kunit_case backlight_cases[] = {
+ 	KUNIT_CASE(backlight_millinits_takeover_test),
+ 	KUNIT_CASE(backlight_takeover_test),
+ 	KUNIT_CASE(backlight_range_test),
++	KUNIT_CASE(backlight_floor_test),
+ 	KUNIT_CASE(backlight_dpms_cycles_test),
+ 	KUNIT_CASE(backlight_blanked_target_test),
+ 	KUNIT_CASE(backlight_suspend_test),

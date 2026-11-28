@@ -1,0 +1,193 @@
+From 8b4229f490a3254e60624d47358501b60e87c904 Mon Sep 17 00:00:00 2001
+From: verify <verify@localhost>
+Date: Thu, 26 Nov 2026 14:19:44 -0700
+Subject: [PATCH 30/31] K114s: keep the r3f boot NOR write gates
+
+Leave the packaged K114s DT without the QSPI NVRAM partition added by 59c72f163caa. Reverse 0cb67690b3f5 in this candidate so the write policy still rejects the GD25UF64E even when the configured Stage 2 describes an NVRAM partition. The QSPI driver retains its read-only default.
+---
+ arch/arm64/boot/dts/apple/t6050-k114s.dts | 14 +++++++++--
+ drivers/spi/spi-apple-qspi-policy-test.c  | 15 ++++--------
+ drivers/spi/spi-apple-qspi-policy.h       | 19 +++++++--------
+ tools/asahi/qspi-nvram-tests.py           | 29 ++++-------------------
+ 4 files changed, 28 insertions(+), 49 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-k114s.dts b/arch/arm64/boot/dts/apple/t6050-k114s.dts
+index 2774273eb0c4..40bd03c13fb3 100644
+--- a/arch/arm64/boot/dts/apple/t6050-k114s.dts
++++ b/arch/arm64/boot/dts/apple/t6050-k114s.dts
+@@ -4,8 +4,7 @@
+  *
+  * target-type: K114s (Mac17,13)
+  *
+- * Preliminary: described from the ADT. Only the NVRAM partition (t6050-k114-k116.dtsi) has been run
+- * on a K114s, from the boot loader's tree; this file as a whole has not been booted.
++ * Preliminary: described from the ADT only, not yet booted on the hardware.
+  *
+  * Copyright The Asahi Linux Contributors
+  */
+@@ -45,6 +44,17 @@ &mtp_multitouch {
+ /* The camera. The loader sets the platform ID from the ADT isp0 sensor-type (0xba). */
+ #include "t6050-isp.dtsi"
+ 
++/* The shared K114/K116 include has an NVRAM alias and flash client; keep both out of K114s. */
++/ {
++	aliases {
++		/delete-property/ nvram;
++	};
++};
++
++&qspi {
++	/delete-node/ flash@0;
++};
++
+ /*
+  * The 14.2-inch 3024x1986 panel's active area (254 dpi, the notch rows included), for the
+  * DPI only (the ADT carries none)
+diff --git a/drivers/spi/spi-apple-qspi-policy-test.c b/drivers/spi/spi-apple-qspi-policy-test.c
+index 0383e506b533..68b7de086be2 100644
+--- a/drivers/spi/spi-apple-qspi-policy-test.c
++++ b/drivers/spi/spi-apple-qspi-policy-test.c
+@@ -183,8 +183,6 @@ static void qspi_policy_gd_status(struct kunit *test)
+ 	/* The J700 GD25UF16E part: QE is set for good and BP0 by iBoot. */
+ 	KUNIT_EXPECT_TRUE(test, apple_qspi_gd_status_allows_write(0x00, 0x02, 0x1c));
+ 	KUNIT_EXPECT_TRUE(test, apple_qspi_gd_status_allows_write(0x04, 0x02, 0x1c));
+-	/* The J775D GD25UF64E part: QE only, no block protection tolerated. */
+-	KUNIT_EXPECT_TRUE(test, apple_qspi_gd_status_allows_write(0x00, 0x02, 0));
+ 	KUNIT_EXPECT_FALSE(test, apple_qspi_gd_status_allows_write(0x04, 0x02, 0));
+ 	/* SRP0, SRP1 and LB1 to LB3 stay as found and do not block a write. */
+ 	KUNIT_EXPECT_TRUE(test, apple_qspi_gd_status_allows_write(0x80, 0x3b, 0x1c));
+@@ -206,10 +204,8 @@ static void qspi_policy_part_status(struct kunit *test)
+ 	KUNIT_EXPECT_TRUE(test, apple_qspi_part_status_allows_write(0xef, 0x20, 0, 0, 0x1c));
+ 	KUNIT_EXPECT_FALSE(test, apple_qspi_part_status_allows_write(0xc8, 0x20, 0, 0, 0x1c));
+ 	KUNIT_EXPECT_FALSE(test, apple_qspi_part_status_allows_write(0xef, 0, 0, 0x04, 0x1c));
+-	/* GigaDevice SR3 bit 2 is LPE, a power setting; J775D leaves SR3 0x20. */
++	/* GigaDevice SR3 bit 2 is LPE, a power setting. */
+ 	KUNIT_EXPECT_TRUE(test, apple_qspi_part_status_allows_write(0xc8, 0, 0, 0x04, 0x1c));
+-	KUNIT_EXPECT_TRUE(test, apple_qspi_part_status_allows_write(0xc8, 0x00, 0x02, 0x20, 0));
+-	KUNIT_EXPECT_FALSE(test, apple_qspi_part_status_allows_write(0xc8, 0x04, 0x02, 0x20, 0));
+ 	KUNIT_EXPECT_TRUE(test, apple_qspi_part_status_allows_write(0xef, 0, 0x04, 0, 0x1c));
+ 	KUNIT_EXPECT_FALSE(test, apple_qspi_part_status_allows_write(0xc8, 0, 0x04, 0, 0x1c));
+ 	KUNIT_EXPECT_FALSE(test, apple_qspi_part_status_allows_write(0xc2, 0x20, 0, 0, 0x1c));
+@@ -277,15 +273,12 @@ static void qspi_policy_parts(struct kunit *test)
+ 	static const unsigned char known[][3] = {
+ 		{ 0xef, 0x65, 0x17 }, { 0xc2, 0x2b, 0x27 },
+ 		{ 0xef, 0x65, 0x15 }, { 0xc8, 0x83, 0x15 },
+-		{ 0xc8, 0x83, 0x17 },
+ 	};
+-	static const unsigned int sizes[] = { 0x800000, 0x800000, 0x200000, 0x200000,
+-					      0x800000 };
+-	static const unsigned char bp_ok[] = { 0, 0, 0x1c, 0x1c, 0 };
++	static const unsigned int sizes[] = { 0x800000, 0x800000, 0x200000, 0x200000 };
++	static const unsigned char bp_ok[] = { 0, 0, 0x1c, 0x1c };
+ 	static const unsigned char unknown[][3] = {
+ 		{ 0xef, 0x65, 0x16 }, { 0xef, 0x40, 0x17 }, { 0xc2, 0x2b, 0x28 },
+-		{ 0xc8, 0x60, 0x15 }, { 0xc8, 0x83, 0x16 }, { 0xc8, 0x83, 0x18 },
+-		{ 0, 0, 0 }, { 0xff, 0xff, 0xff },
++		{ 0xc8, 0x60, 0x15 }, { 0, 0, 0 }, { 0xff, 0xff, 0xff },
+ 	};
+ 	const struct apple_qspi_part *part;
+ 	unsigned int i;
+diff --git a/drivers/spi/spi-apple-qspi-policy.h b/drivers/spi/spi-apple-qspi-policy.h
+index 0a8e502cfcbb..f0ac13bf978b 100644
+--- a/drivers/spi/spi-apple-qspi-policy.h
++++ b/drivers/spi/spi-apple-qspi-policy.h
+@@ -81,14 +81,14 @@ static inline int apple_qspi_mx_status_allows_write(unsigned int sr,
+ #define APPLE_QSPI_MFR_GIGADEVICE	0xc8
+ 
+ /*
+- * GigaDevice GD25UF16E and GD25UF64E. SR1 holds WIP, WEL, five block-protect
+- * bits BP[4:0] at bits 6:2 and SRP0. SR2 holds SRP1, QE, SUS2 at bit 2,
+- * LB[3:1], CMP and SUS1 at bit 7. SR3 holds output drive, dummy-cycle and
+- * low-power settings and has no write-protect selection. BUSY and WEL, both
+- * suspend bits and CMP are always refused. BP[2:0] sit where they do on
+- * Winbond parts and are tolerated only where bp_ok allows them; BP3 and BP4
+- * move or shrink the protected range and are refused unless bp_ok names them.
+- * SRP0, SRP1, QE and LB stay unchanged.
++ * GigaDevice GD25UF16E. SR1 holds WIP, WEL, five block-protect bits BP[4:0]
++ * at bits 6:2 and SRP0. SR2 holds SRP1, QE, SUS2 at bit 2, LB[3:1], CMP and
++ * SUS1 at bit 7. SR3 holds output drive, dummy-cycle and low-power settings
++ * and has no write-protect selection. BUSY and WEL, both suspend bits and
++ * CMP are always refused. BP[2:0] sit where they do on Winbond parts and
++ * are tolerated only where bp_ok allows them; BP3 and BP4 move or shrink
++ * the protected range and are refused unless bp_ok names them. SRP0, SRP1,
++ * QE and LB stay unchanged.
+  */
+ static inline int apple_qspi_gd_status_allows_write(unsigned int sr1,
+ 						    unsigned int sr2,
+@@ -171,7 +171,6 @@ struct apple_qspi_part {
+ #define APPLE_QSPI_JEDEC_W25Q16		{ 0xef, 0x65, 0x15 }
+ #define APPLE_QSPI_JEDEC_MX_2B27	{ 0xc2, 0x2b, 0x27 }
+ #define APPLE_QSPI_JEDEC_GD25UF16E	{ 0xc8, 0x83, 0x15 }
+-#define APPLE_QSPI_JEDEC_GD25UF64E	{ 0xc8, 0x83, 0x17 }
+ 
+ static const struct apple_qspi_part apple_qspi_parts[] = {
+ 	/* J613, J713, J813; also on the bus of some J616s */
+@@ -182,8 +181,6 @@ static const struct apple_qspi_part apple_qspi_parts[] = {
+ 	{ APPLE_QSPI_JEDEC_W25Q16, 0x200000, 0x1c },
+ 	/* Some J700s; BP0 covers the same range */
+ 	{ APPLE_QSPI_JEDEC_GD25UF16E, 0x200000, 0x1c },
+-	/* J775D (M5 Ultra): no block protection left set, SR1 0x00 */
+-	{ APPLE_QSPI_JEDEC_GD25UF64E, 0x800000, 0 },
+ };
+ 
+ static inline const struct apple_qspi_part *
+diff --git a/tools/asahi/qspi-nvram-tests.py b/tools/asahi/qspi-nvram-tests.py
+index b34f00178013..a67a44af6502 100644
+--- a/tools/asahi/qspi-nvram-tests.py
++++ b/tools/asahi/qspi-nvram-tests.py
+@@ -167,16 +167,16 @@ static void arm(void){runtime_ready=true;assert(!apple_qspi_set_read_only("N",&p
+ static bool sent(unsigned int o){for(unsigned int i=0;i<wire_count;i++)if(wire[i]==o)return true;return false;}
+ static void denied(struct spi_mem_op o){wire_count=0;assert(apple_qspi_exec_op(&mem,&o)<0);assert(!wire_count);}
+ int main(void){
+- const u8 known[][3]={{0xef,0x65,0x17},{0xc2,0x2b,0x27},{0xef,0x65,0x15},{0xc8,0x83,0x15},{0xc8,0x83,0x17}};
+- const u32 sizes[]={0x800000,0x800000,0x200000,0x200000,0x800000};
+- const u8 tolerated[]={0,0,0x1c,0x1c,0};
++ const u8 known[][3]={{0xef,0x65,0x17},{0xc2,0x2b,0x27},{0xef,0x65,0x15},{0xc8,0x83,0x15}};
++ const u32 sizes[]={0x800000,0x800000,0x200000,0x200000};
++ const u8 tolerated[]={0,0,0x1c,0x1c};
+  for(unsigned int i=0;i<ARRAY_SIZE(known);i++){
+   const struct apple_qspi_part *part=apple_qspi_find_part(known[i]);
+   assert(part&&part->size==sizes[i]&&part->bp_ok==tolerated[i]);
+  }
+  const u8 unknown[][3]={{0xef,0x65,0x16},{0xef,0x65,0x18},{0xc2,0x2b,0x28},{0xc8,0x60,0x15},{0xef,0x40,0x17},{0,0,0},{0xff,0xff,0xff}};
+  for(unsigned int i=0;i<ARRAY_SIZE(unknown);i++)assert(!apple_qspi_find_part(unknown[i]));
+- puts("PASS part table: W25Q64, Macronix 2B27, W25Q16, GD25UF16E and GD25UF64E with their size and tolerated BP bits; other IDs refused");
++ puts("PASS part table: W25Q64, Macronix 2B27, W25Q16 and GD25UF16E with their size and tolerated BP bits; other IDs refused");
+  u8 data[256];memset(data,0x55,sizeof(data));reset();
+  struct spi_mem_op wren=SPI_MEM_OP(SPI_MEM_OP_CMD(0x06,1),SPI_MEM_OP_NO_ADDR,SPI_MEM_OP_NO_DUMMY,SPI_MEM_OP_NO_DATA);
+  /* T8140 (J700) shares the verified policy at its DT nvram window; its data
+@@ -308,25 +308,6 @@ int main(void){
+  reset();memcpy(jedec,gd25uf16e,3);jedec[1]=0x60;window(0x24000,0x1f4000);arm();
+  wire_count=0;o=program(0x24000,1,data);assert(apple_qspi_exec_op(&mem,&o)==-ENODEV&&!sent(0x06));
+  puts("PASS GD25UF16E J700 part: GigaDevice SR1/SR2/SR3 checks; WIP, WEL, BP3, BP4, CMP, SUS1, SUS2 and other IDs refused");
+- /* J775D GD25UF64E part: GigaDevice checks in its 12-bank partition, as its loader leaves the status. */
+- const u8 gd25uf64e[3]={0xc8,0x83,0x17};
+- reset();memcpy(jedec,gd25uf64e,3);window(0x700000,0x7c0000);arm();
+- memset(data,0x55,sizeof(data));sr[0]=0x00;sr[1]=0x02;sr[2]=0x20;
+- o=program(0x700000,256,data);wire_count=0;assert(!apple_qspi_exec_op(&mem,&o)&&sent(0x02)&&sent(0x35)&&sent(0x15));
+- assert(!memcmp(flash+0x700000,data,256)&&sr[0]==0x00&&sr[1]==0x02&&sr[2]==0x20);
+- erase.addr.val=0x7bf000;memset(flash+0x7bf000,0,4096);
+- wire_count=0;assert(!apple_qspi_exec_op(&mem,&erase)&&sent(0x20));
+- for(unsigned int i=0;i<4096;i++)assert(flash[0x7bf000+i]==0xff);
+- /* The part tolerates no BP bits: BP0 is refused before WREN. */
+- reset();memcpy(jedec,gd25uf64e,3);window(0x700000,0x7c0000);arm();
+- sr[0]=0x04;sr[1]=0x02;sr[2]=0x20;wire_count=0;o=program(0x700000,1,data);
+- assert(apple_qspi_exec_op(&mem,&o)==-EACCES&&!sent(0x06)&&!sent(0x02));
+- /* First-write qualification on the J775D 12-bank GD25UF64E window (SFDP + bank header). */
+- reset();q.qualified=0;memcpy(jedec,gd25uf64e,3);window(0x700000,0x7c0000);
+- store_at(0x710000);arm();memset(data,0x55,sizeof(data));
+- sr[0]=0x00;sr[1]=0x02;sr[2]=0x20;wire_count=0;o=program(0x700000,256,data);
+- assert(!apple_qspi_exec_op(&mem,&o)&&sent(0x5a)&&sent(0x02)&&q.qualified);
+- puts("PASS GD25UF64E J775D part: GigaDevice SR1/SR2/SR3 checks with SR1 0x00, SR2 0x02, SR3 0x20; qualify and BP0 refusal");
+  /* BP0 protects the top 64 KiB of a 2 MiB part, the J700 window's last 16 KiB: refused before WREN there. */
+  reset();memcpy(jedec,w25q16,3);window(0x24000,0x1f4000);arm();sr[0]=0x04;
+  wire_count=0;o=program(0x1f0000,1,data);assert(apple_qspi_exec_op(&mem,&o)==-EACCES&&!sent(0x06));
+@@ -487,8 +468,6 @@ def main():
+             ('gd-cmp', '!(sr2 & 0xc4)', '!(sr2 & 0x84)'),
+             ('j700-gd-id', 'APPLE_QSPI_JEDEC_GD25UF16E\t{ 0xc8, 0x83, 0x15 }',
+              'APPLE_QSPI_JEDEC_GD25UF16E\t{ 0xc8, 0x83, 0x16 }'),
+-            ('j775d-gd-id', 'APPLE_QSPI_JEDEC_GD25UF64E\t{ 0xc8, 0x83, 0x17 }',
+-             'APPLE_QSPI_JEDEC_GD25UF64E\t{ 0xc8, 0x83, 0x18 }'),
+             ('read-only', 'read_only || !qspi->nvram_write_candidate || qspi->write_fault',
+              '!qspi->nvram_write_candidate || qspi->write_fault'),
+             ('fault-latch', 'write_fault_latched = true;', 'write_fault_latched = false;'),
