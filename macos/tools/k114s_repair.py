@@ -320,8 +320,8 @@ class Esp:
     def matches_staged(self, rel, data):
         return self.read_staged(rel) == data
 
-    def put(self, rel, data, *, reuse_staged=False):
-        """Write beside the target, read back, then rename over it."""
+    def stage(self, rel, data, *, reuse_staged=False):
+        """Write and verify a replacement beside its target."""
         if not self.writable:
             raise Stop("internal: ESP is not mounted writable")
         target = self.path(rel)
@@ -338,12 +338,24 @@ class Esp:
                     os.fsync(stream.fileno())
             if sha(read(temporary)) != sha(data):
                 raise OSError("did not read back")
-            os.replace(temporary, target)
         except OSError as error:
             if os.path.lexists(temporary):
                 os.remove(temporary)
             self.drop_appledouble(temporary)
             raise Stop("writing %s failed (%s). The previous file is intact; run  status" % (rel, error))
+        return temporary
+
+    def put(self, rel, data, *, reuse_staged=False):
+        """Write beside the target, read back, then rename over it."""
+        temporary = self.stage(rel, data, reuse_staged=reuse_staged)
+        target = self.path(rel)
+        try:
+            os.replace(temporary, target)
+        except OSError as error:
+            if not reuse_staged:
+                os.remove(temporary)
+                self.drop_appledouble(temporary)
+            raise Stop("publishing %s failed (%s). The previous file is intact; run  status" % (rel, error))
         self.drop_appledouble(temporary)
         self.drop_appledouble(target)
 
@@ -1110,9 +1122,10 @@ def restore_repair(esp, m, image_path, check_only):
         block_to_insert = block
         if present:
             prefix, match, suffix = text.partition(block)
+            next_title = next((line for line in suffix.splitlines() if line.lstrip().startswith("/")), "")
             # Require the saved bytes to cover the entire flat entry.
             if (not match or (prefix and not prefix.endswith("\n"))
-                    or (suffix and (not suffix.startswith(("###", "/")) or suffix.startswith("//")))
+                    or (suffix and not suffix.startswith(("###", "/"))) or next_title.lstrip().startswith("//")
                     or text.count(tool.LIMINE_MARKER) != 1 or text.count(REPAIR_UKI) != 1):
                 raise Stop("limine.conf has a repair entry that is not the saved block: the saved copy is not the one "
                            "that boots. Make the saved copy again (docs/r3a-promotion.md, P0e); nothing written")
@@ -1183,6 +1196,9 @@ def restore_repair(esp, m, image_path, check_only):
             esp.remove(UKI)
             say("removed %s to make room" % UKI)
         if not have_image:
+            # A retry can identify this restore as soon as the verified image lands.
+            # Keep the active menu until the image has passed readback.
+            esp.stage(LIMINE, new, reuse_staged=True)
             if replace_repair:
                 esp.remove(REPAIR_UKI)   # no live menu entry names this image
             esp.put(REPAIR_UKI, image, reuse_staged=True)

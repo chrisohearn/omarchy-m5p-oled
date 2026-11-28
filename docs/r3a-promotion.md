@@ -937,8 +937,9 @@ Each step's undo is next to it. When Linux does not come up, hold the power butt
   3. **If both images are the suspect** (a hang after an update that rebuilt them, or 2 also hangs):
      Run `sudo ./k114s-repair restore-repair --check`. A space refusal exits with status 1 and reports the free,
      reclaimable, and required byte counts. On a passing check, run `sudo ./k114s-repair restore-repair`. It writes the
-     static repair image from `promotion/` and checks it against the ESP's record (`51148ff7...`), puts the saved block
-     back as entry 1 and writes `default_entry: 1`.
+     replacement menu beside the active menu, then writes the static repair image from `promotion/` and checks it
+     against the ESP's record (`51148ff7...`). Only then does it publish the menu with the saved block as entry 1
+     and `default_entry: 1`. If interrupted, rerun `restore-repair` to finish with the staged menu.
      Expected: `Restored the repair entry as entry 1 and the default (default_entry: 1) ...`, then
      `status` with `repair UKI on ESP:     r1; Limine repair entry: yes` and
      `Limine default entry:  1 -> Omarchy K114s repair r1 (trackpad fix B) (entry 1)`. Boot Linux: the static repair

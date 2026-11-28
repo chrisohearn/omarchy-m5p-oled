@@ -193,7 +193,7 @@ out=$($R rollback all --esp-dir "$E" 2>&1); has "after P6a: rollback all still s
 RF() { local f=$1; shift; python3 -I -c '
 import os, sys; sys.path.insert(0, sys.argv[1]); import k114s_repair as r
 free = int(sys.argv[2])
-remove_file, put_file = r.Esp.remove, r.Esp.put
+remove_file, stage_file, put_file = r.Esp.remove, r.Esp.stage, r.Esp.put
 r.Esp.free = lambda self: free
 r.Esp.cluster = lambda self: 4096
 def allocated(size):
@@ -203,21 +203,31 @@ def remove(esp, rel):
     released = allocated(os.path.getsize(esp.path(rel)))
     remove_file(esp, rel)
     free += released
-def put(esp, rel, data, **options):
+def stage(esp, rel, data, **options):
     global free
     temporary = esp.path(rel) + ".k114s-new"
     staged = allocated(os.path.getsize(temporary)) if os.path.isfile(temporary) else 0
     need = max(0, allocated(len(data)) - staged)
     if need > free:
         raise r.Stop("writing %s failed (replica out of space)" % rel)
+    if rel == r.LIMINE and os.environ.get("INTERRUPT_MENU_START"):
+        with open(temporary, "wb"):
+            raise SystemExit(86)
+    result = stage_file(esp, rel, data, **options)
+    free -= need
+    return result
+def put(esp, rel, data, **options):
+    global free
     old = allocated(os.path.getsize(esp.path(rel))) if esp.has(rel) else 0
     put_file(esp, rel, data, **options)
-    free += old - need
-r.Esp.remove, r.Esp.put = remove, put
+    free += old
+r.Esp.remove, r.Esp.stage, r.Esp.put = remove, stage, put
 if os.environ.get("INTERRUPT_MENU"):
     rename = os.replace
     def interrupt(source, target):
         if os.path.basename(target) == r.LIMINE:
+            if os.environ["INTERRUPT_MENU"] == "eio":
+                raise OSError(5, "simulated menu rename failure")
             raise SystemExit(86)
         return rename(source, target)
     r.os.replace = interrupt
@@ -314,6 +324,22 @@ for mode in "" "--check"; do
   ok "restore refuses a saved block that has a child entry ($mode)" "$? $(sum "$E")" "1 $before"
 done
 
+for mode in "" "--check"; do
+  mkesp before; rm -- "$repair" </dev/null
+  sed -i '/^### .*added from macOS/i\/Previous\n  protocol: efi\n  path: boot():/EFI/Linux/previous.efi' "$E/limine.conf"
+  sed -i '/^\/+Omarchy/i\### separator\n  //Child' "$E/limine.conf"
+  before=$(sum "$E")
+  out=$($R restore-repair $mode --esp-dir "$E" 2>&1)
+  ok "restore refuses to move a later repair entry with a child ($mode)" "$? $(sum "$E")" "1 $before"
+done
+
+mkesp before; rm -- "$repair" </dev/null
+out=$(INTERRUPT_MENU_START=1 RF "$((REPAIR_RESERVE + 8192))" restore-repair --esp-dir "$E" 2>&1)
+ok "interruption before staging the menu leaves the repair image absent" \
+  "$? $(test -e "$repair"; echo $?) $(test -e "$E/limine.conf.k114s-new"; echo $?) $(def)" "86 1 0 Omarchy/linux-k114s"
+out=$(RF "$((REPAIR_RESERVE + 8192))" restore-repair --esp-dir "$E" 2>&1)
+ok "restore can retry an empty earlier staging file" "$? $(def)" "0 1"
+
 mkesp before; rm -- "$repair" </dev/null
 out=$(INTERRUPT_MENU=1 RF "$((REPAIR_RESERVE + 8192))" restore-repair --esp-dir "$E" 2>&1)
 ok "interrupting stale restore preserves a verified image and staged menu" \
@@ -325,6 +351,13 @@ ok "stale recovery check evaluates the staged plan without writing" \
 out=$(RF 0 restore-repair --esp-dir "$E" 2>&1)
 ok "stale restore finishes the staged menu with no free clusters" \
   "$? $(def) $(test -e "$E/limine.conf.k114s-new"; echo $?)" "0 1 1"
+
+mkesp before; rm -- "$repair" </dev/null
+out=$(INTERRUPT_MENU=eio RF "$((REPAIR_RESERVE + 8192))" restore-repair --esp-dir "$E" 2>&1)
+ok "menu rename failure keeps the staged menu and verified image" \
+  "$? $(cmp -s "$rimg" "$repair"; echo $?) $(test -s "$E/limine.conf.k114s-new"; echo $?) $(def)" "1 0 0 Omarchy/linux-k114s"
+out=$(RF 0 restore-repair --esp-dir "$E" 2>&1)
+ok "stale restore can retry an earlier rename error without free space" "$? $(def)" "0 1"
 
 mkesp before; rm -- "$repair" </dev/null
 python3 -c 'import sys; open(sys.argv[1], "a").write("#" + "x" * 5000 + "\n")' "$E/limine.conf"
