@@ -119,7 +119,7 @@ run_check() { # fresh verdicts as root, in root's private cache; 0 or 10 means i
 }
 rollback_set() { # rollback_set ID PACKAGES [--no-uki]: prints the folder
   local dir=$VAR/rollback/$1
-  bash "$(tool k114s-recovery-set)" --out "$dir" --packages "$2" --label release ${3:+"$3"} >/dev/null
+  bash "$(tool k114s-recovery-set)" --out "$dir" --packages "$2" --label release ${3:+"$3"} >/dev/null || return 1
   [[ -f $dir/SHA256SUMS ]] || return 1
   echo "$dir"
 }
