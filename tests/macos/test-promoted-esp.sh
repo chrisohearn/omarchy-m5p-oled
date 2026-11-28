@@ -247,6 +247,55 @@ out=$($R restore-repair --esp-dir "$E" 2>&1); has "before P5: restore-repair ref
 ok "and writes nothing" "$(sum "$E")" "$before"
 sed -i 's#rw$#rw quiet#' "$E/limine.conf"; out=$($R restore-repair --check --esp-dir "$E" 2>&1)
 has "before P5: --check stops when the live repair entry is not the saved block" "$out" "is not the saved block"
+mkesp before; rm "$repair"; before=$(sum "$E")
+out=$($R default repair --esp-dir "$E" 2>&1)
+has "default repair refuses the missing repair image" "$out" "so the repair entry cannot start"
+ok "the missing image cannot become the default" "$(sum "$E")" "$before"
+cp "$W/conf.p2" "$E/limine.conf"
+out=$($R restore-repair --check --esp-dir "$E" 2>&1)
+has "the exact stale repair block passes --check" "$out" "restore-repair check passed"
+ok "the stale repair check writes nothing" "$(sum "$E")" "$before"
+out=$($R restore-repair --esp-dir "$E" 2>&1)
+has "restore-repair recovers the missing image under the stale repair block" "$out" "Restored the repair entry as entry 1"
+ok "the restored image matches the recorded source" "$(cmp -s "$rimg" "$repair"; echo $?)" 0
+ok "the stale repair menu differs only in the default line" \
+  "$(diff "$W/conf.p2" "$E/limine.conf" | grep '^[<>]' | tr '\n' '|')" "< default_entry: Omarchy/linux-k114s|> default_entry: 1|"
+mkesp before; rm "$repair"; sed -i '/^\/+Omarchy/,$d' "$E/limine.conf"
+out=$($R restore-repair --esp-dir "$E" 2>&1)
+has "restore-repair can reuse a stale block that is the only entry" "$out" "Restored the repair entry as entry 1"
+ok "the only entry now has its recorded image" "$(cmp -s "$rimg" "$repair"; echo $?)" 0
+for mode in "" "--check"; do
+  mkesp before; rm "$repair"; sed -i '/^\/+Omarchy/i\  comment: changed entry' "$E/limine.conf"; before=$(sum "$E")
+  out=$($R restore-repair $mode --esp-dir "$E" 2>&1)
+  has "a stale entry that differs from the saved block stops ($mode)" "$out" "is not the saved block"
+  ok "the changed stale entry leaves the ESP untouched ($mode)" "$(sum "$E")" "$before"
+done
+mkesp before; printf 'x' | dd of="$repair" conv=notrunc status=none; before=$(sum "$E")
+out=$($R default repair --esp-dir "$E" 2>&1)
+has "default repair refuses an image that differs from the ESP's record" "$out" "does not match the ESP's record"
+ok "a mismatched recorded repair image cannot become the default" "$(sum "$E")" "$before"
+for mode in "" "--check"; do
+  out=$($R restore-repair $mode --esp-dir "$E" 2>&1)
+  has "restore-repair refuses a mismatched image still named in the menu ($mode)" "$out" "already named in limine.conf and does not match"
+  ok "the mismatched image and menu stay intact ($mode)" "$(sum "$E")" "$before"
+done
+mkesp before
+sed -i '/path: .*aurora-k114s\.efi$/s/aurora-k114s\.efi/k114s.efi/' "$E/limine.conf"
+printf '# The repair image is EFI/Linux/omarchy_linux-aurora-k114s.efi\n' >> "$E/limine.conf"; before=$(sum "$E")
+out=$($R default repair --esp-dir "$E" 2>&1)
+has "default repair checks the first entry's actual path" "$out" "the first repair entry does not boot"
+ok "a repair title pointing to another image cannot become the default" "$(sum "$E")" "$before"
+mkesp before
+bad_digest=$(printf '%0128d' 0)
+sed -i "/path: .*aurora-k114s\.efi\$/s/\$/#$bad_digest/" "$E/limine.conf"; before=$(sum "$E")
+out=$($R default repair --esp-dir "$E" 2>&1)
+has "default repair refuses a Limine hash mismatch" "$out" "does not match its hash in limine.conf"
+ok "a repair image with a mismatched Limine hash cannot become the default" "$(sum "$E")" "$before"
+digest=$(python3 -c 'import hashlib, sys; print(hashlib.blake2b(open(sys.argv[1], "rb").read()).hexdigest())' "$repair")
+sed -i "s/#$bad_digest\$/#$digest/" "$E/limine.conf"
+out=$($R default repair --esp-dir "$E" 2>&1)
+has "default repair accepts a matching Limine hash" "$out" "Default boot entry changed"
+ok "the verified repair image becomes the default" "$(def)" 1
 # the promoted ESP: the block cut the way P5a cuts it (k114s-lib.sh), then the hook's linux-aurora entry in front (P5b)
 bash -c '. "$1/linux/k114s-lib.sh"; limine_remove_entry_block "$2" EFI/Linux/omarchy_linux-aurora-k114s.efi' _ "$H/../.." "$W/conf.p2" > "$W/conf.p5"
 # The old image occupies two clusters, enough for the repair image and the atomic menu copy.
