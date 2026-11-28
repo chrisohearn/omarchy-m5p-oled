@@ -22,7 +22,9 @@ sum=$(sha256sum < "$mirror_package")
 printf '%%FILENAME%%\n%s\n\n%%SHA256SUM%%\n%s\n' "$filename" "${sum%% *}" \
   > "$fixture/database/fixture-1.0-1/desc"
 bsdtar -czf "$MIRROR_DIR/extra/extra.db" -C "$fixture/database" fixture-1.0-1
-bsdtar -czf "$MIRROR_DIR/core/core.db" --files-from /dev/null
+mkdir -p "$fixture/database/core-fixture-1.0-1"
+cp -- "$fixture/database/fixture-1.0-1/desc" "$fixture/database/core-fixture-1.0-1/desc"
+bsdtar -czf "$MIRROR_DIR/core/core.db" -C "$fixture/database" core-fixture-1.0-1
 echo 'wrong payload' > "$fixture/payload/usr/bin/fixture"
 bsdtar -czf "$fixture/wrong-package" -C "$fixture/payload" usr
 
@@ -93,6 +95,19 @@ check recover-old-cache 0 "$(printf '%s\n' extra/extra.db "extra/$filename")"
 cmp "$db" "$MIRROR_DIR/extra/extra.db"
 cmp "$package" "$mirror_package"
 check healthy-cache 0 ''
+
+# A zero-filled transfer can look like an empty archive to bsdtar.
+rm -- "$db" </dev/null
+cp -- "$MIRROR_DIR/extra/extra.db" "$fixture/extra-valid"
+head -c 512 /dev/zero > "$MIRROR_DIR/extra/extra.db"
+check empty-db-transfer 1 'extra/extra.db'
+[[ ! -e $db ]]
+cp -- "$fixture/extra-valid" "$MIRROR_DIR/extra/extra.db"
+check recover-empty-db 0 'extra/extra.db'
+
+# A previously cached but parseable database with no records is invalid too.
+head -c 512 /dev/zero > "$db"
+check replace-empty-cache 0 'extra/extra.db'
 
 # A successful transfer with the wrong contents must fail before extraction or cache publication.
 rm -- "$package" </dev/null
