@@ -126,6 +126,8 @@ Rules it keeps, each with a test:
 the installed package rebuilt into an archive by `k114s-repackage`, the files in `/boot`,
 `limine.conf`, `m1n1/boot.bin`, `m1n1/boot-ctxr.bin`, the boot images (boot classes only), a
 SHA-256 of every file on the ESP, files no package owns that the boot needs, `SHA256SUMS`.
+The recovery command publishes `SHA256SUMS` only after all checksums are written.
+If recovery set creation fails, the release stops before the package or boot-file change.
 
 `k114s-repackage` is the lesson of the 2026-11-14 repair: the image's own archives are in no
 cache, and copying files by pacman's file lists copied far too much. It archives exactly the paths

@@ -241,6 +241,34 @@ out=$(run "$r" k114s-release stage2); ok "Stage 2 trial: the hook refuses (no bo
 ok "Stage 2 switch refused: no trial was started" "$(test -e "$r/var/lib/omarchy-k114s/release/trial"; status)" 1
 r=$(mk); out=$(run "$r" k114s-release stage2); ok "Stage 2 switch without a proven chain: refused" "$? $(echo "$out" | grep -c 'no proven boot chain is recorded yet')" "1 1"
 
+# Simulate a checksum command that writes one entry and then fails during finalization.
+r=$(mk); run "$r" k114s-release mark-known-good >/dev/null
+mkdir "$BASE/checksum-fault"
+cat > "$BASE/checksum-fault/sha256sum" <<'FAULT'
+#!/bin/bash
+case $PWD in
+  */rollback/*-stage2) "$REAL_SHA256SUM" "$1"; exit 1 ;;
+esac
+exec "$REAL_SHA256SUM" "$@"
+FAULT
+chmod +x "$BASE/checksum-fault/sha256sum"
+out=$(REAL_SHA256SUM=$(command -v sha256sum) PATH="$BASE/checksum-fault:$PATH" run "$r" k114s-release stage2)
+ok "Stage 2: a failed manifest write stops before the hook and leaves no final manifest" \
+  "$? $(echo "$out" | grep -c 'could not write the rollback set') $(find "$r/var/lib/omarchy-k114s/rollback" -name stage2.log -o -name SHA256SUMS | wc -l)" "1 1 0"
+
+# An older recovery producer can leave a final manifest even though it exits nonzero.
+r=$(mk); run "$r" k114s-release mark-known-good >/dev/null
+cat > "$(lib "$r")/k114s-recovery-set" <<'FAULT'
+#!/bin/bash
+[[ $1 == --out ]] || exit 2
+mkdir -p "$2"
+: > "$2/SHA256SUMS"
+exit 1
+FAULT
+out=$(run "$r" k114s-release stage2)
+ok "Stage 2: a failed recovery producer stops even if its final manifest exists" \
+  "$? $(echo "$out" | grep -c 'could not write the rollback set') $(find "$r/var/lib/omarchy-k114s/rollback" -name stage2.log | wc -l)" "1 1 0"
+
 # --- aura-try: the loader's one-boot Stage 2 trial (a standing one is the lead's; ours is the candidate) -----------
 GPU=m1n1/boot-ctxr-r3-gpu.bin
 rec() { cat "$1"/var/lib/omarchy-k114s/release/boots/*-"$2" 2>/dev/null; }
@@ -314,6 +342,8 @@ python3 -I "$T/mkfdt.py" "$r/j.dtb" j714s; python3 -I "$T/mkfdt.py" "$r/packaged
 run "$r" k114s-release mark-known-good >/dev/null; conf=$(sum "$r/boot/efi/m1n1/boot-ctxr.bin"); echo "$conf" > "$r/etc/omarchy-k114s/stage2-frozen"
 out=$(run "$r" k114s-release stage2 --dtb pinned); ok "stage2: the candidate is built beside the configured file and armed" \
   "$? $(sum "$r/boot/efi/m1n1/boot-ctxr.bin") $(grep -c -a 'apple,centauri-platform-id' "$r/boot/efi/$TRY") $(head -n 1 "$r/boot/efi/aura-try") $(awk '$1 == "kind" || $1 == "dtb" { print $2 }' "$r/var/lib/omarchy-k114s/release/trial" | tr '\n' ' ')" "0 $conf 1 armed stage2 pinned "
+ok "Stage 2: the selected rollback set has a valid manifest" \
+  "$(cd "$r"/var/lib/omarchy-k114s/rollback/*-stage2 && sha256sum --quiet -c SHA256SUMS; status)" 0
 out=$(run "$r" k114s-release stage2); ok "a second stage2 during the trial: refused" "$? $(echo "$out" | grep -c 'one change at a time')" "1 1"
 out=$(run "$r" k114s-release abandon); ok "abandon in the boot that armed it" "$? $(test -e "$r/boot/efi/$TRY"; status) $(test -e "$r/boot/efi/aura-try"; status) $(sum "$r/boot/efi/m1n1/boot-ctxr.bin")" "0 1 1 $conf"
 sed -i 's/^AUTO_STAGE2_SWITCH=.*/AUTO_STAGE2_SWITCH=yes/' "$r/etc/omarchy-k114s/release.conf"; rm -rf "$REPO/edge"; out=$(run "$r" k114s-release auto)

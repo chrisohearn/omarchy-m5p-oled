@@ -138,7 +138,13 @@ Files no package owns:  sudo bsdtar -xpf extras.tar -C /
 If Linux does not start at all, the way back is from macOS: the k114s-repair tool's
 "rollback" and "stage2" commands rewrite the same ESP files from the bundle.
 TEXT
-(cd "$out" && find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$out/SHA256SUMS"
+# Publish the completion manifest only after every checksum is written.
+manifest_tmp=$out/.SHA256SUMS.tmp
+if ! (cd "$out" && find . -type f ! -path ./.SHA256SUMS.tmp -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$manifest_tmp"; then
+  rm -f -- "$manifest_tmp"
+  die "could not write the checksum manifest; the incomplete set is $out"
+fi
+mv -- "$manifest_tmp" "$out/SHA256SUMS"
 trap - ERR
 say "recovery set: $out ($(du -sm "$out" | cut -f1) MB; packages: ${made[*]:-none}${skipped:+; not installed: ${skipped[*]}})"
 
