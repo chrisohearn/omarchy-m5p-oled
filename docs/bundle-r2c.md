@@ -101,6 +101,11 @@ EFI partition has about 20 MB free, and an update can rebuild an 80 MB boot imag
 the finish step a guard stops package changes until the partition has 100 MB free. The Omarchy
 channel switch is stopped as well. Making room on the partition is a separate later step.
 
+The repair tool recognizes both promoted K114s UKI slots. If the configured
+Stage 2 file is missing, `rollback stage2` can restore its backup or
+`stage2 r1` can write the bundle's verified Stage 2. Both require a digest-verified
+Stage 2 backup and a single recognized ESP.
+
 ## Which Stage 2 the tool knows
 
 `status` and `stage2` start from what `m1n1/boot-ctxr.bin` is now (`stage2` refuses to replace an `unknown` one; `rollback stage2` restores the backup

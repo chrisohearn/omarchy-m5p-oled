@@ -29,10 +29,10 @@ If the original kernel image (EFI/Linux/omarchy_linux-aurora.efi) was removed fr
 (the r3a kernel trial, docs/r3-integration.md), status, stage2, default repair and rollback stage2 keep
 working; kernel, default original, rollback all and apply stop with a message and write nothing,
 because each would need that image.
-After the promotion (the repair image and its entry removed, default_entry the path Omarchy/linux-k114s) the ESP is
-found by the r3a image (EFI/Linux/omarchy_linux-k114s.efi); status, stage2 r1, default k114s and default aurora work;
-default repair, kernel, rollback all and apply stop with a message and write nothing; restore-repair puts the
-repair image and entry back when both hook-built images fail.
+After the promotion, the tool recognizes either K114s UKI slot. The default command
+checks that its selected entry and image exist. restore-repair puts the repair image
+and entry back when the hook-built images fail. If the configured Stage 2 file is
+missing, stage2 and rollback stage2 require a verified Stage 2 backup.
 
 Options: --kernel r1|r1a              which repair kernel apply installs (default r1)
          --stage2 r1|wifi|gp1c|keep   which device tree the Stage 2 gets at apply (default r1)
@@ -66,6 +66,8 @@ import k114s_esp_tool as tool  # noqa: E402
 UKI = "EFI/Linux/omarchy_linux-aurora.efi"
 # The hook-built image of the linux-k114s package (r3a), the default after the promotion (docs/r3a-promotion.md).
 K114S_UKI = "EFI/Linux/omarchy_linux-k114s.efi"
+K114S_UKI_R3B = "EFI/Linux/omarchy_linux-k114s-r3b.efi"
+PROMOTED_UKIS = (K114S_UKI, K114S_UKI_R3B)
 # default V for the promoted layout: the Limine entry path written as default_entry, and the image it must boot.
 PATH_DEFAULTS = {"k114s": ("Omarchy/linux-k114s", K114S_UKI), "aurora": ("Omarchy/linux-aurora", UKI)}
 # Stage 2 files built on this Mac outside the bundle (docs/r3-gpu-result.md, docs/r3-integration.md), named in status.
@@ -167,12 +169,29 @@ def run(*command):
     return subprocess.run(command, check=True, capture_output=True).stdout
 
 
-def is_omarchy_esp(mount):
-    have = lambda p: os.path.isfile(os.path.join(mount, p))
-    # The original kernel image may be gone on purpose (the r3a slot swap, docs/r3-integration.md); the
-    # repair image then stands in for it, and after the promotion (docs/r3a-promotion.md) the r3a image does.
-    return (have(UKI) or have(REPAIR_UKI) or have(K114S_UKI)) and all(have(p) for p in (STAGE2, LIMINE, "m1n1/boot.bin")) \
-        and os.path.isdir(os.path.join(mount, "vendorfw"))
+def has_verified_stage2_backup(mount):
+    backup = os.path.join(mount, BACKUP_DIR)
+    try:
+        with open(os.path.join(backup, "backup.json"), encoding="utf-8") as stream:
+            expected = json.load(stream)["files"][STAGE2]
+        data = read(os.path.join(backup, STAGE2))
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return bool(data) and sha(data) == expected
+
+
+def is_omarchy_esp(mount, stage2_recovery=False):
+    def have(path):
+        return os.path.isfile(os.path.join(mount, path))
+
+    if not (any(have(path) for path in (UKI, REPAIR_UKI) + PROMOTED_UKIS)
+            and all(have(path) for path in (LIMINE, "m1n1/boot.bin"))
+            and os.path.isdir(os.path.join(mount, "vendorfw"))):
+        return False
+    # Only Stage 2 recovery accepts an absent live file, and requires the verified
+    # backup before the discovery scan can include that partition.
+    return have(STAGE2) or (stage2_recovery and not os.path.lexists(os.path.join(mount, STAGE2))
+                            and has_verified_stage2_backup(mount))
 
 
 class Esp:
@@ -232,10 +251,10 @@ class Esp:
             raise Stop("could not mount %s: %s" % (device, error.stderr.decode().strip()))
         return point
 
-    def open(self, writable=False):
+    def open(self, writable=False, stage2_recovery=False):
         if self.test_dir:
             self.mount, self.device, self.writable = self.test_dir, "test-dir", True
-            if not is_omarchy_esp(self.mount):
+            if not is_omarchy_esp(self.mount, stage2_recovery):
                 raise Stop("%s is not an Omarchy ESP" % self.mount)
             self._note_appledouble()
             return self
@@ -249,7 +268,7 @@ class Esp:
             for device in self._efi_partitions():
                 point = self._mount(device, False)
                 try:
-                    if is_omarchy_esp(point):
+                    if is_omarchy_esp(point, stage2_recovery):
                         matches.append(device)
                 finally:
                     self._unmount(device, point)
@@ -405,7 +424,7 @@ def live_state(esp, m):
     state = {"device": esp.device, "files": {}}
     for rel in (UKI, STAGE2, LIMINE, "m1n1/boot.bin") + VENDORFW:
         if not esp.has(rel):
-            if rel == UKI and (esp.has(REPAIR_UKI) or esp.has(K114S_UKI)):
+            if rel == UKI and any(esp.has(path) for path in (REPAIR_UKI,) + PROMOTED_UKIS):
                 continue   # removed on purpose to make room (docs/r3-integration.md); not an error
             raise Stop("the ESP has no " + rel)
         state["files"][rel] = sha(esp.get(rel))
@@ -432,7 +451,7 @@ def live_state(esp, m):
     state["limine_has_repair_entry"] = tool.LIMINE_MARKER in limine or any(
         p in limine for p in (REPAIR_UKI,) + OLD_REPAIR_UKIS)
     state["limine_default"] = default_text(limine)
-    state["k114s_uki_present"] = esp.has(K114S_UKI)
+    state["promoted_uki"] = next((path for path in PROMOTED_UKIS if esp.has(path)), None)
     state["backup_present"] = esp.has(BACKUP_DIR + "/backup.json")
     state["linux_revisions"] = [r for r in ("r1", "r2", "r2c") if esp.has(REPAIR_DIR + "/" + r + "/SHA256SUMS")]
     state["free_bytes"] = esp.free()
@@ -489,8 +508,10 @@ def default_text(text):
 def show(state):
     say("  ESP device:            %s" % state["device"])
     if state["kernel"] == "removed":
-        say("  installed kernel UKI:  REMOVED (the original image is not on the ESP; %s)"
-            % ("the r3a image omarchy_linux-k114s.efi is" if state.get("k114s_uki_present") else "the repair image is the only Linux image"))
+        promoted = state["promoted_uki"]
+        remaining = ("the promoted image %s is" % os.path.basename(promoted)
+                     if promoted else "the repair image is the only Linux image")
+        say("  installed kernel UKI:  REMOVED (the original image is not on the ESP; %s)" % remaining)
     else:
         say("  installed kernel UKI:  %s (%s)" % (state["kernel"], state["uki_uname"]))
     say("  Stage 2 (boot-ctxr):   %s" % state["stage2"])
@@ -752,7 +773,7 @@ def apply(esp, m, stage2_choice, variant, work, assume_yes):
 
 
 def rollback(esp, m, what):
-    esp.open(True)
+    esp.open(True, stage2_recovery=(what == "stage2"))
     try:
         if not esp.has(BACKUP_DIR + "/backup.json"):
             raise Stop("the ESP has no %s: nothing to roll back to" % BACKUP_DIR)
@@ -805,11 +826,13 @@ def switch_stage2(esp, m, choice):
         data, dtb = stage2_payload(choice, m), payload(STAGE2_FILES[choice][1], m)
     else:
         raise Stop("stage2 must be one of: " + ", ".join(list(STAGE2_FILES) + list(PROMOTED_STAGE2)))
-    esp.open(True)
+    esp.open(True, stage2_recovery=True)
     try:
         if not esp.has(BACKUP_DIR + "/backup.json"):
             raise Stop("apply the repair first (no backup on the ESP yet)")
-        if stage2_state(esp.get(STAGE2), m, esp) == "unknown":
+        if not esp.has(STAGE2) and not has_verified_stage2_backup(esp.mount):
+            raise Stop("missing Stage 2 and no verified backup; nothing written")
+        if esp.has(STAGE2) and stage2_state(esp.get(STAGE2), m, esp) == "unknown":
             raise Stop("the live Stage 2 is not one this bundle knows (its loader or U-Boot tail is not listed, KNOWN_LOADERS in this tool and %s on the ESP); not replacing it" % KNOWN_JSON)
         esp.put(STAGE2, data)
         esp.put(REPAIR_DIR + "/k114s.dtb", dtb)
