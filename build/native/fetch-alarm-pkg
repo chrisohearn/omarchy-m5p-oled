@@ -5,9 +5,38 @@
 set -euo pipefail
 B=${B:-$HOME/k114s-build}; MIRROR=${MIRROR:-https://arm-mirror.omarchy.org/aarch64}
 prefix=$1; shift; mkdir -p "$prefix" "$B/pkgcache/db" "$B/pkgcache/pkg"
+
+check_db() {
+  local entries first
+  entries=$(bsdtar -tf "$1") || return 1
+  first=$(awk '/^[^/]+\/desc$/ && !found { print; found=1 }' <<< "$entries")
+  [[ -n $first ]] || return 1
+  bsdtar -xOf "$1" "$first" | LC_ALL=C awk '
+    /^%FILENAME%$/ { if (getline > 0 && $0 ~ /^[A-Za-z0-9@+._:-]+$/) filename=1 }
+    /^%SHA256SUM%$/ { if (getline > 0 && length($0) == 64 && $0 !~ /[^0-9A-Fa-f]/) digest=1 }
+    END { exit !(filename && digest) }'
+}
+check_package() { printf '%s  %s\n' "$1" "$2" | sha256sum -c --quiet -; }
+
+fetch_cached() (
+  local destination=$1 url=$2 retries=$3 staged
+  shift 3
+  if [[ -s $destination ]] && "$@" "$destination" 2>/dev/null; then
+    return
+  fi
+
+  # Keep partial or invalid downloads away from the cache path used by other invocations.
+  staged=$(mktemp "$destination.XXXXXX")
+  trap 'rm -f -- "$staged" </dev/null' EXIT
+  curl -fsSL --retry "$retries" -o "$staged" "$url"
+  [[ -s $staged ]] || { echo "fetch-alarm-pkg: empty download from $url" >&2; exit 1; }
+  "$@" "$staged" || { echo "fetch-alarm-pkg: invalid download from $url" >&2; exit 1; }
+  mv -fT -- "$staged" "$destination"
+)
+
 for repo in extra core; do
   db=$B/pkgcache/db/$repo.db
-  [[ -s $db ]] || curl -fsSL -o "$db" "$MIRROR/$repo/$repo.db"
+  fetch_cached "$db" "$MIRROR/$repo/$repo.db" 0 check_db
 done
 for pkg in "$@"; do
   found=
@@ -18,8 +47,7 @@ for pkg in "$@"; do
     file=$(bsdtar -xOf "$db" "$desc" | awk '/^%FILENAME%$/{getline; print}')
     sum=$(bsdtar -xOf "$db" "$desc" | awk '/^%SHA256SUM%$/{getline; print}')
     out=$B/pkgcache/pkg/$file
-    [[ -s $out ]] || curl -fsSL --retry 3 -o "$out" "$MIRROR/$repo/${file//:/%3A}"
-    echo "$sum  $out" | sha256sum -c --quiet -
+    fetch_cached "$out" "$MIRROR/$repo/${file//:/%3A}" 3 check_package "$sum"
     bsdtar -xf "$out" -C "$prefix" --exclude .PKGINFO --exclude .MTREE --exclude .BUILDINFO --exclude .INSTALL
     echo "$pkg: $file ($repo) -> $prefix"
     found=1; break
