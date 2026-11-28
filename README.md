@@ -94,6 +94,7 @@ Exact revisions are in `pins/sources.json`; who wrote what is in [NOTICE.md](NOT
 | `docs/matrix.md` | subsystem by subsystem: upstream fix, K114s applicability, state, next step |
 | `docs/upstream-applicability.md` | the detailed source review behind the matrix |
 | `docs/r3-gpu-result.md` | the GPU on the K114s: what ran, what was measured, how to install and undo it |
+| `docs/r3i-kernel.md` | r3i's upstream rebase, offline evidence and remaining hardware gates |
 | `docs/r3-display-gpu.md` | the display coprocessor and GPU design (only the GPU step has run) |
 | `docs/edge-update-path.md` | how updates on the Edge channel are kept safe, and how that was tested |
 | `docs/bundle-r2.md` | the bundle's own instructions |

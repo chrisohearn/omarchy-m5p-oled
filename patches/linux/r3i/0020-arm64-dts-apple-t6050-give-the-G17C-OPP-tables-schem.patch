@@ -1,0 +1,40 @@
+From c848b41080da0ed75a5b350ef6e879416acfbc50 Mon Sep 17 00:00:00 2001
+From: Ryan Murray <address-in-upstream-commit@localhost>
+Date: Fri, 20 Nov 2026 02:54:55 +1100
+Subject: [PATCH 20/31] arm64: dts: apple: t6050: give the G17C OPP tables
+ schema-valid names
+
+opp-v2-base.yaml allows one suffix after opp-table, so
+opp-table-gpu-afr and opp-table-gpu-cs fail CHECK_DTBS. J716c already
+carried those warnings; sharing the block with J714c and K116c would
+add the same four on each board. Rename the nodes to opp-table-afr and
+opp-table-cs. Nothing looks them up by name: drm/asahi and the loader
+follow the GPU node's apple,afr-opp and apple,cs-opp phandles.
+
+Signed-off-by: Ryan Murray <address-in-upstream-commit@localhost>
+---
+ arch/arm64/boot/dts/apple/t6050-gpu-g17c.dtsi | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t6050-gpu-g17c.dtsi b/arch/arm64/boot/dts/apple/t6050-gpu-g17c.dtsi
+index a7841f666933..4fc4df0789b9 100644
+--- a/arch/arm64/boot/dts/apple/t6050-gpu-g17c.dtsi
++++ b/arch/arm64/boot/dts/apple/t6050-gpu-g17c.dtsi
+@@ -151,7 +151,7 @@ opp13 {
+ 		};
+ 	};
+ 
+-	gpu_afr_opp: opp-table-gpu-afr {
++	gpu_afr_opp: opp-table-afr {
+ 		compatible = "operating-points-v2";
+ 
+ 		opp00 {
+@@ -225,7 +225,7 @@ opp13 {
+ 		};
+ 	};
+ 
+-	gpu_cs_opp: opp-table-gpu-cs {
++	gpu_cs_opp: opp-table-cs {
+ 		compatible = "operating-points-v2";
+ 
+ 		opp00 {

@@ -35,7 +35,7 @@
 # -k114s-r3b-t1-ARCH release keep its boot names and module directory separate from r3b.
 #
 # This file does not compile anything. It packages a finished build:
-#   K114S_CAND  the candidate, r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d, r3e, r3e1, r3f, r3g, r3h, pr3104, pr3105   (default r3a, the one the runbook docs/r3-integration.md names;
+#   K114S_CAND  the candidate, r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d, r3e, r3e1, r3f, r3g, r3h, r3i, pr3104, pr3105   (default r3a, the one the runbook docs/r3-integration.md names;
 #               r3b: docs/r3b-kernel.md, K114S_CAND=r3b makepkg ...; r3b-b1: D5a, K114S_CAND=r3b-b1 makepkg ...;
 #               r3b-c1: docs/r3-hdr.md, K114S_CAND=r3b-c1 makepkg ...; r3b-c2: docs/r3b-kernel.md,
 #               K114S_CAND=r3b-c2 makepkg ...; r3b-c3: docs/r3-vrr.md, K114S_CAND=r3b-c3 makepkg ...;
@@ -81,11 +81,13 @@ case $_cand in
   r3g) pkgname=linux-k114s; _kcand=r3g; _ver=r3g; _rel=1 ;;
   # r3h replaces r3f in the Backup slot while r3g remains Main.
   r3h) pkgname=linux-k114s; _kcand=r3h; _ver=r3h; _rel=1 ;;
+  # r3i rebases the current K114s series onto Aurora Linux main and takes the Backup slot.
+  r3i) pkgname=linux-k114s; _kcand=r3i; _ver=r3i; _rel=1 ;;
   # Attended #3104 trial in the r3e1 Backup slot. Main stays r3f.
   pr3104) pkgname=linux-k114s; _kcand=pr3104; _ver=r3f.pr3104; _rel=1 ;;
   # Attended #3105 trial in the r3e1 Backup slot. Main stays r3f.
   pr3105) pkgname=linux-k114s; _kcand=pr3105; _ver=r3f.pr3105; _rel=1 ;;
-  *) echo "K114S_CAND must be r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d, r3e, r3e1, r3f, r3g, r3h, pr3104 or pr3105" >&2; exit 1 ;;
+  *) echo "K114S_CAND must be r3a, r3b, r3b-b1, r3b-c1 to r3b-c4, r3b-t1, r3c, r3d, r3e, r3e1, r3f, r3g, r3h, r3i, pr3104 or pr3105" >&2; exit 1 ;;
 esac
 pkgbase=$pkgname
 pkgver=7.3.0.$_ver
@@ -160,7 +162,7 @@ package() {
     grep -q 'fw27_panel_edr_max_nits = 500;' "$_src/drivers/gpu/drm/apple/dcp.c" ||
       { echo "$_src has no 500-nit EDR cap (patches/linux/r3e.series)" >&2; return 1; }
   fi
-  if [[ $_cand == r3f || $_cand == r3g || $_cand == r3h || $_cand == pr3104 || $_cand == pr3105 ]]; then
+  if [[ $_cand == r3f || $_cand == r3g || $_cand == r3h || $_cand == r3i || $_cand == pr3104 || $_cand == pr3105 ]]; then
     ! grep -q 'fw27_panel_edr_max_nits = 500;' "$_src/drivers/gpu/drm/apple/dcp.c" &&
       grep -q '^static unsigned int fw27_panel_edr_max_nits;' "$_src/drivers/gpu/drm/apple/dcp.c" &&
       grep -q '^bool dcp_panel_edr(struct platform_device \*pdev)' "$_src/drivers/gpu/drm/apple/dcp.c" &&
@@ -169,7 +171,7 @@ package() {
       grep -q 'after a counted dark wake' "$_src/drivers/mfd/macsmc.c" ||
       { echo "$_src lacks #2694's EDR code, or still has the 500-nit cap, or lacks #2559 (docs/r3f-kernel.md)" >&2; return 1; }
   fi
-  if [[ $_cand == r3e || $_cand == r3e1 || $_cand == r3f || $_cand == r3g || $_cand == pr3104 || $_cand == pr3105 ]]; then
+  if [[ $_cand == r3e || $_cand == r3e1 || $_cand == r3f || $_cand == r3g || $_cand == r3h || $_cand == r3i || $_cand == pr3104 || $_cand == pr3105 ]]; then
     grep -q 'dcp_bl_set_minimum' "$_src/drivers/gpu/drm/apple/dcp_backlight.h" &&
       grep -q 'dcp_panel_color_target' "$_src/drivers/gpu/drm/apple/dcp-display-metadata.c" &&
       grep -q 'panel EDR off: cap %u nits set and the SDR maximum is unknown' "$_src/drivers/gpu/drm/apple/dcp.c" &&
@@ -184,7 +186,7 @@ package() {
       grep -q 'static bool read_only = true;' "$_src/drivers/spi/spi-apple-qspi.c" &&
       grep -q 'apple,camera-light-undescribed' "$_src/drivers/media/platform/apple/isp/isp-drv.c" &&
       grep -q 'bool light_ctrl;' "$_src/drivers/media/platform/apple/isp/isp-drv.h" &&
-      ! grep -rq 'label = "nvram"' "$_src"/arch/arm64/boot/dts/apple/t6050-k114s.dts "$_src"/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi &&
+      { [[ $_cand == r3i ]] || ! grep -rq 'label = "nvram"' "$_src"/arch/arm64/boot/dts/apple/t6050-k114s.dts "$_src"/arch/arm64/boot/dts/apple/t6050-k114-k116.dtsi; } &&
       grep -q 'apple,k114-macaudio' "$_src/sound/soc/apple/macaudio.c" &&
       grep -q 'name: "27.2 (26B8125), G17S",' "$_src/drivers/gpu/drm/asahi/hw/t6050.rs" ||
       { echo "$_src lacks a required patch for $_cand" >&2; return 1; }
@@ -192,7 +194,7 @@ package() {
       { echo "$_src has the 26B8125 G17S firmware entry more than once" >&2; return 1; }
   fi
   # r3e1 adds r3e/0076: on apple,k114s the camera indicator is a solid 32x32 square under the notch (also carried by r3f and r3g)
-  if [[ $_cand == r3e1 || $_cand == r3f || $_cand == r3g || $_cand == r3h || $_cand == pr3104 || $_cand == pr3105 ]]; then
+  if [[ $_cand == r3e1 || $_cand == r3f || $_cand == r3g || $_cand == r3h || $_cand == r3i || $_cand == pr3104 || $_cand == pr3105 ]]; then
     grep -q 'IND_COMPACT_SIDE	32' "$_src/drivers/gpu/drm/apple/dcp-indicator.c" &&
       grep -q 'of_machine_is_compatible("apple,k114s")' "$_src/drivers/gpu/drm/apple/dcp-indicator.c" ||
       { echo "$_src lacks r3e/0076 (the small camera indicator)" >&2; return 1; }
@@ -271,6 +273,36 @@ package() {
       grep -q 'of_machine_is_compatible("apple,k114s")' "$_src/drivers/gpu/drm/apple/dcp-indicator.c" &&
       grep -q 'apple,k114-macaudio' "$_src/sound/soc/apple/macaudio.c" ||
       { echo "$_src differs from the pinned r3h source or violates a K114s safety/configuration invariant" >&2; return 1; }
+  fi
+  if [[ $_cand == r3i ]]; then
+    # Pin the 31-patch replay on current Aurora main. K114s remains jack-only and has no NOR client.
+    local base=85cde3ca97c8da78cf7c3a7e77c99319d8cf0770
+    local tree=c1dfbeeb56ed282ebb30717a8b27b9a0f30a4f8d
+    local repo="$startdir/../.."
+    [[ $(git -C "$_src" rev-parse 'HEAD^{tree}') == "$tree" ]] &&
+      git -C "$_src" merge-base --is-ancestor "$base" HEAD &&
+      git -C "$_src" diff --quiet HEAD -- &&
+      [[ $(<"$_out/localversion.10-pkgrel") == '-17.v272-20-k114s-r3i' ]] &&
+      grep -Fxq '# CONFIG_APPLE_SOC_SLEEP is not set' "$_out/.config" &&
+      python3 "$repo/build/validate-config.py" "$_out/.config" \
+        "$repo/patches/linux/config/k114s-required.config" "$repo/patches/linux/config/k114s-r3.config" &&
+      grep -q 'static bool read_only = true;' "$_src/drivers/spi/spi-apple-qspi.c" &&
+      ! grep -q 'apple,k114s' "$_src/drivers/spi/spi-apple-qspi.c" &&
+      ! grep -q '0xc8, 0x83, 0x17' "$_src/drivers/spi/spi-apple-qspi-policy.h" &&
+      grep -q '/delete-property/ nvram;' "$_src/arch/arm64/boot/dts/apple/t6050-k114s.dts" &&
+      grep -q '/delete-node/ flash@0;' "$_src/arch/arm64/boot/dts/apple/t6050-k114s.dts" &&
+      grep -q 'macaudio_k114_cfg' "$_src/sound/soc/apple/macaudio.c" &&
+      grep -q '\.enable_speakers = false,' "$_src/sound/soc/apple/macaudio.c" &&
+      grep -q 'apple,k114-macaudio", .data = &macaudio_k114_cfg' "$_src/sound/soc/apple/macaudio.c" &&
+      ! grep -q 't6050-sn012776-speakers.dtsi' "$_src/arch/arm64/boot/dts/apple/t6050-k114.dtsi" &&
+      grep -q 'apple,j714-macaudio' "$_src/arch/arm64/boot/dts/apple/t6050-k114c.dts" &&
+      grep -q 'apple,camera-light-undescribed' "$_src/drivers/media/platform/apple/isp/isp-drv.c" &&
+      grep -q $'IND_COMPACT_SIDE\t32' "$_src/drivers/gpu/drm/apple/dcp-indicator.c" &&
+      grep -q 'of_machine_is_compatible("apple,k114s")' "$_src/drivers/gpu/drm/apple/dcp-indicator.c" &&
+      ! grep -q 'fw27_panel_edr_max_nits = 500;' "$_src/drivers/gpu/drm/apple/dcp.c" &&
+      grep -q 'A deep sleep whose display step is not known for this firmware is refused here' "$_src/drivers/gpu/drm/apple/dcp.c" &&
+      grep -q 'return dcp_v27_sleep_known(dcp);' "$_src/drivers/gpu/drm/apple/dcp.c" ||
+      { echo "$_src differs from the pinned r3i source or violates a K114s safety/configuration invariant" >&2; return 1; }
   fi
   if [[ $_cand == pr3104 ]]; then
     local pr_head=9d3eeaa5d8ddd80c3868280ff5376425443c42c5
