@@ -36,8 +36,12 @@ build a kernel; it prints the baseline commands.
 | `src/linux.git` | aurora-silicon/linux `integration/aurora` since 2026-10-01 (head `b9ac02af54da` when fetched) and 28 pull request heads | all 88 kernel commits named in `docs/upstream-applicability.md` and `docs/matrix.md` resolve |
 | `src/base` | `a34d26c255c2` + `linux-j714s-27.2.patch` (19 patches, `git am`, authors kept) + `localversion.10-pkgrel` | tree of pin + series equals `git apply` of the patch file from release 3 (`cfbe533c8b`, sha256 `a3140b09...` as in its PKGBUILD) on the pin: tree `8ab0355a1d01` |
 | `src/r1` | `base` + `patches/linux/pr1568.patch` | applied with `patch -Np1` as the running kernel was built; `git am` refuses it (one hunk of patch 4 needs fuzz 1) |
-| `aura/base` | aurora-silicon/aura `22b71758dfd0` + `aura-j714s-27.2.patch` (7 patches, `git am`) | patch sha256 `37d12316...` as in the PKGBUILD |
+| `aura/base` | aurora-silicon/aura `22b71758dfd0` + `aura-j714s-27.2.patch` (7 patches, `git am`) | patch sha256 `37d12316...` as in the PKGBUILD. On every run, setup checks the `base` branch tree against `a708dc46429358b16e84a8852e3397f029981c11` |
 | `recipe/release3` | betizzel/omarchy-m5 `cfbe533c8b`: `installer/recipes/{linux-aurora-j714s,m1n1-aurora-j714s,uboot-aurora}`, `patches/j714s-27.2` | sha256 of the kernel recipe files equal the PKGBUILD's `sha256sums` |
+
+If setup stops at the Aura base check, move the entire `aura/base` checkout in the build root
+to an unused sibling name, such as `aura/base-backup`. Rerun `build/native/setup.sh` with
+the same build root to create a fresh checkout. The moved checkout keeps any local work.
 
 aurora-silicon/m1n1 is not needed: the Stage 2 this stack boots is Aura (packaged as
 `m1n1-aurora`, installed as `/usr/lib/asahi-boot/m1n1.bin`).
