@@ -184,6 +184,84 @@ trial() { # trial ROOT: a proven uki trial of the standard image by hand, old = 
     "$(sum "$r/boot/efi/EFI/Linux/omarchy_linux-aurora.efi")" "$(sum "$r/boot/efi/m1n1/boot-ctxr.bin")" > "$st/boots/2026010${n}T000000Z-aaaa000$n"; done
   echo "$KOLD" > "$r/etc/omarchy-k114s/keep-modules"; stub "$r" EFI/Linux/omarchy_linux-aurora.efi
 }
+# Fail the sync of the menu with the replacement default, after any intermediate draft.
+mkdir "$BASE/menu-fault"
+cat > "$BASE/menu-fault/sync" <<'FAULT'
+#!/bin/bash
+if [[ $1 == */boot/efi/limine.conf.k114s-new* ]]; then
+  if [[ -e $MENU_SYNC_SEEN || $1 == *.k114s-new.k114s-new ]]; then exit 1; fi
+  touch "$MENU_SYNC_SEEN"
+fi
+exec "$REAL_SYNC" "$@"
+FAULT
+chmod +x "$BASE/menu-fault/sync"
+menu_write_failure() {
+  local r=$1; shift
+  REAL_SYNC=$(command -v sync) MENU_SYNC_SEEN="$r/menu-sync-seen" PATH="$BASE/menu-fault:$PATH" \
+    BOOT_ID=aaaa0003 run "$r" k114s-release "$@"
+}
+r=$(mk); trial "$r"; original=$(sum "$r/boot/efi/limine.conf")
+backup=$r/var/lib/omarchy-k114s/rollback/t1/limine.conf.before-retire
+old_image=$r/boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi
+out=$(menu_write_failure "$r" retire)
+ok "retire: a menu write failure preserves the menu, backup, old image and trial" \
+  "$? $(sum "$r/boot/efi/limine.conf") $(sum "$backup") $(test -f "$old_image"; status) $(test -f "$r/var/lib/omarchy-k114s/release/trial"; status)" \
+  "1 $original $original 0 0"
+out=$(BOOT_ID=aaaa0003 run "$r" k114s-release retire)
+ok "retire: retry completes and keeps the first backup" \
+  "$? $(sum "$backup") $(test -e "$old_image"; status) $(sed -n 's/^default_entry: //p' "$r/boot/efi/limine.conf")" "0 $original 1 2"
+
+# The menu is already safe if a later failure interrupts retirement.
+r=$(mk); trial "$r"; original=$(sum "$r/boot/efi/limine.conf")
+backup=$r/var/lib/omarchy-k114s/rollback/t1/limine.conf.before-retire
+old_image=$r/boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi
+mkdir "$BASE/remove-fault"
+real_rm=$(command -v rm)
+cat > "$BASE/remove-fault/rm" <<'FAULT'
+#!/bin/bash
+[[ ${!#} != "$RETIRE_OLD_IMAGE" ]] || exit 1
+exec "$REAL_RM" "$@"
+FAULT
+chmod +x "$BASE/remove-fault/rm"
+out=$(REAL_RM="$real_rm" PATH="$BASE/remove-fault:$PATH" RETIRE_OLD_IMAGE="$old_image" BOOT_ID=aaaa0003 run "$r" k114s-release retire)
+ok "retire: when image removal fails, the new menu is already bootable" \
+  "$? $(sed -n 's/^default_entry: //p' "$r/boot/efi/limine.conf") $(test -f "$old_image"; status)" "1 2 0"
+out=$(BOOT_ID=aaaa0003 run "$r" k114s-release retire)
+ok "retire: a retry after menu publication retains the original backup and completes" \
+  "$? $(sum "$backup") $(test -e "$old_image"; status) $(test -e "$r/var/lib/omarchy-k114s/release/trial"; status)" "0 $original 1 1"
+
+r=$(mk); stub "$r" EFI/Linux/omarchy_linux-aurora.efi; run "$r" k114s-release mark-known-good >/dev/null
+original=$(sum "$r/boot/efi/limine.conf")
+out=$(menu_write_failure "$r" forget-image EFI/Linux/omarchy_linux-aurora-k114s.efi)
+ok "forget-image: a menu write failure preserves the menu and spare image" \
+  "$? $(sum "$r/boot/efi/limine.conf") $(test -f "$r/boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi"; status)" "1 $original 0"
+
+# A previous release may have removed the entry and stopped before changing the default.
+r=$(mk); trial "$r"; menu=$r/boot/efi/limine.conf
+backup=$r/var/lib/omarchy-k114s/rollback/t1/limine.conf.before-retire
+cp -p "$menu" "$backup"
+original=$(sum "$backup")
+awk '/^### K114s repair/{skip=1} /^\/\+Omarchy/{skip=0} !skip' "$backup" > "$menu"
+out=$(BOOT_ID=aaaa0003 run "$r" k114s-release retire)
+ok "retire: retry completes a verified intermediate menu from the old tool" \
+  "$? $(sum "$backup") $(sed -n 's/^default_entry: //p' "$menu") $(test -e "$r/var/lib/omarchy-k114s/release/trial"; status)" "0 $original 2 1"
+
+# A failed read is not evidence that the menu lacks an image reference.
+mkdir "$BASE/menu-read-fault"
+real_grep=$(command -v grep)
+cat > "$BASE/menu-read-fault/grep" <<'FAULT'
+#!/bin/bash
+if [[ $1 == -q && $2 == -F && ${!#} == "$FAULT_MENU" ]]; then exit 2; fi
+exec "$REAL_GREP" "$@"
+FAULT
+chmod +x "$BASE/menu-read-fault/grep"
+r=$(mk); trial "$r"; menu=$r/boot/efi/limine.conf
+sed -i 's/^default_entry: .*/default_entry: 3/' "$menu"
+original=$(sum "$menu")
+out=$(REAL_GREP="$real_grep" PATH="$BASE/menu-read-fault:$PATH" FAULT_MENU="$menu" BOOT_ID=aaaa0003 run "$r" k114s-release retire)
+ok "retire: a menu read error leaves the menu, old image and trial untouched" \
+  "$? $(sum "$menu") $(test -e "$r/boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi"; status) $(test -e "$r/var/lib/omarchy-k114s/release/trial"; status)" "1 $original 0 0"
+
 r=$(mk); trial "$r"; out=$(BOOT_ID=aaaa0003 run "$r" k114s-release auto); ok "retire: the old image leaves the ESP" "$? $(test -e "$r/boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi"; status)" "0 1"
 ok "retire: its block and marker are out of the menu; every other line is as it was" "$(grep -c -E 'K114s repair|aurora-k114s' "$r/boot/efi/limine.conf") $(grep -c -E '^/\+Omarchy$|^  //linux-aurora$|^  //Snapshots$|^timeout: 5$|^quiet: no$' "$r/boot/efi/limine.conf")" "0 5"
 ok "retire: the default is the new image's entry, counted as Limine counts (directories too)" "$(sed -n 's/^default_entry: //p' "$r/boot/efi/limine.conf")" 2
