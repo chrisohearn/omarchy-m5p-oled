@@ -27,7 +27,7 @@ def fdt(tag):
     st += struct.pack(">III", 3, len(tag), 11) + tag + b"\0" * (-len(tag) % 4) + struct.pack(">II", 2, 9)
     off = 40 + 16; total = off + len(st) + len(strs)
     return struct.pack(">10I", 0xd00dfeed, total, off, off + len(st), 40, 17, 16, 0, len(strs), len(st)) + b"\0" * 16 + st + strs
-prefix, trailer = b"AURA", gzip.compress(b"u-boot")
+prefix, trailer = b"AURA", gzip.compress(b"u-boot", mtime=0)
 d1, d2, dg = fdt(b"r1"), fdt(b"trial1"), fdt(b"gpu")
 r1, t1, gpu, comb = prefix + d1 + trailer, prefix + d2 + trailer, prefix + dg + trailer, b"image-combined"
 w(B + "/payload/boot-ctxr-k114s-r1.bin", r1); w(B + "/payload/t6050-k114s-r1.dtb", d1)
@@ -290,7 +290,7 @@ mkb13() { # the ESP of layout $1 with the b13 Stage 2; $W/known.json lists its l
 import gzip, hashlib, json, sys
 h = lambda b: hashlib.sha256(b).hexdigest(); f = sys.argv[1] + "/m1n1/boot-ctxr.bin"; d = open(f, "rb").read()
 i = d.index(b"\xd0\x0d\xfe\xed"); tree = d[i:i + int.from_bytes(d[i + 4:i + 8], "big")]
-loader, tail = b"B13LDR", gzip.compress(b"aurora9-uboot")
+loader, tail = b"B13LDR", gzip.compress(b"aurora9-uboot", mtime=0)
 open(f, "wb").write(loader + tree + tail)
 json.dump({"loaders": [{"name": "aura-b13", "bytes": len(loader), "sha256": h(loader)}],
            "trailers": [{"name": "aurora9", "sha256": h(tail)}]}, open(sys.argv[2], "w"))

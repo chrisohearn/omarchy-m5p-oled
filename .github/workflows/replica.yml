@@ -1,0 +1,37 @@
+name: Replica CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  replica:
+    name: Hardware-free replicas
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install archive tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libarchive-tools zstd
+      - name: Check Linux update and recovery replicas
+        run: |
+          bash tests/linux/k114s-syntax.sh
+          bash tests/linux/test-r3-guard.sh
+          bash tests/linux/test-r3-recovery.sh
+          bash tests/linux/test-r3-release.sh
+      - name: Check macOS repair replicas
+        run: |
+          bash tests/macos/test-no-original-uki.sh
+          bash tests/macos/test-promoted-esp.sh
+          bash tests/macos/test-repair-tool-install.sh
