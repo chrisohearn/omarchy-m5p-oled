@@ -158,7 +158,11 @@ replaces the proven boot path in one step.
 
 `k114s-release abandon` gives a trial up: the old packages come back from the rollback set's
 archives as a pacman transaction (the saved module folder is handed back to its package with
-`--overwrite`), they are held again and the trial's markers go.
+`--overwrite`). The packages stay held. If the rollback set contains `extras.tar`, the files
+in it must also be restored before the trial closes. If extraction fails, the command exits
+with an error and keeps the trial, module keep list, Stage 2 freeze and rollback set. See
+`abandon.log` in that set for the extraction error. Fix the cause and rerun `k114s-release abandon`
+before restarting. The retry uses the same package archives and restores all the extras again.
 
 **Stage 2** (m1n1, U-Boot, the device tree) is one file for every menu entry, so a new one cannot
 be an additional boot entry. It can be tried beside the proven file, though: the installed loader

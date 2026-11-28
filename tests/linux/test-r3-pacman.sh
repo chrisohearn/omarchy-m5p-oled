@@ -322,6 +322,7 @@ ok "adopting over a GPU build that is on trial ends the trial and auto does not 
 held_before=$(state)
 
 # --- release: the boot chain, never in one step -----------------------------------------------------------------------
+echo 'saved loader settings' > "$S/etc/m1n1.conf"
 t=$(tree); kernel_tree "$t" "$KNEW" k114s-full "$GOOD_CONFIG" "clamping Report Size"; c_kernel=$(mkpkg "$t" linux-aurora 7.4.4.aurora18-1 "$P")
 c_fw=$(mkpkg "$(fw_tree 'apple,j714s|apple,k114s|apple,k116s')" omarchy-aurora-firmware 20261201-1 "$P")
 t=$(tree); mkdir -p "$t/usr/lib/asahi-boot"; printf 'm1n1 channel\0apple,t6050\0apcie,t6050\0atc-phy,t6050\0' > "$t/usr/lib/asahi-boot/m1n1.bin"; c_m1n1=$(mkpkg "$t" m1n1-aurora 1.7.0.aurora25-1 "$P")
@@ -355,8 +356,19 @@ out=$(rel retire); ok "retire is refused before the new chain has booted" "$? $(
 out=$(rel stage2); ok "the Stage 2 switch is refused during a trial (one change at a time)" "$? $(echo "$out" | grep -c 'one change at a time')" "1 1"
 out=$(update); ok "ordinary updates still work during a trial" "$?" 0
 
-# abandon: everything back from the rollback set, as pacman transactions
-out=$(rel abandon); ok "abandon: the old packages come back from the archives" "$? $(Q linux-aurora) $(Q omarchy-aurora-firmware) $(Q m1n1-aurora)" "0 7.3.0.aurora17.v272-4 20261014.j714s9-1 1.6.1.aurora24.v272-3"
+# Abandon must leave a partially restored trial open when a destination blocks a valid archive.
+ok "abandon: the rollback set passes its checksum manifest" "$(cd "$boot_roll" && sha256sum -c --quiet SHA256SUMS; status)" 0
+extras_before=$(sum "$boot_roll/extras.tar"); trial_before=$(sum "$STATE/release/trial")
+rm "$S/etc/m1n1.conf"; mkdir "$S/etc/m1n1.conf"; touch "$S/etc/m1n1.conf/collision"
+extras_module=$S/usr/lib/modules/$KOLD/updates/hid-magicmouse.ko
+echo 'changed since the backup' > "$extras_module"
+out=$(rel abandon); ok "abandon: a blocked extras restore fails after the old packages come back" "$? $(Q linux-aurora) $(Q omarchy-aurora-firmware) $(Q m1n1-aurora)" "1 7.3.0.aurora17.v272-4 20261014.j714s9-1 1.6.1.aurora24.v272-3"
+ok "abandon: the caller is told where the extras restore failed" "$(grep -c 'restoring extras from .*extras.tar failed' <<< "$out") $(grep -c 'etc/m1n1.conf' "$boot_roll/abandon.log")" "1 1"
+ok "abandon: the trial, archive, freeze and keep list survive the failure" "$(sum "$STATE/release/trial") $(sum "$boot_roll/extras.tar") $(cat "$S/etc/omarchy-k114s/stage2-frozen" 2>/dev/null) $(cat "$S/etc/omarchy-k114s/keep-modules")" "$trial_before $extras_before $STAGE2_R2C $KOLD"
+ok "abandon: the archive restored the module before hitting the collision" "$(cat "$extras_module") $(test -f "$S/etc/m1n1.conf/collision"; status)" "patched module 0"
+
+rm "$S/etc/m1n1.conf/collision"; rmdir "$S/etc/m1n1.conf"
+out=$(rel abandon); ok "abandon retry: the restored packages and all extras are in place" "$? $(state) $(cat "$extras_module") $(cat "$S/etc/m1n1.conf" 2>/dev/null)" "0 $held_before patched module saved loader settings"
 ok "abandon: the kernel file is the repair kernel again" "$(grep -c -a K114S-R1 "$S/usr/lib/modules/$KOLD/vmlinuz")" 1
 ok "abandon: they are held again, the markers are gone" "$(state) $(ls "$S/etc/omarchy-k114s" | grep -c -E 'stage2-frozen') $(cat "$S/etc/omarchy-k114s/keep-modules" | wc -w | tr -d ' ')" "$held_before 0 0"
 ok "abandon: proven image and Stage 2 untouched throughout" "$(sum "$ESPD/EFI/Linux/omarchy_linux-aurora-k114s.efi") $(sum "$ESPD/m1n1/boot-ctxr.bin")" "$REPAIR $STAGE2_R2C"

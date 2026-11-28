@@ -756,8 +756,10 @@ cmd_abandon() {
       die "putting the old packages back did not go through (see $dir/abandon.log); the trial stays as it was"
     fi
     permit_clear
-    [[ ! -f $dir/extras.tar ]] || bsdtar -xpf "$dir/extras.tar" -C "${ROOT:-/}" 2>/dev/null || true
-    # The old packages are back and Stage 2 never left the proven file: the trial's markers go.
+    if [[ -f $dir/extras.tar ]] && ! bsdtar -xpf "$dir/extras.tar" -C "${ROOT:-/}" >> "$dir/abandon.log" 2>&1; then
+      die "restoring extras from $dir/extras.tar failed (see $dir/abandon.log); the old packages are back and the trial stays open. Fix the error and rerun k114s-release abandon before restarting"
+    fi
+    # The old packages and extras are back: the trial's markers can go.
     old=$(kv "$TRIAL" old_release)
     if [[ -f $KEEP_MODULES && -n $old ]]; then grep -Fxv -- "$old" "$KEEP_MODULES" > "$KEEP_MODULES.new" || true; mv -f "$KEEP_MODULES.new" "$KEEP_MODULES"; fi
     if [[ -f $KNOWN && $(sum "$ESP/$STAGE2_REL") == "$(known_configured)" ]]; then rm -f "$FROZEN"
