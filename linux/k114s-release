@@ -512,8 +512,29 @@ running_trial() { # is the trial chain the one running, unchanged?
   [[ $(boot_id) != "$(kv "$TRIAL" boot_id)" && $(booted_uki) == "$(kv "$TRIAL" uki)" && $(sum "$ESP/$(kv "$TRIAL" uki)") == "$(kv "$TRIAL" uki_sha256)" &&
      $(booted_stage2_sum) == "$(kv "$TRIAL" stage2_sha256)" ]]
 }
+# Publish the removed entry and replacement default as one menu update.
+# Return 1 for an unsupported menu shape and 2 for a write failure.
+remove_menu_entry() {
+  local conf=$1 remove=$2 keep=$3 draft=$1.k114s-new before after index
+  before=$(grep -c -E '^/[^/]' "$conf" || true)
+  if ! limine_remove_entry_block "$conf" "$remove" > "$draft"; then
+    rm -f -- "$draft"
+    return 2
+  fi
+  after=$(grep -c -E '^/[^/]' "$draft" || true)
+  index=$(limine_entry_of "$draft" "$keep")
+  if ((after != before - 1)) || [[ -z $index ]] || grep -q -F "$remove" "$draft"; then
+    rm -f -- "$draft"
+    return 1
+  fi
+  if ! limine_set_default "$draft" "$index" || ! mv -f -- "$draft" "$conf"; then
+    rm -f -- "$draft"
+    return 2
+  fi
+}
+
 retire() {
-  local kind old_uki new_uki dir conf before after index old_release
+  local explicit=$1 kind old_uki new_uki dir conf backup index old_release result=0
   kind=$(kv "$TRIAL" kind); dir=$(kv "$TRIAL" rollback); conf=$(limine_conf)
   boot_lock
   running_trial || { note "retire waits: the boot chain on trial is not the one running"; return 0; }
@@ -527,19 +548,25 @@ retire() {
       [[ -f $file && $(sum "$file") == "$(kv "$KNOWN" uki_sha256)" ]] && kept=1
     done
     ((kept)) || { note "retire waits: the rollback set $dir no longer holds the old boot image; it stays on the ESP"; return 0; }
-    cp -p "$conf" "$dir/limine.conf.before-retire"
-    if [[ $old_uki != "$new_uki" ]]; then
-      before=$(grep -c -E '^/[^/]' "$conf" || true)
-      limine_remove_entry_block "$conf" "$old_uki" > "$conf.k114s-new"
-      after=$(grep -c -E '^/[^/]' "$conf.k114s-new" || true)
-      if ((after != before - 1)) || [[ -z $(limine_entry_of "$conf.k114s-new" "$new_uki") ]] || grep -q -F "$old_uki" "$conf.k114s-new"; then
-        rm -f "$conf.k114s-new"
-        note "retire waits: the old image's menu entry is not a block this tool can take out safely; boot menu left as it is"; return 0
+    backup=$dir/limine.conf.before-retire
+    if [[ ! -f $backup ]]; then
+      if ! cp -p "$conf" "$backup.k114s-new" || ! sync "$backup.k114s-new" || ! mv -f -- "$backup.k114s-new" "$backup"; then
+        rm -f -- "$backup.k114s-new"
+        note "PROBLEM: could not save the boot menu before retirement; boot menu left as it is"
+        return "$explicit"
       fi
-      sync "$conf.k114s-new"; mv -f "$conf.k114s-new" "$conf"
     fi
     index=$(limine_entry_of "$conf" "$new_uki")
-    limine_set_default "$conf" "$index" || { note "PROBLEM: could not set the default boot entry; check $conf (copy: $dir/limine.conf.before-retire)"; return 0; }
+    if [[ $old_uki == "$new_uki" ]]; then
+      limine_set_default "$conf" "$index" || result=2
+    elif [[ -z $index || $(limine_default_index "$conf") != "$index" ]] ||
+         grep -q -F "$old_uki" "$conf" || ! grep -q -F "$old_uki" "$backup"; then
+      remove_menu_entry "$conf" "$old_uki" "$new_uki" || result=$?
+    fi
+    case $result in
+      1) note "retire waits: the old image's menu entry is not a block this tool can take out safely; boot menu left as it is"; return 0 ;;
+      2) note "PROBLEM: could not write the boot menu; boot menu left as it is (copy: $backup)"; return "$explicit" ;;
+    esac
     [[ $old_uki == "$new_uki" ]] || rm -f "$ESP/$old_uki"
     # Stage 2 stays frozen only while a loader or U-Boot package was installed and not yet switched to.
     [[ $(kv "$TRIAL" packages) == *m1n1-aurora* || $(kv "$TRIAL" packages) == *uboot-aurora* ]] || rm -f "$FROZEN"
@@ -585,7 +612,7 @@ advance() { # move a trial forward: prove it from the boot records; retire on a 
   [[ $(kv "$TRIAL" kind) != stage2 || $(booted_stage2) == "$STAGE2_TRY_REL" ]] || { stage2_trial_note; return 0; }
   need=$(setting RETIRE_AFTER_BOOTS 2)
   if ((explicit)) || { enabled AUTO_RETIRE yes && ((count >= need)); }; then
-    retire
+    retire "$explicit"
   else
     note "the boot chain on trial is proven ($count recorded boot(s); retired after $need, or now with: sudo k114s-release retire)"
   fi
@@ -771,7 +798,7 @@ cmd_abandon() {
 
 # --- make room: take a boot image that is neither proven, nor running, nor on trial off the ESP -------
 cmd_forget_image() {
-  local rel=${1:-} conf id dir before after index proven
+  local rel=${1:-} conf id dir index proven result=0
   [[ $rel =~ ^EFI/Linux/[A-Za-z0-9._+-]+\.efi$ ]] || die "usage: k114s-release forget-image EFI/Linux/NAME.efi"
   esp_is_mounted || die "nothing is mounted at $ESP"
   [[ -f $ESP/$rel ]] || die "$rel is not on the ESP"
@@ -789,17 +816,16 @@ cmd_forget_image() {
   [[ $(sum "$dir/esp/$rel") == "$(sum "$ESP/$rel")" ]] || die "could not keep a copy of $rel; nothing changed"
   (cd "$dir" && sha256sum "esp/$rel" esp/limine.conf > SHA256SUMS)
   if grep -q -F "$rel" "$conf"; then
-    before=$(grep -c -E '^/[^/]' "$conf" || true)
-    limine_remove_entry_block "$conf" "$rel" > "$conf.k114s-new"
-    after=$(grep -c -E '^/[^/]' "$conf.k114s-new" || true)
-    if ((after != before - 1)) || grep -q -F "$rel" "$conf.k114s-new" || [[ -z $(limine_entry_of "$conf.k114s-new" "$proven") ]]; then
-      rm -f "$conf.k114s-new"
-      die "the menu entry of $rel is not a block this tool can take out safely; nothing changed (its copy is in $dir)"
-    fi
-    sync "$conf.k114s-new"; mv -f "$conf.k114s-new" "$conf"
+    remove_menu_entry "$conf" "$rel" "$proven" || result=$?
+    case $result in
+      1) die "the menu entry of $rel is not a block this tool can take out safely; nothing changed (its copy is in $dir)" ;;
+      2) die "could not write the boot menu; $rel was not removed (menu copy: $dir/esp/limine.conf)" ;;
+    esac
+  else
+    index=$(limine_entry_of "$conf" "$proven")
+    [[ -z $index ]] || limine_set_default "$conf" "$index" || die "could not set the default boot entry; $rel was not removed (menu copy: $dir/esp/limine.conf)"
   fi
   index=$(limine_entry_of "$conf" "$proven")
-  [[ -z $index ]] || limine_set_default "$conf" "$index" || die "could not set the default boot entry; $rel was NOT removed (menu copy: $dir/esp/limine.conf)"
   rm -f "$ESP/$rel"
   log "$rel was taken off the ESP ($(( $(size "$dir/esp/$rel") / 1000000 )) MB); copy and the menu as it was: $dir. Default entry: $(limine_title_of "$conf" "${index:-0}")"
 }
