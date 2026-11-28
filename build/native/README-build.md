@@ -157,6 +157,10 @@ k114s-qemu-smoke console out      # interactive shell on the serial console (Ctr
 K114S_QEMU_TEST_INIT=REPO/build/qemu-test-init k114s-qemu-smoke modules out   # modprobe every built module (4 min)
 ```
 
+Shell and modules modes pass only when QEMU exits successfully within the timeout, `tee` records
+the serial log successfully, and the log contains the expected markers. A modules pass means the
+test run completed. Read the `K114S-TEST modprobe` lines for individual module failures.
+
 Machine `virt`, `-cpu max`, 4 CPUs, TCG (pure emulation; KVM is deliberately not used on this
 machine). Baseline results: shell PASS; modules `ok=1721 failed=7` (`tcrypt ipmi_si cppc_cpufreq
 sun50i-cpufreq-nvmem stratix10-soc apple-pmp-j613-hwmon xen-pciback`), no Oops. A variant should
