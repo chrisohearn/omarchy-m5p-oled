@@ -311,10 +311,14 @@ class Esp:
                        if not os.path.islink(temporary) and os.path.isfile(temporary) else 0)
         return max(0, clusters(size, cluster) - clusters(staged_size, cluster))
 
-    def matches_staged(self, rel, data):
+    def read_staged(self, rel):
         temporary = self.path(rel) + ".k114s-new"
-        return (not os.path.islink(temporary) and os.path.isfile(temporary)
-                and read(temporary) == data)
+        if not os.path.islink(temporary) and os.path.isfile(temporary):
+            return read(temporary)
+        return None
+
+    def matches_staged(self, rel, data):
+        return self.read_staged(rel) == data
 
     def put(self, rel, data, *, reuse_staged=False):
         """Write beside the target, read back, then rename over it."""
@@ -909,12 +913,27 @@ def switch_kernel(esp, m, variant):
     show(state)
 
 
-def check_repair_default(esp, entry):
-    if entry is None or entry[0] != 1 or "/" + entry[1] not in REPAIR_TITLES:
+def first_repair_target(text):
+    lines = [line.lstrip() for line in text.splitlines()]
+    entries = [index for index, line in enumerate(lines) if line.startswith("/")]
+    if default_value(text) != "1" or not entries or lines[entries[0]] not in REPAIR_TITLES:
         raise Stop("the default does not resolve to the first repair entry; nothing written")
-    path, separator, digest = entry[2].partition("#")
-    if path != REPAIR_UKI:
+    end = entries[1] if len(entries) > 1 else len(lines)
+    if end < len(lines) and lines[end].startswith("//"):
+        raise Stop("the first repair entry has children and cannot boot; nothing written")
+    body = lines[entries[0] + 1:end]
+    paths = [line[5:].strip() for line in body if line.lower().startswith("path:")]
+    protocols = [line[9:].strip().lower() for line in body if line.lower().startswith("protocol:")]
+    if len(paths) != 1 or not paths[0].startswith("boot():/") or protocols != ["efi"]:
+        raise Stop("the first repair entry needs one EFI path on the boot partition; nothing written")
+    target = paths[0][len("boot():/"):]
+    if target.split("#", 1)[0] != REPAIR_UKI:
         raise Stop("the first repair entry does not boot %s; nothing written" % REPAIR_UKI)
+    return target
+
+
+def check_repair_default(esp, text):
+    _, separator, digest = first_repair_target(text).partition("#")
     if not esp.has(REPAIR_UKI):
         raise Stop("%s is not on the ESP, so the repair entry cannot start. Use  restore-repair  instead; nothing written"
                    % REPAIR_UKI)
@@ -972,7 +991,7 @@ def switch_default(esp, m, choice):
                 raise Stop("default must be repair, original, k114s or aurora")
             new = tool.limine_default(text, index)
             if index == 1:
-                check_repair_default(esp, default_entry(new))
+                check_repair_default(esp, new)
             esp.put(LIMINE, new.encode("utf-8"))
         state = live_state(esp, m)
     finally:
@@ -1067,8 +1086,7 @@ def with_repair_block(text, block):
         raise Stop("limine.conf has %d default_entry lines before its first entry, not one; nothing written" % len(at))
     lines[at[0]] = "default_entry: 1"
     new = "\n".join(lines[:first] + block.split("\n")[:-1] + lines[first:])
-    hit = default_entry(new)
-    if hit is None or hit[0] != 1 or hit[2] != REPAIR_UKI or new.count(REPAIR_UKI) != 1:
+    if first_repair_target(new) != REPAIR_UKI or new.count(REPAIR_UKI) != 1:
         raise Stop("internal: the restored menu does not start the repair entry; nothing written")
     return new
 
@@ -1109,7 +1127,12 @@ def restore_repair(esp, m, image_path, check_only):
             say("restore-repair check (nothing written):")
             say("  repair image:   %s matches the ESP's record (%d bytes, sha256 %s...)" % (image_path, size, digest[:16]))
             say("  saved block:    %s, one repair entry (%s)" % (" and ".join(sources), block.split("\n")[1].lstrip("/")))
-        if present and have_image:
+        have_aurora = esp.has(UKI)
+        menu_base = text if have_aurora else drop_sub_entry(text, "linux-aurora")
+        new = with_repair_block(menu_base, block_to_insert).encode("utf-8")
+        staged_menu = esp.read_staged(LIMINE) if present and have_image else None
+        resume_menu = bool(staged_menu) and new.startswith(staged_menu)
+        if present and have_image and not resume_menu:
             if not check_only:
                 raise Stop("limine.conf already has a repair entry: use  default repair  instead; nothing written")
             say("  limine.conf:    the repair entry is in it now and is exactly the saved block (verification only)")
@@ -1117,13 +1140,10 @@ def restore_repair(esp, m, image_path, check_only):
             return
 
         cluster, free = esp.cluster(), esp.free()
-        have_aurora = esp.has(UKI)
         replace_repair = repair_present and not have_image
         reclaim = clusters(os.path.getsize(esp.path(REPAIR_UKI)), cluster) if replace_repair else 0
         # Keep the reserve when writing the UKI. A retry with the verified UKI only writes the menu.
         image_need = 0 if have_image else esp.write_space(REPAIR_UKI, size, cluster) + RESERVE
-        menu_base = text if have_aurora else drop_sub_entry(text, "linux-aurora")
-        new = with_repair_block(menu_base, block_to_insert).encode("utf-8")
         need = image_need + esp.write_space(LIMINE, len(new), cluster)
         remove_aurora = not have_image and have_aurora and free + reclaim < need
         if remove_aurora:
@@ -1141,7 +1161,9 @@ def restore_repair(esp, m, image_path, check_only):
             raise Stop("%s: %d bytes free, %d bytes reclaimable, %d bytes needed; nothing written"
                        % (reason, free, reclaim, need))
         if check_only:
-            if present:
+            if resume_menu:
+                say("  limine.conf:    the interrupted staged menu write can finish")
+            elif present:
                 say("  limine.conf:    the exact saved block is already present; restore-repair would restore its missing image")
             else:
                 say("  limine.conf:    no repair entry; restore-repair would put the saved block first, with default_entry: 1")

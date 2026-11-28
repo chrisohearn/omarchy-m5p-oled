@@ -296,6 +296,46 @@ sed -i "s/#$bad_digest\$/#$digest/" "$E/limine.conf"
 out=$($R default repair --esp-dir "$E" 2>&1)
 has "default repair accepts a matching Limine hash" "$out" "Default boot entry changed"
 ok "the verified repair image becomes the default" "$(def)" 1
+
+mkesp before
+sed -i '/path: .*aurora-k114s\.efi$/s|boot():/||' "$E/limine.conf"
+before=$(sum "$E")
+out=$($R default repair --esp-dir "$E" 2>&1)
+ok "repair default refuses a bare filename, preserving the menu" "$? $(sum "$E")" "1 $before"
+
+mkesp before
+sed -i '/^\/+Omarchy/i\### separator\n  //Child' "$E/limine.conf"
+before=$(sum "$E")
+out=$($R default repair --esp-dir "$E" 2>&1)
+ok "repair default cannot select an entry with children" "$? $(sum "$E")" "1 $before"
+rm -- "$repair" </dev/null; before=$(sum "$E")
+for mode in "" "--check"; do
+  out=$($R restore-repair $mode --esp-dir "$E" 2>&1)
+  ok "restore refuses a saved block that has a child entry ($mode)" "$? $(sum "$E")" "1 $before"
+done
+
+mkesp before; rm -- "$repair" </dev/null
+out=$(INTERRUPT_MENU=1 RF "$((REPAIR_RESERVE + 8192))" restore-repair --esp-dir "$E" 2>&1)
+ok "interrupting stale restore preserves a verified image and staged menu" \
+  "$? $(cmp -s "$rimg" "$repair"; echo $?) $(test -s "$E/limine.conf.k114s-new"; echo $?) $(def)" "86 0 0 Omarchy/linux-k114s"
+before=$(sum "$E")
+out=$(RF 0 restore-repair --check --esp-dir "$E" 2>&1)
+ok "stale recovery check evaluates the staged plan without writing" \
+  "$? $(grep -c 'verification only' <<< "$out") $(sum "$E")" "0 0 $before"
+out=$(RF 0 restore-repair --esp-dir "$E" 2>&1)
+ok "stale restore finishes the staged menu with no free clusters" \
+  "$? $(def) $(test -e "$E/limine.conf.k114s-new"; echo $?)" "0 1 1"
+
+mkesp before; rm -- "$repair" </dev/null
+python3 -c 'import sys; open(sys.argv[1], "a").write("#" + "x" * 5000 + "\n")' "$E/limine.conf"
+out=$(INTERRUPT_MENU=1 RF "$((REPAIR_RESERVE + 12288))" restore-repair --esp-dir "$E" 2>&1)
+ok "interrupted stale restore staged a menu longer than one cluster" \
+  "$? $(test "$(wc -c < "$E/limine.conf.k114s-new")" -gt 4096; echo $?)" "86 0"
+truncate -s 4096 "$E/limine.conf.k114s-new"
+out=$(RF 4096 restore-repair --esp-dir "$E" 2>&1)
+ok "stale restore can finish a partial staged menu" "$? $(def) $(test -e "$E/limine.conf.k114s-new"; echo $?)" "0 1 1"
+
+
 # the promoted ESP: the block cut the way P5a cuts it (k114s-lib.sh), then the hook's linux-aurora entry in front (P5b)
 bash -c '. "$1/linux/k114s-lib.sh"; limine_remove_entry_block "$2" EFI/Linux/omarchy_linux-aurora-k114s.efi' _ "$H/../.." "$W/conf.p2" > "$W/conf.p5"
 # The old image occupies two clusters, enough for the repair image and the atomic menu copy.
