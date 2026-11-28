@@ -191,6 +191,8 @@ emulator. It proves nothing about K114s hardware: label it `emulator/replica`.
 machine uses, checks the sha256 from the repository database and extracts them under PREFIX
 (use `$B/tools/alarm` for build tools: it is already on `PATH` and `LD_LIBRARY_PATH`). It does
 not resolve dependencies: run `ldd` on what you fetched and add what is missing.
+After a transfer failure, rerun the same command. It fetches incomplete cache entries again
+and reuses complete entries.
 
 The whole area can be recreated from nothing with `build/native/setup.sh` of the integration
 repository (branch `r3/buildenv`); `docs/r3-buildenv.md` there has the evidence behind the
