@@ -69,7 +69,13 @@ qemu=(qemu-system-aarch64 -machine virt,gic-version=3 -accel "${K114S_QEMU_ACCEL
       -kernel "$img" -initrd "$work/initramfs.cpio.zst" -append "$append")
 if [[ $mode == console ]]; then exec "${qemu[@]}"; fi
 log=${K114S_QEMU_LOG:-$work/serial.log}
-set +e; timeout "$tmo" "${qemu[@]}" < /dev/null 2>&1 | tee "$log" | grep -a -E 'K114S-|Linux version|Kernel panic|Unable to|BUG:|Oops' ; set -e
-if [[ $mode == shell ]]; then grep -a -q 'K114S-QEMU-SHELL end' "$log" && grep -a -q "release=$rel " "$log" && { echo "k114s-qemu-smoke: PASS (shell, $rel)"; exit 0; }
+set +e
+timeout "$tmo" "${qemu[@]}" < /dev/null 2>&1 | tee "$log" |
+  grep --line-buffered -a -E 'K114S-|Linux version|Kernel panic|Unable to|BUG:|Oops'
+serial_status=("${PIPESTATUS[@]}")
+set -e
+if (( serial_status[0] != 0 || serial_status[1] != 0 )); then
+  printf 'k114s-qemu-smoke: QEMU/timeout exit=%s, tee exit=%s\n' "${serial_status[0]}" "${serial_status[1]}" >&2
+elif [[ $mode == shell ]]; then grep -a -q 'K114S-QEMU-SHELL end' "$log" && grep -a -q "release=$rel " "$log" && { echo "k114s-qemu-smoke: PASS (shell, $rel)"; exit 0; }
 else grep -a -q 'K114S-TEST end' "$log" && { echo "k114s-qemu-smoke: PASS (modules run completed; read the K114S-TEST lines above)"; exit 0; }; fi
 echo "k114s-qemu-smoke: FAIL (serial log: $log)" >&2; [[ -n ${K114S_QEMU_LOG:-} ]] || cp "$log" "$B/logs/qemu-smoke-failed.log"; exit 1
