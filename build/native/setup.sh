@@ -24,6 +24,7 @@ SERIES_SHA256=a3140b092b5d68543bc89d261682f577ef52341499bbe58416a80ae999329230  
 BASE_TREE=8ab0355a1d01edb824747f38e7c6de44239ad55f           # git tree of pin + series
 AURA_PIN=22b71758dfd048f6a874073db55fbe6bd1d17f44
 AURA_SERIES_SHA256=37d1231652b96fce4d00fc84452ac74743b69d132bbf80eee9b3699e1fc07c78
+AURA_BASE_TREE=a708dc46429358b16e84a8852e3397f029981c11      # git tree of Aura pin + series
 say() { echo "setup: $*"; }
 mkdir -p "$B"/{bin,tools,pkgcache,logs,recipe,src,build,out,aura}
 
@@ -116,13 +117,20 @@ fi
 say "src/r1: $(git -C "$B/src/r1" log --oneline -1 r1)"
 
 # 9. Aura (Stage 2 source) = pin + betizzel's 7 patches
+aura_base_recovery() {
+  printf 'setup: could not prepare the pinned Aura base tree at %s/aura/base.\n' "$B" >&2
+  echo 'setup: if that path exists, move it to an unused backup path, then rerun setup.' >&2
+  exit 1
+}
 if [[ ! -d $B/aura/base/.git ]]; then
-  git clone -q https://github.com/aurora-silicon/aura.git "$B/aura/base"; cd "$B/aura/base"
+  git clone -q https://github.com/aurora-silicon/aura.git "$B/aura/base" || aura_base_recovery
+  cd "$B/aura/base"
   git config user.name k114s-build; git config user.email k114s-build@localhost
-  git checkout -q -b base "$AURA_PIN"
-  git am -q "$rec/m1n1-aurora-j714s/aura-j714s-27.2.patch"
+  git checkout -q -b base "$AURA_PIN" || aura_base_recovery
+  git am -q "$rec/m1n1-aurora-j714s/aura-j714s-27.2.patch" || aura_base_recovery
 fi
-say "aura/base: $(git -C "$B/aura/base" log --oneline -1 base)"
+[[ $(git -C "$B/aura/base" rev-parse --verify 'refs/heads/base^{tree}' 2>/dev/null) == "$AURA_BASE_TREE" ]] || aura_base_recovery
+say "aura/base: $(git -C "$B/aura/base" log --oneline -1 refs/heads/base)"
 cat <<MSG
 setup: done. Not done by this script (commands as run on 2026-11-14, see docs/r3-buildenv.md):
   QEMU:      fetch-alarm-pkg \$B/tools/qemu qemu-system-aarch64 qemu-common capstone rdma-core libslirp vde2 libxdp ndctl libaio
