@@ -110,6 +110,75 @@ out=$($R default k114s --esp-dir "$E" 2>&1); has "after P5: default k114s works"
 echo x >> "$E/EFI/Linux/omarchy_linux-k114s.efi"; b2=$(sum "$E")
 out=$($R default k114s --esp-dir "$E" 2>&1); has "after P5: a default whose image does not match its hash is refused" "$out" "does not match its hash"; ok "that refusal wrote nothing" "$(sum "$E")" "$b2"
 
+# --- recovery recognizes the later promoted Main slot and a verified missing Stage 2 ---
+mkesp window
+rm -- "$E/EFI/Linux/omarchy_linux-k114s.efi" </dev/null
+sed 's/^default_entry: .*/default_entry: Omarchy\/linux-k114s-r3b/' "$E/limine.conf" > "$W/r3b-limine"
+mv -- "$W/r3b-limine" "$E/limine.conf"
+before=$(sum "$E")
+out=$($R restore-repair --check --esp-dir "$E" 2>&1)
+has "r3b-only ESP: restore check can reach the verified repair plan" "$out" "restore-repair check passed"
+ok "r3b-only ESP: the read-only check wrote nothing" "$(sum "$E")" "$before"
+out=$($R status --esp-dir "$E" 2>&1)
+has "r3b-only ESP: status reports the surviving UKI" "$out" "omarchy_linux-k114s-r3b.efi"
+
+rm -- "$E/m1n1/boot-ctxr.bin" </dev/null
+out=$($R rollback stage2 --esp-dir "$E" 2>&1)
+ok "missing Stage 2: rollback recovers the digest-verified backup" \
+  "$? $(cmp -s "$E/m1n1/boot-ctxr.bin" "$E/k114s-repair/backup-before-r1/m1n1/boot-ctxr.bin"; echo $?)" "0 0"
+rm -f -- "$E/m1n1/boot-ctxr.bin"
+out=$($R stage2 r1 --esp-dir "$E" 2>&1)
+ok "missing Stage 2: a verified backup admits a bundled Stage 2" \
+  "$? $(cmp -s "$E/m1n1/boot-ctxr.bin" "$B/payload/boot-ctxr-k114s-r1.bin"; echo $?)" "0 0"
+
+rm -f -- "$E/m1n1/boot-ctxr.bin"
+printf 'damaged backup' > "$E/k114s-repair/backup-before-r1/m1n1/boot-ctxr.bin"
+before=$(sum "$E")
+out=$($R rollback stage2 --esp-dir "$E" 2>&1)
+ok "missing Stage 2: recovery refuses a damaged backup without writes" "$? $(sum "$E")" "1 $before"
+
+# Exercise automatic candidate selection entirely against temporary folders.
+mkesp window
+rm -- "$E/m1n1/boot-ctxr.bin" </dev/null
+cp -a -- "$E" "$W/alternate-esp"
+out=$(python3 -I - "$B/tools" "$E" "$W/alternate-esp" <<'PYFIXTURE'
+import os
+import sys
+sys.path.insert(0, sys.argv[1])
+import k114s_repair as repair
+
+devices = {"one": sys.argv[2], "two": sys.argv[3]}
+writable = []
+repair.os.geteuid = lambda: 0
+def run(*args):
+    assert args == ("/usr/sbin/sysctl", "-n", "hw.targettype")
+    return b"K114s"
+repair.run = run
+repair.Esp._efi_partitions = lambda self: list(devices)
+def mount(self, device, write):
+    if write:
+        writable.append(device)
+    return devices[device]
+repair.Esp._mount = mount
+repair.Esp._unmount = lambda self, device, point: None
+
+for recovery, count in ((False, 0), (True, 2)):
+    try:
+        repair.Esp().open(True, stage2_recovery=recovery)
+    except repair.Stop as stop:
+        assert "found %d" % count in str(stop), stop
+    else:
+        raise AssertionError("selected an unavailable or ambiguous ESP")
+assert not writable
+
+os.rename(os.path.join(devices["two"], "vendorfw"), os.path.join(devices["two"], "other"))
+esp = repair.Esp().open(True, stage2_recovery=True)
+assert esp.device == "one" and writable == ["one"]
+print("strict, ambiguous and unrelated selections preserved")
+PYFIXTURE
+)
+ok "candidate scan admits only one supported recovery partition" "$? $out" "0 strict, ambiguous and unrelated selections preserved"
+
 # --- after step P6a: the hook's linux-aurora entry is in front of linux-k114s ----------------------------------------
 mkesp aurora
 out=$($R status --esp-dir "$E" 2>&1); has "after P6a: the path default still names linux-k114s, now entry 3" "$out" "Omarchy/linux-k114s -> linux-k114s (entry 3)"
