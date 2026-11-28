@@ -170,13 +170,12 @@ the Linux disk (`/var/lib/k114s-recovery/uki/`) is on the encrypted root, which 
   record (`k114s-repair/r2c/repair-uki.txt`, written by `apply`) and that the saved block is the live entry.
 - `sudo ./k114s-repair restore-repair` puts them back. Both modes count free space and the clusters freed by planned
   deletions before any write. The budget covers the image, the full new menu beside the old one, and an 8 MiB reserve
-  for an image write. When recovery requires a new image, the tool removes `omarchy_linux-aurora.efi` and its entry
-  only if recovery fits with that deletion and needs the space. A retry reuses the allocation of a partial staged
-  file. If the staged bytes match the plan, it completes the rename. A verified repair image already on the ESP
-  needs space only for the menu.
-  The tool verifies the image, puts the saved block first, and sets `default_entry: 1`.
-  Apply refuses while a repair entry is still there or if the image or block fails verification.
-  Rerun the command to finish recovery after an interrupted write.
+  for an image write. The tool removes `omarchy_linux-aurora.efi` and its entry only when it needs that space
+  and recovery fits after the removal. A retry reuses the allocation of a partial staged file and can finish the
+  rename when its bytes match the plan. A verified repair image already on the ESP needs space only for the menu.
+  The tool verifies the image, puts the saved block first, and sets `default_entry: 1`. If the exact saved entry
+  is already in the menu and its image is missing, the command restores the verified image and reuses the entry.
+  An intact entry and image can be selected with `default repair`.
 
 This keeps the owner's decision (the image is off the ESP) and a way back that does not depend on any hook-built image.
 The bundle may also still hold the original image from the 2026-11-14 `apply` (`work/*-apply-*/live/EFI/Linux/`, the
@@ -925,8 +924,9 @@ Each step's undo is next to it. When Linux does not come up, hold the power butt
   (`Stage 2 (boot-ctxr): r1`) and boot Linux, which is now the state before P1. In Linux run the undo of P1, which also
   puts the Linux pin back. The tool that works here is the one on the Mac today, or the changed one.
 - **A default boot that hangs (P3 to P4b)**, or a Limine menu that stays up. The default boots again and again, so
-  `sudo ./k114s-repair default repair`. It writes `default_entry: 1` over the path (tested:
-  `tests/macos/test-promoted-esp.sh`; it replaces whatever value is there), and the repair entry is still entry 1. Boot
+  `sudo ./k114s-repair default repair`. It checks that entry 1 points to the repair image, that the image exists,
+  and that it matches the recorded SHA-256 and Limine hash when present. It then writes `default_entry: 1`.
+  If the image is missing, run `restore-repair --check` followed by `restore-repair` to put it back. Boot
   Linux: the repair kernel on the GPU file, which P1c proved. If that also fails, `sudo ./k114s-repair stage2 r1` as well.
   In Linux, run the undo of P2 (it finds the default already 1), and the undo of P1 if Stage 2 was rolled back.
 - **A boot that hangs after P5** (P5c on: no repair entry, two Linux images), with the changed tool (P4b). In this order:
@@ -937,8 +937,9 @@ Each step's undo is next to it. When Linux does not come up, hold the power butt
   3. **If both images are the suspect** (a hang after an update that rebuilt them, or 2 also hangs):
      Run `sudo ./k114s-repair restore-repair --check`. A space refusal exits with status 1 and reports the free,
      reclaimable, and required byte counts. On a passing check, run `sudo ./k114s-repair restore-repair`. It writes the
-     static repair image from `promotion/` and checks it against the ESP's record (`51148ff7...`), puts the saved block
-     back as entry 1 and writes `default_entry: 1`.
+     replacement menu beside the active menu, then writes the static repair image from `promotion/` and checks it
+     against the ESP's record (`51148ff7...`). Only then does it publish the menu with the saved block as entry 1
+     and `default_entry: 1`. If interrupted, rerun `restore-repair` to finish with the staged menu.
      Expected: `Restored the repair entry as entry 1 and the default (default_entry: 1) ...`, then
      `status` with `repair UKI on ESP:     r1; Limine repair entry: yes` and
      `Limine default entry:  1 -> Omarchy K114s repair r1 (trackpad fix B) (entry 1)`. Boot Linux: the static repair
