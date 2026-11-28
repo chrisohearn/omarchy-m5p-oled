@@ -303,7 +303,19 @@ class Esp:
     def has(self, rel):
         return os.path.isfile(self.path(rel))
 
-    def put(self, rel, data):
+    def write_space(self, rel, size, cluster):
+        """Additional space needed when put() replaces its existing staged file."""
+        temporary = self.path(rel) + ".k114s-new"
+        staged_size = (os.path.getsize(temporary)
+                       if not os.path.islink(temporary) and os.path.isfile(temporary) else 0)
+        return max(0, clusters(size, cluster) - clusters(staged_size, cluster))
+
+    def matches_staged(self, rel, data):
+        temporary = self.path(rel) + ".k114s-new"
+        return (not os.path.islink(temporary) and os.path.isfile(temporary)
+                and read(temporary) == data)
+
+    def put(self, rel, data, *, reuse_staged=False):
         """Write beside the target, read back, then rename over it."""
         if not self.writable:
             raise Stop("internal: ESP is not mounted writable")
@@ -311,10 +323,14 @@ class Esp:
         temporary = target + ".k114s-new"
         try:
             self.makedirs(os.path.dirname(target))
-            with open(temporary, "wb") as stream:
-                stream.write(data)
-                stream.flush()
-                os.fsync(stream.fileno())
+            if reuse_staged and self.matches_staged(rel, data):
+                with open(temporary, "r+b") as stream:
+                    os.fsync(stream.fileno())
+            else:
+                with open(temporary, "wb") as stream:
+                    stream.write(data)
+                    stream.flush()
+                    os.fsync(stream.fileno())
             if sha(read(temporary)) != sha(data):
                 raise OSError("did not read back")
             os.replace(temporary, target)
@@ -1047,48 +1063,72 @@ def restore_repair(esp, m, image_path, check_only):
         block, sources = saved_repair_block(esp)
         text = esp.get(LIMINE).decode("utf-8")
         present = tool.LIMINE_MARKER in text or REPAIR_UKI in text
-        cluster, free = esp.cluster(), esp.free()
-        have_image = esp.has(REPAIR_UKI) and sha(esp.get(REPAIR_UKI)) == digest
-        need = 0 if have_image else clusters(size, cluster) + RESERVE
-        make_room = free < need
-        new = None
-        if not present:   # the menu is built before any write (and in --check), so a refusal leaves the ESP as it was
-            new = text if esp.has(UKI) and not make_room else drop_sub_entry(text, "linux-aurora")
-            new = with_repair_block(new, block)
         if check_only:
             say("restore-repair check (nothing written):")
             say("  repair image:   %s matches the ESP's record (%d bytes, sha256 %s...)" % (image_path, size, digest[:16]))
             say("  saved block:    %s, one repair entry (%s)" % (" and ".join(sources), block.split("\n")[1].lstrip("/")))
-            if present:
-                if block not in text:
-                    raise Stop("limine.conf has a repair entry that is not the saved block: the saved copy is not the one "
-                               "that boots. Make the saved copy again (docs/r3a-promotion.md, P0e)")
-                say("  limine.conf:    the repair entry is in it now and is exactly the saved block (restore-repair is for after P5)")
-            else:
-                say("  limine.conf:    no repair entry; restore-repair would put the saved block first, with default_entry: 1")
-            say("  space:          %.1f MB free, %.1f MB needed; %s" % (free / 1e6, need / 1e6,
-                "omarchy_linux-aurora.efi and its entry would be removed to make room" if make_room and esp.has(UKI) else
-                ("enough as it is" if not make_room else "NOT ENOUGH, and no omarchy_linux-aurora.efi to remove")))
-            say("restore-repair check passed." if not make_room or esp.has(UKI) else "restore-repair check: short of space.")
-            return
         if present:
-            raise Stop("limine.conf already has a repair entry: use  default repair  instead; nothing written")
-        if make_room and not esp.has(UKI):
-            raise Stop("%.1f MB free, %.1f MB needed, and no omarchy_linux-aurora.efi to remove; nothing written"
-                       % (free / 1e6, need / 1e6))
-        if make_room:
+            if not check_only:
+                raise Stop("limine.conf already has a repair entry: use  default repair  instead; nothing written")
+            if block not in text:
+                raise Stop("limine.conf has a repair entry that is not the saved block: the saved copy is not the one "
+                           "that boots. Make the saved copy again (docs/r3a-promotion.md, P0e)")
+            say("  limine.conf:    the repair entry is in it now and is exactly the saved block (restore-repair is for after P5)")
+            say("  space:          verification only")
+            say("restore-repair check passed.")
+            return
+
+        cluster, free = esp.cluster(), esp.free()
+        have_aurora = esp.has(UKI)
+        repair_present = esp.has(REPAIR_UKI)
+        have_image = repair_present and sha(esp.get(REPAIR_UKI)) == digest
+        replace_repair = repair_present and not have_image
+        reclaim = clusters(os.path.getsize(esp.path(REPAIR_UKI)), cluster) if replace_repair else 0
+        # Keep the reserve when writing the UKI. A retry with the verified UKI only writes the menu.
+        image_need = 0 if have_image else esp.write_space(REPAIR_UKI, size, cluster) + RESERVE
+        menu_base = text if have_aurora else drop_sub_entry(text, "linux-aurora")
+        new = with_repair_block(menu_base, block).encode("utf-8")
+        need = image_need + esp.write_space(LIMINE, len(new), cluster)
+        remove_aurora = not have_image and have_aurora and free + reclaim < need
+        if remove_aurora:
+            reclaim += clusters(os.path.getsize(esp.path(UKI)), cluster)
+            new = with_repair_block(drop_sub_entry(text, "linux-aurora"), block).encode("utf-8")
+            need = image_need + esp.write_space(LIMINE, len(new), cluster)
+        # put() writes the whole replacement menu beside the old one, so none of the old menu is reclaimable here.
+        if free + reclaim < need:
+            if have_image:
+                reason = "NOT ENOUGH for the menu copy"
+            elif remove_aurora:
+                reason = "NOT ENOUGH after planned removals"
+            else:
+                reason = "NOT ENOUGH, and no omarchy_linux-aurora.efi to remove"
+            raise Stop("%s: %d bytes free, %d bytes reclaimable, %d bytes needed; nothing written"
+                       % (reason, free, reclaim, need))
+        if check_only:
+            say("  limine.conf:    no repair entry; restore-repair would put the saved block first, with default_entry: 1")
+            if remove_aurora:
+                removals = "omarchy_linux-aurora.efi and its entry would be removed to make room"
+            elif replace_repair:
+                removals = "the invalid repair image would be replaced"
+            else:
+                removals = "enough as it is"
+            say("  space:          %d bytes free, %d bytes reclaimable, %d bytes needed; %s"
+                % (free, reclaim, need, removals))
+            say("restore-repair check passed.")
+            return
+        if remove_aurora:
             # The hook-built linux-aurora image goes first: it is built the same way as the image that failed. Its
             # entry goes in the menu write below, and a run stopped in between is finished by running this again.
             esp.remove(UKI)
             say("removed %s to make room" % UKI)
         if not have_image:
-            if esp.has(REPAIR_UKI):
+            if replace_repair:
                 esp.remove(REPAIR_UKI)   # not named by limine.conf (checked above), and not the recorded image
-            esp.put(REPAIR_UKI, image)
+            esp.put(REPAIR_UKI, image, reuse_staged=True)
             if sha(esp.get(REPAIR_UKI)) != digest:
                 raise Stop("%s does not verify after writing; limine.conf is unchanged. Run this again" % REPAIR_UKI)
-        esp.put(LIMINE, new.encode("utf-8"))
-        if esp.get(LIMINE).decode("utf-8") != new:
+        esp.put(LIMINE, new, reuse_staged=True)
+        if esp.get(LIMINE) != new:
             raise Stop("limine.conf does not read back as written: run this again")
         state = live_state(esp, m)
     finally:

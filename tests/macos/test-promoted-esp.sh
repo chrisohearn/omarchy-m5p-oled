@@ -17,9 +17,10 @@ mkesp() { # $1: before (repair entry still first, default the path) | after (pro
   #           (pin loader, brightness tree) configured, and the fallback Stage 2 and tree in promotion/ on the ESP and in the bundle)
   rm -rf "$B" "$E"; mkdir -p "$B/tools" "$B/payload" "$E/EFI/Linux" "$E/m1n1" "$E/vendorfw" "$E/k114s-repair/backup-before-r1/m1n1"
   cp "$H"/../../macos/tools/k114s_repair.py "$H"/../../macos/tools/k114s_esp_tool.py "$B/tools/"; cp -r "$H"/../../macos/tools/asahi_firmware "$B/tools/"
-  python3 -I - "$B" "$E" "$1" <<'PY'
+  python3 -I - "$B" "$E" "$1" "${2:-0}" <<'PY'
 import hashlib, io, json, os, sys, tarfile, gzip, struct
 B, E, layout = sys.argv[1:4]; h = lambda b: hashlib.sha256(b).hexdigest()
+aurora_size = int(sys.argv[4])
 w = lambda p, d: open(p, "wb").write(d)
 def fdt(tag):
     strs = b"compatible\0tag\0"; val = b"apple,k114s\0apple,t6050\0"
@@ -59,7 +60,8 @@ w(E + "/k114s-repair/promotion/repair-block.conf", repair.encode()); w(B + "/pro
 w(B + "/promotion/omarchy_linux-aurora-k114s.efi", ri)
 aur = ""
 if layout == "aurora":
-    a = b"the hook-built linux-aurora image stand-in"; w(E + "/EFI/Linux/omarchy_linux-aurora.efi", a)
+    a = bytes(aurora_size) if aurora_size else b"the hook-built linux-aurora image stand-in"
+    w(E + "/EFI/Linux/omarchy_linux-aurora.efi", a)
     aur = "  //linux-aurora\n  protocol: efi\n  path: boot():/EFI/Linux/omarchy_linux-aurora.efi#%s\n" % hashlib.blake2b(a).hexdigest()
 r3b = ""
 if layout in ("window", "display"):
@@ -187,14 +189,44 @@ out=$($R default k114s --esp-dir "$E" 2>&1); ok "after P6a: and back" "$(def)" "
 out=$($R rollback all --esp-dir "$E" 2>&1); has "after P6a: rollback all still stops, though an omarchy_linux-aurora.efi is there again" "$out" "STOPPED"
 
 # --- restore-repair: the static repair image back from macOS when both hook-built images fail (section 5) ------------
-# RF runs the tool with the ESP's free space faked to $1 bytes (the real ESP has about 111 MB after P5b: too little for
-# the 111.8 MB image unless omarchy_linux-aurora.efi goes first)
+# RF gives the replica $1 free bytes in 4 KiB clusters and accounts for writes and deletions.
 RF() { local f=$1; shift; python3 -I -c '
-import sys; sys.path.insert(0, sys.argv[1]); import k114s_repair as r
-r.Esp.free = lambda self, f=int(sys.argv[2]): f
+import os, sys; sys.path.insert(0, sys.argv[1]); import k114s_repair as r
+free = int(sys.argv[2])
+remove_file, put_file = r.Esp.remove, r.Esp.put
+r.Esp.free = lambda self: free
+r.Esp.cluster = lambda self: 4096
+def allocated(size):
+    return (size + 4095) // 4096 * 4096
+def remove(esp, rel):
+    global free
+    released = allocated(os.path.getsize(esp.path(rel)))
+    remove_file(esp, rel)
+    free += released
+def put(esp, rel, data, **options):
+    global free
+    temporary = esp.path(rel) + ".k114s-new"
+    staged = allocated(os.path.getsize(temporary)) if os.path.isfile(temporary) else 0
+    need = max(0, allocated(len(data)) - staged)
+    if need > free:
+        raise r.Stop("writing %s failed (replica out of space)" % rel)
+    old = allocated(os.path.getsize(esp.path(rel))) if esp.has(rel) else 0
+    put_file(esp, rel, data, **options)
+    free += old - need
+r.Esp.remove, r.Esp.put = remove, put
+if os.environ.get("INTERRUPT_MENU"):
+    rename = os.replace
+    def interrupt(source, target):
+        if os.path.basename(target) == r.LIMINE:
+            raise SystemExit(86)
+        return rename(source, target)
+    r.os.replace = interrupt
 try: sys.exit(r.main(["k114s-repair"] + sys.argv[3:]))
 except r.Stop as stop: print("k114s-repair: STOPPED: %s" % stop); sys.exit(1)' "$B/tools" "$f" "$@"; }
 rimg=$B/promotion/omarchy_linux-aurora-k114s.efi
+aurora=$E/EFI/Linux/omarchy_linux-aurora.efi
+repair=$E/EFI/Linux/omarchy_linux-aurora-k114s.efi
+REPAIR_RESERVE=$((8 * 1024 * 1024))
 # RP runs the tool with the constants of this synthetic world: the pin loader's prefix, the r3-gpu file and tree it restores,
 # and the display file's name (the real hashes belong to the real files and have a case of their own below)
 RP() { python3 -I -c '
@@ -217,16 +249,17 @@ sed -i 's#rw$#rw quiet#' "$E/limine.conf"; out=$($R restore-repair --check --esp
 has "before P5: --check stops when the live repair entry is not the saved block" "$out" "is not the saved block"
 # the promoted ESP: the block cut the way P5a cuts it (k114s-lib.sh), then the hook's linux-aurora entry in front (P5b)
 bash -c '. "$1/linux/k114s-lib.sh"; limine_remove_entry_block "$2" EFI/Linux/omarchy_linux-aurora-k114s.efi' _ "$H/../.." "$W/conf.p2" > "$W/conf.p5"
-mkesp aurora
+# The old image occupies two clusters, enough for the repair image and the atomic menu copy.
+mkesp aurora 4097
 ok "the P5a cut of the synthetic menu is the saved block, line for line" \
   "$(diff "$W/conf.p2" "$W/conf.p5" | sed -n 's/^< //p' | cmp -s - "$E/k114s-repair/promotion/repair-block.conf"; echo $?)" 0
 before=$(sum "$E")
-out=$(RF 1000000 restore-repair --check --esp-dir "$E" 2>&1)
-has "after P5b: --check with 1 MB free plans to remove the linux-aurora image" "$out" "omarchy_linux-aurora.efi and its entry would be removed"
+out=$(RF "$REPAIR_RESERVE" restore-repair --check --esp-dir "$E" 2>&1)
+has "after P5b: --check plans to remove the linux-aurora image" "$out" "omarchy_linux-aurora.efi and its entry would be removed"
 has "after P5b: --check passes" "$out" "restore-repair check passed"
 ok "after P5b: --check wrote nothing" "$(sum "$E")" "$before"
 cp "$E/limine.conf" "$W/conf.p5b"
-out=$(RF 1000000 restore-repair --esp-dir "$E" 2>&1)
+out=$(RF "$REPAIR_RESERVE" restore-repair --esp-dir "$E" 2>&1)
 has "after P5b: restore-repair, short of space: done" "$out" "Restored the repair entry as entry 1"
 ok "it removed the linux-aurora image and its entry, and put the bundle's repair image on the ESP" \
   "$(test -e "$E/EFI/Linux/omarchy_linux-aurora.efi"; echo $?) $(grep -c -e '//linux-aurora' -e 'omarchy_linux-aurora[.]efi' "$E/limine.conf") $(cmp -s "$rimg" "$E/EFI/Linux/omarchy_linux-aurora-k114s.efi"; echo $?)" "1 0 0"
@@ -240,6 +273,76 @@ out=$($R default k114s --esp-dir "$E" 2>&1); ok "after restore-repair: default k
 mkesp aurora; out=$($R restore-repair --esp-dir "$E" 2>&1)
 ok "with room to spare restore-repair keeps the linux-aurora image and its entry" \
   "$(test -e "$E/EFI/Linux/omarchy_linux-aurora.efi"; echo $?) $(grep -c '//linux-aurora' "$E/limine.conf") $(def)" "0 1 1"
+# Issue #325: about 0.5 MB free and 1 MB reclaimable cannot fit a 2.2 MB repair image.
+mkesp aurora 1000000
+python3 -I - "$rimg" "$E/k114s-repair/r2c/repair-uki.txt" <<'PY'
+import hashlib, sys
+from pathlib import Path
+image, record = map(Path, sys.argv[1:])
+data = bytes(2200000)
+image.write_bytes(data)
+record.write_text("uki EFI/Linux/omarchy_linux-aurora-k114s.efi %d %s\n" % (len(data), hashlib.sha256(data).hexdigest()))
+PY
+before=$(sum "$E")
+for mode in --check apply; do
+  args=()
+  if [ "$mode" = --check ]; then args=(--check); fi
+  out=$(RF 499712 restore-repair "${args[@]}" --esp-dir "$E" 2>&1); rc=$?
+  ok "insufficient even after reclamation: $mode exits 1" "$rc" 1
+  has "insufficient even after reclamation: $mode reports the exact budget" "$out" \
+    "NOT ENOUGH after planned removals: 499712 bytes free, 1003520 bytes reclaimable, 10596352 bytes needed"
+  ok "insufficient even after reclamation: $mode leaves the ESP byte for byte" "$(sum "$E")" "$before"
+done
+# The image fits with its reserve, but the old menu still occupies its own cluster during replacement.
+mkesp after; before=$(sum "$E")
+out=$(RF "$((REPAIR_RESERVE + 4096))" restore-repair --esp-dir "$E" 2>&1)
+has "room for the image alone does not cover the atomic menu copy" "$out" "NOT ENOUGH"
+ok "menu allocation shortfall leaves the ESP byte for byte" "$(sum "$E")" "$before"
+# Replacing an invalid repair image can free enough space by itself.
+mkesp aurora; printf 'invalid repair image' > "$repair"
+out=$(RF "$((REPAIR_RESERVE + 4096))" restore-repair --esp-dir "$E" 2>&1)
+has "reclaiming the invalid repair image alone is enough" "$out" "Restored the repair entry"
+ok "replacing the invalid repair image keeps the linux-aurora image and entry" \
+  "$(test -e "$aurora"; echo $?) $(grep -c '//linux-aurora' "$E/limine.conf") $(cmp -s "$rimg" "$repair"; echo $?)" "0 1 0"
+# A retry with the verified image already in place only needs room for the atomic menu write.
+mkesp aurora; cp "$rimg" "$repair"; before=$(sum "$E")
+out=$(RF 0 restore-repair --esp-dir "$E" 2>&1)
+has "a verified image still needs room for the menu copy" "$out" "NOT ENOUGH"
+ok "the menu-only refusal leaves both images and the menu in place" "$(sum "$E")" "$before"
+out=$(RF 4096 restore-repair --esp-dir "$E" 2>&1)
+has "a verified image can finish recovery with one free cluster" "$out" "Restored the repair entry"
+ok "finishing the menu keeps the linux-aurora image and entry" \
+  "$(test -e "$aurora"; echo $?) $(grep -c '//linux-aurora' "$E/limine.conf") $(def)" "0 1 1"
+
+mkesp after
+cp -- "$rimg" "$repair"
+original=$(sha256sum < "$E/limine.conf")
+out=$(INTERRUPT_MENU=1 RF 4096 restore-repair --esp-dir "$E" 2>&1)
+ok "an interruption before menu rename leaves a complete draft and the previous menu" \
+  "$? $(test -s "$E/limine.conf.k114s-new"; echo $?) $(sha256sum < "$E/limine.conf")" "86 0 $original"
+before=$(sum "$E")
+out=$(RF 0 restore-repair --check --esp-dir "$E" 2>&1)
+ok "restore check can verify the staged menu with zero free clusters" "$?" 0
+ok "that restore check writes nothing" "$(sum "$E")" "$before"
+out=$(RF 0 restore-repair --esp-dir "$E" 2>&1)
+ok "restore retry finishes the staged menu rename with zero free clusters" \
+  "$? $(def) $(test -e "$E/limine.conf.k114s-new"; echo $?)" "0 1 1"
+
+# A partial temporary file also contributes space when the writer truncates it.
+mkesp after
+cp -- "$rimg" "$repair"
+python3 -c 'import sys; open(sys.argv[1], "a").write("#" + "x" * 5000 + "\n")' "$E/limine.conf"
+out=$(INTERRUPT_MENU=1 RF 8192 restore-repair --esp-dir "$E" 2>&1)
+ok "the larger staged menu occupied two clusters" "$? $(test "$(wc -c < "$E/limine.conf.k114s-new")" -gt 4096; echo $?)" "86 0"
+truncate -s 4096 "$E/limine.conf.k114s-new"
+before=$(sum "$E")
+out=$(RF 4096 restore-repair --check --esp-dir "$E" 2>&1)
+ok "restore check credits the partial staged menu before any write" "$? $(sum "$E")" "0 $before"
+out=$(RF 4096 restore-repair --esp-dir "$E" 2>&1)
+ok "restore retry rewrites the staged menu using its already allocated cluster" \
+  "$? $(def) $(test -e "$E/limine.conf.k114s-new"; echo $?)" "0 1 1"
+
+
 mkesp aurora; rm "$E/EFI/Linux/omarchy_linux-aurora.efi"; out=$($R restore-repair --esp-dir "$E" 2>&1)
 ok "a run stopped after removing the linux-aurora image is finished by running it again (its entry goes)" \
   "$(grep -c -e '//linux-aurora' -e 'omarchy_linux-aurora[.]efi' "$E/limine.conf") $(def)" "0 1"
@@ -279,12 +382,12 @@ out=$($R status --esp-dir "$E" 2>&1)
 has "window: status reads the path default, r3a" "$out" "Limine default entry:  Omarchy/linux-k114s -> linux-k114s (entry 2)"
 has "window: status says the r3a image is the Linux image" "$out" "omarchy_linux-k114s.efi is"
 ok "window: status wrote nothing" "$(sum "$E")" "$before"
-out=$(RF $WINDOW_FREE restore-repair --check --esp-dir "$E" 2>&1)
+out=$(RF $WINDOW_FREE restore-repair --check --esp-dir "$E" 2>&1); rc=$?
 has "window: --check reads the space as short, with nothing to remove" "$out" "NOT ENOUGH, and no omarchy_linux-aurora.efi to remove"
-has "window: --check ends short of space" "$out" "restore-repair check: short of space."
+ok "window: --check exits 1 when short of space" "$rc" 1
 ok "window: --check wrote nothing" "$(sum "$E")" "$before"
 out=$(RF $WINDOW_FREE restore-repair --esp-dir "$E" 2>&1)
-has "window: restore-repair refuses" "$out" "no omarchy_linux-aurora.efi to remove; nothing written"
+has "window: restore-repair refuses" "$out" "STOPPED: NOT ENOUGH, and no omarchy_linux-aurora.efi to remove"
 ok "window: the refusal wrote nothing" "$(sum "$E")" "$before"
 out=$($R default aurora --esp-dir "$E" 2>&1); has "window: default aurora stops (no such entry)" "$out" "has no entry Omarchy/linux-aurora"
 ok "window: default aurora wrote nothing" "$(sum "$E")" "$before"
