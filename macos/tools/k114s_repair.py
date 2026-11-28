@@ -303,6 +303,13 @@ class Esp:
     def has(self, rel):
         return os.path.isfile(self.path(rel))
 
+    def write_space(self, rel, size, cluster):
+        """Additional space needed when put() replaces its existing staged file."""
+        temporary = self.path(rel) + ".k114s-new"
+        staged_size = (os.path.getsize(temporary)
+                       if not os.path.islink(temporary) and os.path.isfile(temporary) else 0)
+        return max(0, clusters(size, cluster) - clusters(staged_size, cluster))
+
     def matches_staged(self, rel, data):
         temporary = self.path(rel) + ".k114s-new"
         return (not os.path.islink(temporary) and os.path.isfile(temporary)
@@ -1078,17 +1085,15 @@ def restore_repair(esp, m, image_path, check_only):
         replace_repair = repair_present and not have_image
         reclaim = clusters(os.path.getsize(esp.path(REPAIR_UKI)), cluster) if replace_repair else 0
         # Keep the reserve when writing the UKI. A retry with the verified UKI only writes the menu.
-        image_need = 0 if have_image else clusters(size, cluster) + RESERVE
+        image_need = 0 if have_image else esp.write_space(REPAIR_UKI, size, cluster) + RESERVE
         menu_base = text if have_aurora else drop_sub_entry(text, "linux-aurora")
         new = with_repair_block(menu_base, block).encode("utf-8")
-        menu_staged = esp.matches_staged(LIMINE, new)
-        need = image_need + (0 if menu_staged else clusters(len(new), cluster))
+        need = image_need + esp.write_space(LIMINE, len(new), cluster)
         remove_aurora = not have_image and have_aurora and free + reclaim < need
         if remove_aurora:
             reclaim += clusters(os.path.getsize(esp.path(UKI)), cluster)
             new = with_repair_block(drop_sub_entry(text, "linux-aurora"), block).encode("utf-8")
-            menu_staged = esp.matches_staged(LIMINE, new)
-            need = image_need + (0 if menu_staged else clusters(len(new), cluster))
+            need = image_need + esp.write_space(LIMINE, len(new), cluster)
         # put() writes the whole replacement menu beside the old one, so none of the old menu is reclaimable here.
         if free + reclaim < need:
             if have_image:
@@ -1119,10 +1124,10 @@ def restore_repair(esp, m, image_path, check_only):
         if not have_image:
             if replace_repair:
                 esp.remove(REPAIR_UKI)   # not named by limine.conf (checked above), and not the recorded image
-            esp.put(REPAIR_UKI, image)
+            esp.put(REPAIR_UKI, image, reuse_staged=True)
             if sha(esp.get(REPAIR_UKI)) != digest:
                 raise Stop("%s does not verify after writing; limine.conf is unchanged. Run this again" % REPAIR_UKI)
-        esp.put(LIMINE, new, reuse_staged=menu_staged)
+        esp.put(LIMINE, new, reuse_staged=True)
         if esp.get(LIMINE) != new:
             raise Stop("limine.conf does not read back as written: run this again")
         state = live_state(esp, m)

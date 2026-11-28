@@ -205,8 +205,9 @@ def remove(esp, rel):
     free += released
 def put(esp, rel, data, **options):
     global free
-    reuse = options.get("reuse_staged") and esp.matches_staged(rel, data)
-    need = 0 if reuse else allocated(len(data))
+    temporary = esp.path(rel) + ".k114s-new"
+    staged = allocated(os.path.getsize(temporary)) if os.path.isfile(temporary) else 0
+    need = max(0, allocated(len(data)) - staged)
     if need > free:
         raise r.Stop("writing %s failed (replica out of space)" % rel)
     old = allocated(os.path.getsize(esp.path(rel))) if esp.has(rel) else 0
@@ -326,6 +327,21 @@ ok "that restore check writes nothing" "$(sum "$E")" "$before"
 out=$(RF 0 restore-repair --esp-dir "$E" 2>&1)
 ok "restore retry finishes the staged menu rename with zero free clusters" \
   "$? $(def) $(test -e "$E/limine.conf.k114s-new"; echo $?)" "0 1 1"
+
+# A partial temporary file also contributes space when the writer truncates it.
+mkesp after
+cp -- "$rimg" "$repair"
+python3 -c 'import sys; open(sys.argv[1], "a").write("#" + "x" * 5000 + "\n")' "$E/limine.conf"
+out=$(INTERRUPT_MENU=1 RF 8192 restore-repair --esp-dir "$E" 2>&1)
+ok "the larger staged menu occupied two clusters" "$? $(test "$(wc -c < "$E/limine.conf.k114s-new")" -gt 4096; echo $?)" "86 0"
+truncate -s 4096 "$E/limine.conf.k114s-new"
+before=$(sum "$E")
+out=$(RF 4096 restore-repair --check --esp-dir "$E" 2>&1)
+ok "restore check credits the partial staged menu before any write" "$? $(sum "$E")" "0 $before"
+out=$(RF 4096 restore-repair --esp-dir "$E" 2>&1)
+ok "restore retry rewrites the staged menu using its already allocated cluster" \
+  "$? $(def) $(test -e "$E/limine.conf.k114s-new"; echo $?)" "0 1 1"
+
 
 mkesp aurora; rm "$E/EFI/Linux/omarchy_linux-aurora.efi"; out=$($R restore-repair --esp-dir "$E" 2>&1)
 ok "a run stopped after removing the linux-aurora image is finished by running it again (its entry goes)" \
