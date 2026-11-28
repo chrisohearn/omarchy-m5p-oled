@@ -29,8 +29,8 @@ If the original kernel image (EFI/Linux/omarchy_linux-aurora.efi) was removed fr
 (the r3a kernel trial, docs/r3-integration.md), status, stage2, default repair and rollback stage2 keep
 working; kernel, default original, rollback all and apply stop with a message and write nothing,
 because each would need that image.
-After the promotion, the tool recognizes either K114s UKI slot. The default command
-checks that its selected entry and image exist. restore-repair puts the repair image
+After the promotion, the tool recognizes either K114s UKI slot. Path-based default commands
+check that their selected entry and image exist. restore-repair puts the repair image
 and entry back when the hook-built images fail. If the configured Stage 2 file is
 missing, stage2 and rollback stage2 require a verified Stage 2 backup.
 
