@@ -92,11 +92,13 @@ Leave the comments to Limine's own tools: the config may be hash-enrolled, so ne
    - `owner-session-camera` for a Stage 2 (arm, gate, check, promote).
 
    Update every hash, version and slot name. Each kit gets a fresh independent review before use.
-7. **Trials, one at a time.** After each boot, run the kit's check. Promote only on PASS. On FAIL, the next boot falls
-   back by itself: record the failing gates, file an issue, and leave the promoted state as it was.
+7. **Trials, one at a time.** After each boot, run the kit's check. Promote only on PASS. Record any failing
+   gates, file an issue, and leave the promoted state as it was.
    1. packages (Mesa): a guarded ordinary reboot with automatic rollback;
    2. kernel: stage into Backup from an ordinary boot, then a one-shot trial, then promote;
-   3. Stage 2: an `aura-try` trial, then promote.
+   3. Stage 2: prepare the `aura-try` trial and boot it with the owner at the Mac. A spent trial falls back on
+      the next start. The K114s trial watchdog did not arm in the observed test, so the owner may have to hold
+      the power button and start again. [Observed Stage 2 trial](r3d-stage2.md)
 8. **One upstream PR head per night** (owner's decision, 2026-11-25: "Fold into nightly"). Our draft upstream PRs need a
    hardware result from a boot of their exact head before they leave draft. They are the `ledger/outgoing.json` rows
    with these ids, while no `kind: "hardware result (PR head)"` row for that PR's current head is recorded (a posted

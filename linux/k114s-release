@@ -45,8 +45,9 @@
 #      Stage 2 (loader, U-Boot, device tree) is one file for every menu entry. It is tried as its
 #      own step (stage2, by the owner unless AUTO_STAGE2_SWITCH=yes): the candidate is written
 #      BESIDE the configured m1n1/boot-ctxr.bin as m1n1/boot-ctxr-try.bin and the loader's
-#      one-boot trial (aura-try) is armed. The loader boots it once under its watchdog and falls
-#      back to the configured file if it hangs. Each boot recorded ok through it arms it again.
+#      one-boot trial (aura-try) is armed. The loader consumes it before starting the candidate,
+#      so a later start uses the configured file. On this Mac a hang can need a manual power cycle.
+#      Each boot recorded ok through the candidate arms the trial again.
 #      On a LATER run, with enough recorded boots and the candidate running, it becomes the
 #      configured file; the old one is kept on the ESP for the way back from macOS.
 #  - Every boot-chain change, the first or a later one, takes this road. Omarchy's own
@@ -645,9 +646,13 @@ advance() { # move a trial forward: prove it from the boot records; retire on a 
 }
 
 # --- Stage 2: a candidate beside the proven file, tried through the loader's one-boot trial -----------
+stage2_recovery_note() {
+  note "Have the owner at the Mac for this trial. If the start hangs, hold the power button and start again. After the trial is spent, the proven $STAGE2_REL boots"
+}
 stage2_trial_note() { # where a Stage 2 trial stands when this start did not come through it
   if [[ -n $(aura_try_armed) ]]; then
-    note "Stage 2 on trial: $STAGE2_TRY_REL is armed for the next start (the loader boots it once; if it hangs, its watchdog resets the Mac onto the proven $STAGE2_REL). Restart when convenient"
+    note "Stage 2 on trial: $STAGE2_TRY_REL is armed for the next start"
+    stage2_recovery_note
   elif [[ $(boot_id) == "$(kv "$TRIAL" boot_id)" ]]; then
     note "Stage 2 on trial: $STAGE2_TRY_REL is written but not armed. Arm it: sudo k114s-release stage2 --rearm"
   else
@@ -672,7 +677,8 @@ cmd_stage2() {
     [[ $(sum "$candidate") == "$(kv "$TRIAL" stage2_sha256)" ]] || die "$STAGE2_TRY_REL is not the candidate on trial; nothing armed (sudo k114s-release abandon)"
     [[ $(sum "$ESP/$STAGE2_REL") == "$(kv "$TRIAL" configured_stage2_sha256)" ]] || die "the configured $STAGE2_REL is not the file the trial began with; nothing armed"
     aura_try_arm "$STAGE2_TRY_REL" || die "could not arm the trial"
-    log "Stage 2 candidate $STAGE2_TRY_REL armed for the next start (one start, under the loader's watchdog)"
+    log "Stage 2 candidate $STAGE2_TRY_REL armed for the next start"
+    stage2_recovery_note
     return 0
   fi
   [[ ! -f $TRIAL ]] || die "a trial is in progress ($(kv "$TRIAL" packages)); one change at a time"
@@ -731,9 +737,9 @@ cmd_stage2() {
   } > "$TRIAL"
   log "Stage 2 candidate written BESIDE the proven one: $STAGE2_TRY_REL (${new:0:16}), device tree $dtb. $STAGE2_REL is unchanged"
   aura_try_arm "$STAGE2_TRY_REL" || { note "the Stage 2 candidate is written but the trial could not be armed. Arm it: sudo k114s-release stage2 --rearm"; return 0; }
-  note "Stage 2 candidate armed for ONE start: the loader boots it once under its watchdog, and a start that hangs is reset onto the proven $STAGE2_REL. Each start recorded ok through it arms it again; it becomes the configured file on a later run"
-  say "If a trial start hangs and the Mac does not come back by itself: hold the power button and start again."
-  say "The trial is spent by then, so the proven $STAGE2_REL boots. Stop trying it: sudo k114s-release abandon"
+  note "Stage 2 candidate armed for ONE start. Each start recorded ok through it arms it again; it becomes the configured file on a later run"
+  stage2_recovery_note
+  say "Stop trying it: sudo k114s-release abandon"
 }
 promote_stage2() { # the candidate, proven and running, becomes the configured Stage 2; the old file is kept
   local candidate=$ESP/$STAGE2_TRY_REL new old keep foreign dir
