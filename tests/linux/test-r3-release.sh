@@ -392,6 +392,7 @@ r=$(mk); s2trial "$r"; aura "$r"; out=$(K114S_AURA_TRIAL=$TRY run "$r" k114s-boo
 r=$(mk); s2trial "$r"; out=$(BOOT_ID=aaaa0002 run "$r" k114s-release auto); ok "auto after a start that did not come through it: says so, changes nothing proven" \
   "$(echo "$out" | grep -c 'this start did not come through m1n1/boot-ctxr-try.bin') $(test -e "$r/boot/efi/$TRY"; status)" "1 0"
 out=$(BOOT_ID=aaaa0002 run "$r" k114s-release stage2 --rearm); ok "stage2 --rearm arms the candidate again" "$? $(cat "$r/boot/efi/aura-try" | tr '\n' ' ')" "0 armed $TRY "
+ok "stage2 --rearm arms the candidate again: recovery guidance calls for an attended restart" "$(grep -c 'Have the owner at the Mac for this trial.*hold the power button' <<< "$out")" 1
 out=$(BOOT_ID=aaaa0002 run "$r" k114s-release auto); ok "auto while it is armed: restart when convenient" "$(echo "$out" | grep -c 'is armed for the next start')" 1
 # promotion: two good starts through the candidate, on a later run
 s2boots() { local r=$1 n; for n in 2 3; do printf 'time 2026010%sT000000Z\nboot_id aaaa000%s\nuki %s\nuki_sha256 %s\nstage2 %s\nstage2_sha256 %s\ntrial %s\nresult ok\n' "$n" "$n" "$(known "$r" uki)" "$(known "$r" uki_sha256)" "$TRY" "$(sum "$r/boot/efi/$TRY")" "$TRY" \
@@ -420,6 +421,7 @@ python3 -I "$T/mkfdt.py" "$r/j.dtb" j714s; python3 -I "$T/mkfdt.py" "$r/packaged
 run "$r" k114s-release mark-known-good >/dev/null; conf=$(sum "$r/boot/efi/m1n1/boot-ctxr.bin"); echo "$conf" > "$r/etc/omarchy-k114s/stage2-frozen"
 out=$(run "$r" k114s-release stage2 --dtb pinned); ok "stage2: the candidate is built beside the configured file and armed" \
   "$? $(sum "$r/boot/efi/m1n1/boot-ctxr.bin") $(grep -c -a 'apple,centauri-platform-id' "$r/boot/efi/$TRY") $(head -n 1 "$r/boot/efi/aura-try") $(awk '$1 == "kind" || $1 == "dtb" { print $2 }' "$r/var/lib/omarchy-k114s/release/trial" | tr '\n' ' ')" "0 $conf 1 armed stage2 pinned "
+ok "stage2: recovery guidance calls for an attended restart" "$(grep -c 'Have the owner at the Mac for this trial.*hold the power button' <<< "$out")" 1
 ok "Stage 2: the selected rollback set has a valid manifest" \
   "$(cd "$r"/var/lib/omarchy-k114s/rollback/*-stage2 && sha256sum --quiet -c SHA256SUMS; status)" 0
 out=$(run "$r" k114s-release stage2); ok "a second stage2 during the trial: refused" "$? $(echo "$out" | grep -c 'one change at a time')" "1 1"

@@ -168,9 +168,10 @@ before restarting. The retry uses the same package archives and restores all the
 be an additional boot entry. It can be tried beside the proven file, though: the installed loader
 (Aura) has a one-boot trial. A file `aura-try` at the root of the EFI partition holding
 `armed\n<path>\n` makes it boot `<path>` once in place of the configured `m1n1/boot-ctxr.bin`: it
-marks the file `spent` before it reads the image, runs the trial under its 178-second watchdog,
-tells Linux through `chosen/aurora,trial`, and a trial that hangs is reset onto the configured file.
-(Read from the lead's GPU trial on this Mac, 2026-11-14; `docs/r3-gpu-result.md` on `r3/gpu-desktop`.)
+marks the file `spent` before reading the image and tells Linux through `chosen/aurora,trial`.
+If the marker stays spent, the next start uses the configured file. Run the trial with the owner at the Mac. The watchdog
+did not arm in the observed K114s test, so a hung trial may require holding the power button
+and starting again. [Observed Stage 2 trial](r3d-stage2.md)
 
 So loader packages are installed with Stage 2 frozen, and Stage 2 is tried as its own step, by
 the owner unless `AUTO_STAGE2_SWITCH=yes`: `sudo k114s-release stage2 [--dtb packaged|pinned]`.
@@ -178,7 +179,7 @@ the owner unless `AUTO_STAGE2_SWITCH=yes`: `sudo k114s-release stage2 [--dtb pac
 | Step | What happens | What stays |
 | --- | --- | --- |
 | before | the proven chain is intact and running; no other trial is under way (a standing trial in `/etc/omarchy-k114s/stage2-trial`, an armed `aura-try` naming another file, a boot-menu trial in `/etc/omarchy-k114s/trial-default`, a boot that came through someone else's trial); room for three Stage 2 sized files and the margin | nothing is written if any of this fails |
-| try | the Stage 2 hook builds a candidate from the installed packages as `m1n1/boot-ctxr-try.bin`, with the named tree; `aura-try` is armed for it | `m1n1/boot-ctxr.bin` byte for byte (it is the watchdog's fallback); the freeze |
+| try | the Stage 2 hook builds a candidate from the installed packages as `m1n1/boot-ctxr-try.bin`, with the named tree; `aura-try` is armed for it | `m1n1/boot-ctxr.bin` byte for byte (the fallback on the next start); the freeze |
 | boots | each start through the candidate that `k114s-boot-success` records as ok arms it again for the next start. A start that is not ok, a start that hung and was reset, or a start through the configured file leaves it spent; `auto` says so (`stage2 --rearm` tries again) | the proven file is what the next start uses unless the trial is armed |
 | switch | on a later run, with `RETIRE_AFTER_BOOTS` (2) recorded ok starts through the candidate and the candidate running: the configured file is copied to `k114s-repair/known-good/boot-ctxr.bin` (with its hash), the candidate replaces `m1n1/boot-ctxr.bin` (written beside, renamed, verified), the marker goes, the freeze goes, the tree choice is kept in `use-packaged-dtb` | the old file on the ESP for the way back from macOS, and in the rollback set. The candidate file stays until a start no longer comes through it |
 
@@ -420,8 +421,8 @@ module folder; three silent exits under `set -e`.
   the boot is ok. It says what a script observed (a Hyprland process, `wlan0`, the
   input device `Apple MTP multi-touch`); all three names were read on this Mac. It does not know
   whether the pointer moves.
-- **Stage 2** has no additional menu entry; its safety is the loader's one-boot trial and its
-  watchdog, as the lead used it for the GPU Stage 2. A candidate that starts Linux but breaks
+- **Stage 2** has no additional menu entry. The loader's one-boot trial preserves the
+  configured file for the next start. Keep the trial attended so the owner can recover a hang. A candidate that starts Linux but breaks
   something the boot check does not look at would still be armed again; the switch to it needs two
   recorded ok starts and a later run, and the way back after the switch is from macOS. The
   `aura-try` format and the `chosen/aurora,trial` property were read from the lead's files and
