@@ -321,6 +321,10 @@ because Edge's `omarchy-dev` replaced them); writes the block; installs and enab
 the module-cleanup drop-in; installs both user hooks; records the running boot chain as proven;
 writes a recovery set. It installs no package, changes no file on the ESP and does not reboot.
 
+If the backup cannot be written, the installer stops before replacing files. Correct the
+backup error and retry. If an older installer left an incomplete `tooling-r3` directory,
+inspect its contents and the existing tooling before running undo.
+
 - `--refresh` copies scripts and data again after a repository update; settings, the hold list
   and state are kept.
 - `--undo` puts back exactly what r2c left (the test compares every file by content and mode).
