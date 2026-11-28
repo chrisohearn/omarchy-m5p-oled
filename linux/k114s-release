@@ -512,22 +512,43 @@ running_trial() { # is the trial chain the one running, unchanged?
   [[ $(boot_id) != "$(kv "$TRIAL" boot_id)" && $(booted_uki) == "$(kv "$TRIAL" uki)" && $(sum "$ESP/$(kv "$TRIAL" uki)") == "$(kv "$TRIAL" uki_sha256)" &&
      $(booted_stage2_sum) == "$(kv "$TRIAL" stage2_sha256)" ]]
 }
-# Publish the removed entry and replacement default as one menu update.
-# Return 1 for an unsupported menu shape and 2 for a write failure.
+# Publish removal and default selection together. When resuming an old partial
+# retirement, accept only the intermediate or finished menu derived from its backup.
+# Return 1 for an unsupported menu shape and 2 for an I/O failure.
 remove_menu_entry() {
-  local conf=$1 remove=$2 keep=$3 draft=$1.k114s-new before after index
-  before=$(grep -c -E '^/[^/]' "$conf" || true)
-  if ! limine_remove_entry_block "$conf" "$remove" > "$draft"; then
+  local conf=$1 remove=$2 keep=$3 source=${4:-$1} draft=$1.k114s-new before after index absent=0 compare=0
+  before=$(grep -c -E '^/[^/]' "$source" || true)
+  if ! limine_remove_entry_block "$source" "$remove" > "$draft"; then
     rm -f -- "$draft"
     return 2
   fi
   after=$(grep -c -E '^/[^/]' "$draft" || true)
   index=$(limine_entry_of "$draft" "$keep")
-  if ((after != before - 1)) || [[ -z $index ]] || grep -q -F "$remove" "$draft"; then
+  grep -q -F -- "$remove" "$draft" || absent=$?
+  if ((absent > 1)); then
+    rm -f -- "$draft"
+    return 2
+  fi
+  if ((after != before - 1 || absent == 0)) || [[ -z $index ]]; then
     rm -f -- "$draft"
     return 1
   fi
-  if ! limine_set_default "$draft" "$index" || ! mv -f -- "$draft" "$conf"; then
+  if [[ $source != "$conf" ]]; then
+    cmp -s -- "$draft" "$conf" || compare=$?
+    if ((compare > 1)); then rm -f -- "$draft"; return 2; fi
+  fi
+  if ! limine_set_default "$draft" "$index"; then
+    rm -f -- "$draft"
+    return 2
+  fi
+  if ((compare == 1)); then
+    compare=0
+    cmp -s -- "$draft" "$conf" || compare=$?
+    rm -f -- "$draft"
+    if ((compare > 1)); then return 2; fi
+    return "$compare"
+  fi
+  if ! mv -f -- "$draft" "$conf"; then
     rm -f -- "$draft"
     return 2
   fi
@@ -556,16 +577,21 @@ retire() {
         return "$explicit"
       fi
     fi
-    index=$(limine_entry_of "$conf" "$new_uki")
     if [[ $old_uki == "$new_uki" ]]; then
+      index=$(limine_entry_of "$conf" "$new_uki")
       limine_set_default "$conf" "$index" || result=2
-    elif [[ -z $index || $(limine_default_index "$conf") != "$index" ]] ||
-         grep -q -F "$old_uki" "$conf" || ! grep -q -F "$old_uki" "$backup"; then
-      remove_menu_entry "$conf" "$old_uki" "$new_uki" || result=$?
+    else
+      local menu_match=0
+      grep -q -F -- "$old_uki" "$conf" || menu_match=$?
+      case $menu_match in
+        0) remove_menu_entry "$conf" "$old_uki" "$new_uki" || result=$? ;;
+        1) remove_menu_entry "$conf" "$old_uki" "$new_uki" "$backup" || result=$? ;;
+        *) result=2 ;;
+      esac
     fi
     case $result in
       1) note "retire waits: the old image's menu entry is not a block this tool can take out safely; boot menu left as it is"; return 0 ;;
-      2) note "PROBLEM: could not write the boot menu; boot menu left as it is (copy: $backup)"; return "$explicit" ;;
+      2) note "PROBLEM: could not update the boot menu; boot menu left as it is (copy: $backup)"; return "$explicit" ;;
     esac
     [[ $old_uki == "$new_uki" ]] || rm -f "$ESP/$old_uki"
     # Stage 2 stays frozen only while a loader or U-Boot package was installed and not yet switched to.
@@ -815,7 +841,11 @@ cmd_forget_image() {
   cp -p "$ESP/$rel" "$dir/esp/$rel" && cp -p "$conf" "$dir/esp/limine.conf"
   [[ $(sum "$dir/esp/$rel") == "$(sum "$ESP/$rel")" ]] || die "could not keep a copy of $rel; nothing changed"
   (cd "$dir" && sha256sum "esp/$rel" esp/limine.conf > SHA256SUMS)
-  if grep -q -F "$rel" "$conf"; then
+  local menu_match=0
+  grep -q -F -- "$rel" "$conf" || menu_match=$?
+  if ((menu_match > 1)); then
+    die "could not read the boot menu; $rel was not removed (menu copy: $dir/esp/limine.conf)"
+  elif ((menu_match == 0)); then
     remove_menu_entry "$conf" "$rel" "$proven" || result=$?
     case $result in
       1) die "the menu entry of $rel is not a block this tool can take out safely; nothing changed (its copy is in $dir)" ;;

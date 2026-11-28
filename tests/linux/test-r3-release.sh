@@ -236,6 +236,32 @@ out=$(menu_write_failure "$r" forget-image EFI/Linux/omarchy_linux-aurora-k114s.
 ok "forget-image: a menu write failure preserves the menu and spare image" \
   "$? $(sum "$r/boot/efi/limine.conf") $(test -f "$r/boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi"; status)" "1 $original 0"
 
+# A previous release may have removed the entry and stopped before changing the default.
+r=$(mk); trial "$r"; menu=$r/boot/efi/limine.conf
+backup=$r/var/lib/omarchy-k114s/rollback/t1/limine.conf.before-retire
+cp -p "$menu" "$backup"
+original=$(sum "$backup")
+awk '/^### K114s repair/{skip=1} /^\/\+Omarchy/{skip=0} !skip' "$backup" > "$menu"
+out=$(BOOT_ID=aaaa0003 run "$r" k114s-release retire)
+ok "retire: retry completes a verified intermediate menu from the old tool" \
+  "$? $(sum "$backup") $(sed -n 's/^default_entry: //p' "$menu") $(test -e "$r/var/lib/omarchy-k114s/release/trial"; status)" "0 $original 2 1"
+
+# A failed read is not evidence that the menu lacks an image reference.
+mkdir "$BASE/menu-read-fault"
+real_grep=$(command -v grep)
+cat > "$BASE/menu-read-fault/grep" <<'FAULT'
+#!/bin/bash
+if [[ $1 == -q && $2 == -F && ${!#} == "$FAULT_MENU" ]]; then exit 2; fi
+exec "$REAL_GREP" "$@"
+FAULT
+chmod +x "$BASE/menu-read-fault/grep"
+r=$(mk); trial "$r"; menu=$r/boot/efi/limine.conf
+sed -i 's/^default_entry: .*/default_entry: 3/' "$menu"
+original=$(sum "$menu")
+out=$(REAL_GREP="$real_grep" PATH="$BASE/menu-read-fault:$PATH" FAULT_MENU="$menu" BOOT_ID=aaaa0003 run "$r" k114s-release retire)
+ok "retire: a menu read error leaves the menu, old image and trial untouched" \
+  "$? $(sum "$menu") $(test -e "$r/boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi"; status) $(test -e "$r/var/lib/omarchy-k114s/release/trial"; status)" "1 $original 0 0"
+
 r=$(mk); trial "$r"; out=$(BOOT_ID=aaaa0003 run "$r" k114s-release auto); ok "retire: the old image leaves the ESP" "$? $(test -e "$r/boot/efi/EFI/Linux/omarchy_linux-aurora-k114s.efi"; status)" "0 1"
 ok "retire: its block and marker are out of the menu; every other line is as it was" "$(grep -c -E 'K114s repair|aurora-k114s' "$r/boot/efi/limine.conf") $(grep -c -E '^/\+Omarchy$|^  //linux-aurora$|^  //Snapshots$|^timeout: 5$|^quiet: no$' "$r/boot/efi/limine.conf")" "0 5"
 ok "retire: the default is the new image's entry, counted as Limine counts (directories too)" "$(sed -n 's/^default_entry: //p' "$r/boot/efi/limine.conf")" 2
