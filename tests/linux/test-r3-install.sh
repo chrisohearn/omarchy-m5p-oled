@@ -104,6 +104,36 @@ out=$(inst "$r" --undo)
 ok "undo restores the original command's contents and mode" "$? $(sha256sum < "$r/usr/local/bin/k114s-boot") $(stat -c %a "$r/usr/local/bin/k114s-boot")" "0 $before 751"
 ok "undo restores the dangling symlink" "$(readlink "$(k "$r")/k114s-release")" "missing-release-tool"
 
+# An I/O error can leave a short destination file before cp reports failure.
+fault_bin=$(mktemp -d "$BASE/backup-fault.XXXXXX")
+cat > "$fault_bin/cp" <<'SH'
+#!/bin/bash
+case ${!#} in
+  */"$K114S_TEST_FAIL_BACKUP")
+    printf 'partial backup\n' > "${!#}"
+    echo "simulated backup I/O error" >&2
+    exit 1 ;;
+esac
+exec "$K114S_TEST_REAL_CP" "$@"
+SH
+chmod +x "$fault_bin/cp"
+for backup_file in pacman.conf.before bin-k114s-boot.orig; do
+  r=$(mk)
+  mkdir -p "$r/usr/local/bin"
+  printf '#!/bin/sh\necho original boot tool\n' > "$r/usr/local/bin/k114s-boot"
+  chmod 751 "$r/usr/local/bin/k114s-boot"
+  before=$(snap "$r")
+  out=$(K114S_TEST_REAL_CP=$(command -v cp) K114S_TEST_FAIL_BACKUP=$backup_file PATH="$fault_bin:$PATH" inst "$r" --no-recovery-set)
+  ok "$backup_file failure leaves the original files and modes" "$? $(grep -c 'simulated backup I/O error' <<< "$out") $(snap "$r")" "1 1 $before"
+  ok "$backup_file failure publishes no backup and gives a retry hint" "$(test -d "$(k "$r")/tooling-r3"; status) $(grep -c 'retry' <<< "$out") $(grep -c -- '--undo' <<< "$out")" "1 1 0"
+  out=$(inst "$r" --undo)
+  ok "undo after $backup_file failure leaves the original files and modes" "$? $(snap "$r")" "1 $before"
+  out=$(inst "$r" --no-recovery-set)
+  ok "retry after $backup_file failure installs the boot command" "$? $(cmp -s "$L/k114s-boot" "$r/usr/local/bin/k114s-boot"; status)" "0 0"
+  out=$(inst "$r" --undo)
+  ok "undo after retry restores the original files and modes" "$? $(snap "$r")" "0 $before"
+done
+
 # use-packaged-dtb is r2c's marker, and r3 (stage2 --dtb) creates and removes it: undo puts back what r2c left
 r=$(mk); : > "$(k "$r")/use-packaged-dtb"; before=$(snap "$r"); inst "$r" --no-recovery-set >/dev/null; rm -f "$(k "$r")/use-packaged-dtb"
 out=$(inst "$r" --undo); ok "undo restores r2c's use-packaged-dtb marker that r3 later removed" "$? $(test -e "$(k "$r")/use-packaged-dtb"; status) $(snap "$r")" "0 0 $before"

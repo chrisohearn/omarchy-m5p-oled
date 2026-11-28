@@ -102,6 +102,27 @@ truncate -s 54086144 "$k/vmlinuz"; truncate -s 25023354 "$r/boot/initramfs-linux
 truncate -s 10040000 "$r/boot/efi/m1n1/boot.bin"; truncate -s 4440000 "$r/boot/efi/m1n1/boot-ctxr.bin"
 out=$(echo usr/lib/modules/7.4.0-1-ARCH/vmlinuz | guard "$r" esp 166000000); ok "esp: real sizes, snapper config present, the standard image forgotten (166 MB free): a kernel update passes" "$?" 0
 out=$(echo usr/lib/firmware/brcm/x.bin | guard "$r" esp 166000000); ok "esp: and so does a firmware update" "$?" 0
+# Before a normal rollback, the preserved and installed trees both report linux-aurora.
+trial_tree=$r/usr/lib/modules/7.4.0-1-ARCH; mkdir -p "$trial_tree"
+echo linux-aurora > "$trial_tree/pkgbase"
+rollback_targets=("${k#"$r/"}/vmlinuz" "${trial_tree#"$r/"}/vmlinuz")
+rollback_need=$((62000000 + 25023354 + 2 * MB + 2 * 10040000 + 4440000 + 8 * MB))
+for larger in "$trial_tree" "$k"; do
+  truncate -s 54086144 "$k/vmlinuz" "$trial_tree/vmlinuz"
+  truncate -s 62000000 "$larger/vmlinuz"
+  out=$(printf '%s\n' "${rollback_targets[@]}" | guard "$r" esp 166000000)
+  ok "esp: rollback with two linux-aurora trees passes at 166 MB (larger: ${larger##*/})" "$?" 0
+  out=$(printf '%s\n' "${rollback_targets[@]}" | guard "$r" esp "$rollback_need")
+  ok "esp: rollback passes at the larger image's budget (larger: ${larger##*/})" "$?" 0
+  out=$(printf '%s\n' "${rollback_targets[@]}" | guard "$r" esp $((rollback_need - 1)))
+  ok "esp: a byte short stops with one UKI reservation (larger: ${larger##*/})" "$? $(grep -c 'boot image for linux-aurora:' <<< "$out")" "1 1"
+done
+echo linux-k114s > "$trial_tree/pkgbase"
+truncate -s 25023354 "$r/boot/initramfs-linux-k114s.img"
+out=$(printf '%s\n' "${rollback_targets[@]}" | guard "$r" esp 166000000)
+ok "esp: two different outputs need separate reservations and stop at 166 MB" "$? $(grep -c -E 'boot image for linux-(aurora|k114s):' <<< "$out")" "1 2"
+rm "$trial_tree/pkgbase" "$trial_tree/vmlinuz" "$r/boot/initramfs-linux-k114s.img"
+rmdir "$trial_tree"
 rm "$r/etc/limine-snapper-sync.conf"
 truncate -s $((54 * MB)) "$k/vmlinuz"; truncate -s $((24 * MB)) "$r/boot/initramfs-linux-aurora.img"; truncate -s $((79 * MB)) "$r/boot/efi/EFI/Linux/omarchy_linux-aurora.efi"
 truncate -s $((4 * MB)) "$r/boot/efi/m1n1/boot.bin"; truncate -s $((4 * MB)) "$r/boot/efi/m1n1/boot-ctxr.bin"
