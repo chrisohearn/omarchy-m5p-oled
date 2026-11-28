@@ -303,7 +303,12 @@ class Esp:
     def has(self, rel):
         return os.path.isfile(self.path(rel))
 
-    def put(self, rel, data):
+    def matches_staged(self, rel, data):
+        temporary = self.path(rel) + ".k114s-new"
+        return (not os.path.islink(temporary) and os.path.isfile(temporary)
+                and read(temporary) == data)
+
+    def put(self, rel, data, *, reuse_staged=False):
         """Write beside the target, read back, then rename over it."""
         if not self.writable:
             raise Stop("internal: ESP is not mounted writable")
@@ -311,10 +316,14 @@ class Esp:
         temporary = target + ".k114s-new"
         try:
             self.makedirs(os.path.dirname(target))
-            with open(temporary, "wb") as stream:
-                stream.write(data)
-                stream.flush()
-                os.fsync(stream.fileno())
+            if reuse_staged and self.matches_staged(rel, data):
+                with open(temporary, "r+b") as stream:
+                    os.fsync(stream.fileno())
+            else:
+                with open(temporary, "wb") as stream:
+                    stream.write(data)
+                    stream.flush()
+                    os.fsync(stream.fileno())
             if sha(read(temporary)) != sha(data):
                 raise OSError("did not read back")
             os.replace(temporary, target)
@@ -1072,12 +1081,14 @@ def restore_repair(esp, m, image_path, check_only):
         image_need = 0 if have_image else clusters(size, cluster) + RESERVE
         menu_base = text if have_aurora else drop_sub_entry(text, "linux-aurora")
         new = with_repair_block(menu_base, block).encode("utf-8")
-        need = image_need + clusters(len(new), cluster)
+        menu_staged = esp.matches_staged(LIMINE, new)
+        need = image_need + (0 if menu_staged else clusters(len(new), cluster))
         remove_aurora = not have_image and have_aurora and free + reclaim < need
         if remove_aurora:
             reclaim += clusters(os.path.getsize(esp.path(UKI)), cluster)
             new = with_repair_block(drop_sub_entry(text, "linux-aurora"), block).encode("utf-8")
-            need = image_need + clusters(len(new), cluster)
+            menu_staged = esp.matches_staged(LIMINE, new)
+            need = image_need + (0 if menu_staged else clusters(len(new), cluster))
         # put() writes the whole replacement menu beside the old one, so none of the old menu is reclaimable here.
         if free + reclaim < need:
             if have_image:
@@ -1111,7 +1122,7 @@ def restore_repair(esp, m, image_path, check_only):
             esp.put(REPAIR_UKI, image)
             if sha(esp.get(REPAIR_UKI)) != digest:
                 raise Stop("%s does not verify after writing; limine.conf is unchanged. Run this again" % REPAIR_UKI)
-        esp.put(LIMINE, new)
+        esp.put(LIMINE, new, reuse_staged=menu_staged)
         if esp.get(LIMINE) != new:
             raise Stop("limine.conf does not read back as written: run this again")
         state = live_state(esp, m)

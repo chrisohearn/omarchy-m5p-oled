@@ -203,15 +203,23 @@ def remove(esp, rel):
     released = allocated(os.path.getsize(esp.path(rel)))
     remove_file(esp, rel)
     free += released
-def put(esp, rel, data):
+def put(esp, rel, data, **options):
     global free
-    need = allocated(len(data))
+    reuse = options.get("reuse_staged") and esp.matches_staged(rel, data)
+    need = 0 if reuse else allocated(len(data))
     if need > free:
         raise r.Stop("writing %s failed (replica out of space)" % rel)
     old = allocated(os.path.getsize(esp.path(rel))) if esp.has(rel) else 0
-    put_file(esp, rel, data)
+    put_file(esp, rel, data, **options)
     free += old - need
 r.Esp.remove, r.Esp.put = remove, put
+if os.environ.get("INTERRUPT_MENU"):
+    rename = os.replace
+    def interrupt(source, target):
+        if os.path.basename(target) == r.LIMINE:
+            raise SystemExit(86)
+        return rename(source, target)
+    r.os.replace = interrupt
 try: sys.exit(r.main(["k114s-repair"] + sys.argv[3:]))
 except r.Stop as stop: print("k114s-repair: STOPPED: %s" % stop); sys.exit(1)' "$B/tools" "$f" "$@"; }
 rimg=$B/promotion/omarchy_linux-aurora-k114s.efi
@@ -304,6 +312,21 @@ out=$(RF 4096 restore-repair --esp-dir "$E" 2>&1)
 has "a verified image can finish recovery with one free cluster" "$out" "Restored the repair entry"
 ok "finishing the menu keeps the linux-aurora image and entry" \
   "$(test -e "$aurora"; echo $?) $(grep -c '//linux-aurora' "$E/limine.conf") $(def)" "0 1 1"
+
+mkesp after
+cp -- "$rimg" "$repair"
+original=$(sha256sum < "$E/limine.conf")
+out=$(INTERRUPT_MENU=1 RF 4096 restore-repair --esp-dir "$E" 2>&1)
+ok "an interruption before menu rename leaves a complete draft and the previous menu" \
+  "$? $(test -s "$E/limine.conf.k114s-new"; echo $?) $(sha256sum < "$E/limine.conf")" "86 0 $original"
+before=$(sum "$E")
+out=$(RF 0 restore-repair --check --esp-dir "$E" 2>&1)
+ok "restore check can verify the staged menu with zero free clusters" "$?" 0
+ok "that restore check writes nothing" "$(sum "$E")" "$before"
+out=$(RF 0 restore-repair --esp-dir "$E" 2>&1)
+ok "restore retry finishes the staged menu rename with zero free clusters" \
+  "$? $(def) $(test -e "$E/limine.conf.k114s-new"; echo $?)" "0 1 1"
+
 mkesp aurora; rm "$E/EFI/Linux/omarchy_linux-aurora.efi"; out=$($R restore-repair --esp-dir "$E" 2>&1)
 ok "a run stopped after removing the linux-aurora image is finished by running it again (its entry goes)" \
   "$(grep -c -e '//linux-aurora' -e 'omarchy_linux-aurora[.]efi' "$E/limine.conf") $(def)" "0 1"

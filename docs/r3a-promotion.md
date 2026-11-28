@@ -171,7 +171,8 @@ the Linux disk (`/var/lib/k114s-recovery/uki/`) is on the encrypted root, which 
 - `sudo ./k114s-repair restore-repair` puts them back. Both modes count free space and the clusters freed by planned
   deletions before any write. The budget covers the image, the full new menu beside the old one, and an 8 MiB reserve
   for an image write. When recovery requires a new image, the tool removes `omarchy_linux-aurora.efi` and its entry
-  only if recovery fits with that deletion and needs the space. A verified repair image already on the ESP can
+  only if recovery fits with that deletion and needs the space. A retry can finish an already-staged menu when
+  its bytes match the recovery plan. A verified repair image already on the ESP can
   finish with space for the menu alone.
   The tool verifies the image, puts the saved block first, and sets `default_entry: 1`.
   Apply refuses while a repair entry is still there or if the image or block fails verification.
