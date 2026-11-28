@@ -64,8 +64,8 @@ done
 [[ $(id -u) == 0 || -n ${K114S_ROOT:-} ]] || die "run with sudo"
 
 save() { # save FILE under KEY, once
-  [[ -e $SAVED/$2.orig || -L $SAVED/$2.orig || -e $SAVED/$2.absent ]] && return 0
-  if [[ -e $1 || -L $1 ]]; then cp -a "$1" "$SAVED/$2.orig"; else : > "$SAVED/$2.absent"; fi
+  [[ -e $backup/$2.orig || -L $backup/$2.orig || -e $backup/$2.absent ]] && return 0
+  if [[ -e $1 || -L $1 ]]; then cp -a "$1" "$backup/$2.orig"; else : > "$backup/$2.absent"; fi
 }
 restore() {
   if [[ -e $SAVED/$2.orig || -L $SAVED/$2.orig ]]; then mkdir -p "$(dirname "$1")"; cp -aT --remove-destination "$SAVED/$2.orig" "$1"
@@ -194,9 +194,11 @@ for command in bsdtar zstd python3 vercmp sha256sum flock; do
   command -v "$command" >/dev/null || die "$command is needed and not installed; nothing changed"
 done
 
-mkdir -p "$SAVED" "$LIB" "$ETC" "$HOOKS" "$UNITS"
-trap 'echo "k114s-tooling-install: stopped part-way. Put everything back with: sudo bash $HERE/k114s-tooling-install --undo" >&2' ERR
-cp -p "$ROOT/etc/pacman.conf" "$SAVED/pacman.conf.before"
+# Undo and refresh recognize the backup by its final name, so publish it only when complete.
+trap 'say "backup preparation failed; installed files are untouched. Fix the error and retry." >&2' ERR
+backup=$(mktemp -d "$LIB/.tooling-r3.XXXXXX")
+trap '[[ ! -d $backup ]] || rm -r -- "$backup" </dev/null' EXIT
+cp -p "$ROOT/etc/pacman.conf" "$backup/pacman.conf.before"
 for file in "${OLD_HOOKS[@]}"; do save "$HOOKS/$file" "hook-$file"; done
 for file in "${TOOLS[@]}" "${OLD_TOOLS[@]}"; do save "$LIB/$file" "tool-$file"; done
 for file in "${BIN[@]}"; do save "$BINDIR/$file" "bin-$file"; done
@@ -205,7 +207,12 @@ if [[ -n $USER_HOME ]]; then
   save "$(user_hook post-update.d/k114s-release-check)" user-post-update
 fi
 
-loader_versions > "$SAVED/loader-versions"
+loader_versions > "$backup/loader-versions"
+mkdir -p "$ETC" "$HOOKS" "$UNITS"
+mv -nT -- "$backup" "$SAVED"
+[[ ! -d $backup ]] || die "could not publish the backup at $SAVED; installed files are untouched"
+trap - EXIT
+trap 'echo "k114s-tooling-install: stopped part-way. Put everything back with: sudo bash $HERE/k114s-tooling-install --undo" >&2' ERR
 copy_files
 
 # The hold list: what was held stays held; the default set is added; names that are not
